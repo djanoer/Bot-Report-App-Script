@@ -3,13 +3,33 @@
 /**
  * Menjalankan alur kerja sinkronisasi penuh: menyalin data VM dan Datastore,
  * lalu menjalankan laporan perubahan harian dan pemeriksaan datastore.
+ * [PERBAIKAN] Menambahkan pesan awal yang informatif untuk membedakan dari /laporan.
  */
 function syncDanBuatLaporanHarian(showUiAlert = true) {
+  const config = bacaKonfigurasi(); // Baca config di awal untuk mengirim pesan
+
+  // Kirim pesan konfirmasi awal yang informatif ke Telegram
+  try {
+    const startTime = new Date();
+    const timestamp = startTime.toLocaleString('id-ID', { timeZone: "Asia/Jakarta", hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n`;
+    pesanAwal += `⚙️ Memulai sinkronisasi penuh & pembuatan laporan...\n`;
+    pesanAwal += `<i>Proses ini akan menyalin data terbaru dari sumber sebelum membuat laporan dan mungkin memerlukan waktu beberapa menit.</i>`;
+    
+    kirimPesanTelegram(pesanAwal, config, 'HTML');
+
+  } catch (e) {
+    console.error(`Gagal mengirim pesan awal untuk /sync_laporan: ${e.message}`);
+    // Jangan hentikan proses utama jika hanya pengiriman pesan awal yang gagal
+  }
+
+  // Lanjutkan dengan proses utama
   if (showUiAlert && SpreadsheetApp.getActiveSpreadsheet().getUi()) {
     showUiFeedback("Proses Dimulai", "Mengimpor semua data dan membuat laporan. Proses ini bisa memakan waktu beberapa menit...");
   }
+
   try {
-    const config = bacaKonfigurasi();
     // Gunakan konstanta dari file Anda
     const sumberIdKey = KONSTANTA.KUNCI_KONFIG.ID_SUMBER; 
     const sheetVmKey = KONSTANTA.KUNCI_KONFIG.SHEET_VM;
@@ -27,7 +47,7 @@ function syncDanBuatLaporanHarian(showUiAlert = true) {
       salinDataSheet(config[sheetDsKey], config[sumberIdKey]);
     }
     
-    // [PERBAIKAN] Memastikan pemanggilan fungsi ini benar
+    // Memastikan pemanggilan fungsi ini benar
     buatLaporanHarianVM();
     jalankanPemeriksaanDatastore();
     
@@ -36,6 +56,7 @@ function syncDanBuatLaporanHarian(showUiAlert = true) {
     }
   } catch (e) {
     console.error(`ERROR UTAMA di syncDanBuatLaporanHarian: ${e.message}\nStack: ${e.stack}`);
+    kirimPesanTelegram(`<b>❌ Proses /sync_laporan Gagal</b>\n\nTerjadi kesalahan saat sinkronisasi data atau pembuatan laporan.\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
     if (showUiAlert) {
       showUiFeedback("Terjadi Error", `Proses dihentikan. Error: ${e.message}`);
     }
@@ -82,6 +103,7 @@ function salinDataSheet(namaSheet, sumberId) {
 /**
  * Mencari informasi VM berdasarkan kata kunci dan mengirimkan hasilnya.
  * [DIREFACTOR] Mencari informasi VM, kini sepenuhnya menggunakan konstanta.
+ * [PERBAIKAN] Memperbaiki logika pengiriman pesan ganda dan error ekspor.
 */
 function findVmAndGetInfo(searchTerm, config, userData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -157,7 +179,8 @@ function findVmAndGetInfo(searchTerm, config, userData) {
   } else if (results.length > 1) {
     let info = `✅ Ditemukan <b>${results.length}</b> hasil untuk "<b>${escapeHtml(searchTerm)}</b>".\n`;
     info += `------------------------------------\n`;
-    // [PERBAIKAN] Menambahkan IP Address ke dalam daftar hasil ganda
+    
+    // Tampilkan hingga 15 hasil teratas di pesan
     results.slice(0, 15).forEach((row, i) => { 
       const vmName = escapeHtml(row[nameIndex]);
       const vmIp = escapeHtml(row[ipIndex]);
@@ -165,35 +188,38 @@ function findVmAndGetInfo(searchTerm, config, userData) {
       info += `${i + 1}. <b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)\n`;
     });
     
-    if (results.length > 15) {
-      info += `\n<i>...dan ${results.length - 15} hasil lainnya. File ekspor akan dikirimkan ke grup.</i>`;
-    }
+    // Kirim pesan ringkasan terlebih dahulu
     kirimPesanTelegram(info, config, 'HTML');
 
+    // Jika lebih dari 15, panggil fungsi ekspor yang sekarang akan otomatis mengirim pesan file
     if (results.length > 15) {
-    info += `\n<i>...dan ${results.length - 15} hasil lainnya. File ekspor akan dikirimkan ke grup.</i>`;
-    kirimPesanTelegram(info, config, 'HTML');
-    exportResultsToSheet(headers, results, `Pencarian '${searchTerm}'`, config);
+      // Kirim pesan bahwa proses ekspor sedang berjalan
+      kirimPesanTelegram(`<i>Membuat file ekspor untuk ${results.length - 15} hasil lainnya...</i>`, config, 'HTML');
+      exportResultsToSheet(headers, results, `Pencarian '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
     }
     
   } else {
-    kirimPesanTelegram(`❌ VM dengan nama/IP/Primary Key yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config);
+    // [PERBAIKAN] Pesan 'tidak ditemukan' menggunakan format HTML agar konsisten
+    kirimPesanTelegram(`❌ VM dengan nama/IP/Primary Key yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
   }
 }
 
 /**
- * [KEAMANAN DITINGKATKAN] Mengekspor data ke Google Sheet baru.
- * File yang dihasilkan sekarang HANYA dapat diakses oleh pengguna yang meminta.
+ * [KEAMANAN DITINGKATKAN & DIPERBAIKI] Mengekspor data ke Google Sheet baru.
+ * File yang dihasilkan sekarang HANYA dapat diakses oleh pengguna yang meminta
+ * dan fungsi ini akan OTOMATIS mengirimkan pesan berisi tautan file.
  */
 function exportResultsToSheet(headers, dataRows, title, config, userData, highlightColumnName = null) {
   const folderId = config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR];
   if (!folderId) {
     kirimPesanTelegram(`⚠️ Gagal membuat file ekspor: Konfigurasi FOLDER_ID_HASIL_EKSPOR tidak ditemukan.`, config);
-    return null;
+    return; // Tidak mengembalikan apa pun karena pesan sudah dikirim
   }
+  
+  // Memeriksa userData dan email secara ketat di awal
   if (!userData || !userData.email) {
-    kirimPesanTelegram(`⚠️ Gagal membagikan file: Email untuk pengguna tidak ditemukan di sheet 'Hak Akses'.`, config);
-    return null;
+    kirimPesanTelegram(`⚠️ Gagal membagikan file: Email untuk pengguna dengan ID ${userData.userId} tidak ditemukan di sheet 'Hak Akses'.`, config);
+    return; // Tidak mengembalikan apa pun
   }
 
   try {
@@ -203,6 +229,7 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
     const sheet = newSs.getSheets()[0];
     sheet.setName(title.substring(0, 100));
 
+    // Pengaturan Header dan Data
     sheet.getRange("A1").setValue(title).setFontWeight("bold").setFontSize(12).setHorizontalAlignment("center");
     sheet.getRange(1, 1, 1, headers.length).merge();
     sheet.getRange(2, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
@@ -210,35 +237,37 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
       sheet.getRange(3, 1, dataRows.length, headers.length).setValues(dataRows);
     }
     
+    // Pemformatan
     const dataRange = sheet.getRange(2, 1, sheet.getLastRow() > 2 ? sheet.getLastRow() - 1 : 1, headers.length);
-    
     if (highlightColumnName) {
       const highlightColIndex = headers.indexOf(highlightColumnName) + 1;
       if (highlightColIndex > 0) {
         sheet.getRange(2, highlightColIndex, dataRange.getNumRows()).setBackground("#FFF2CC");
       }
     }
-
     dataRange.createFilter();
     headers.forEach((_, i) => sheet.autoResizeColumn(i + 1));
     
+    // Memindahkan file dan mengatur hak akses
     const file = DriveApp.getFileById(newSs.getId());
     const folder = DriveApp.getFolderById(folderId);
     file.moveTo(folder);
     
-    // [PENINGKATAN KEAMANAN] Hapus akses publik dan berikan akses hanya ke pengguna
     file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
     file.addViewer(userData.email);
     
     const fileUrl = file.getUrl();
     console.log(`Hasil ekspor berhasil dibuat dan dibagikan ke ${userData.email}: ${fileUrl}`);
     
-    return fileUrl;
+    // === BAGIAN KRUSIAL YANG DIPERBAIKI ===
+    // Secara proaktif mengirimkan pesan berisi tautan file ke grup
+    const userMention = `<a href="tg://user?id=${userData.userId}">${escapeHtml(userData.firstName || 'Pengguna')}</a>`;
+    const pesanFile = `${userMention}, file ekspor Anda untuk "<b>${title}</b>" sudah siap.\n\nFile ini telah dibagikan secara pribadi ke email Anda yang terdaftar.\n\n<a href="${fileUrl}">Buka File Laporan</a>`;
+    kirimPesanTelegram(pesanFile, config, 'HTML');
 
   } catch (e) {
-    console.error(`Gagal mengekspor hasil ke sheet: ${e.message}`);
+    console.error(`Gagal mengekspor hasil ke sheet: ${e.message}\nStack: ${e.stack}`);
     kirimPesanTelegram(`⚠️ Gagal membuat file ekspor. Error: ${e.message}`, config);
-    return null;
   }
 }
 

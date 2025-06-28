@@ -1,70 +1,76 @@
-// ===== FILE: Utama.gs (VERSI FINAL) =====
+// ===== FILE: Utama.gs =====
 
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) return HtmlService.createHtmlOutput("Bad Request");
+  
   try {
     const config = bacaKonfigurasi();
     const update = JSON.parse(e.postData.contents);
-    let userId, fromChatId, text, isCallback = false, userData;
+    
+    let userId, fromChatId, text, firstName, isCallback = false;
 
+    // Ekstrak informasi dasar dari update Telegram
     if (update.callback_query) {
       isCallback = true;
       userId = update.callback_query.from.id;
       fromChatId = update.callback_query.message.chat.id;
       text = update.callback_query.data;
-      // Ambil userData untuk callback
-      userData = getUserData(userId);
-      // Sertakan nama depan untuk pesan yang lebih personal
-      userData.firstName = update.callback_query.from.first_name;
-      userData.userId = userId;
-      
+      firstName = update.callback_query.from.first_name;
     } else if (update.message && update.message.text) {
       userId = update.message.from.id;
       fromChatId = update.message.chat.id;
       text = update.message.text;
-      // Ambil userData untuk pesan biasa
-      userData = getUserData(userId);
-      // Sertakan nama depan untuk pesan yang lebih personal
-      userData.firstName = update.message.from.first_name;
-      userData.userId = userId;
+      firstName = update.message.from.first_name;
+    } else {
+      return HtmlService.createHtmlOutput("OK"); // Bukan update yang perlu diproses
+    }
+    
+    // Blokir interaksi dari chat yang tidak diizinkan
+    if (String(fromChatId) !== String(config.TELEGRAM_CHAT_ID)) {
+      return HtmlService.createHtmlOutput("OK");
+    }
 
-    } else { return HtmlService.createHtmlOutput("OK"); }
+    // Validasi Hak Akses di Awal
+    const userData = getUserData(userId);
     
-    if (String(fromChatId) !== String(config.TELEGRAM_CHAT_ID)) return HtmlService.createHtmlOutput("OK");
-    
-    if (!userData.email) { // Periksa berdasarkan email yang ada di Hak Akses
-      const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(userData.firstName || userId)}</a>`;
-      const pesanDitolak = `❌ ${userMention}, akses Anda ditolak.\nAnda tidak terdaftar untuk menggunakan bot ini. Silakan hubungi administrator.`;
+    if (!userData || !userData.email) {
+      // Buat pesan penolakan yang informatif
+      const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
+      const pesanDitolak = `❌ ${userMention}, Anda tidak terdaftar untuk menggunakan bot ini.\n\nHarap hubungi administrator untuk mendapatkan hak akses.`;
+      
+      // Kirim pesan penolakan dan hentikan eksekusi
       kirimPesanTelegram(pesanDitolak, config, 'HTML'); 
       return HtmlService.createHtmlOutput("Unauthorized"); 
     }
     
+    // Jika pengguna terdaftar, tambahkan informasi tambahan ke objek userData
+    userData.firstName = firstName;
+    userData.userId = userId;
+
+    // Proses perintah berdasarkan jenis update (callback atau pesan biasa)
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
       
-      // [PERBAIKAN] Logika routing callback disesuaikan dengan KONSTANTA baru Anda
       if (text.startsWith("history_") || text.startsWith("cekvm_")) {
         const pk = text.split("_")[1];
         if (text.startsWith("history_")) getVmHistory(pk, config, userData);
         else findVmAndGetInfo(pk, config, userData);
       } else if (text.startsWith("run_export_log_") || text.startsWith("export_")) {
-        // Semua jenis ekspor sekarang ditangani oleh satu fungsi pusat
         handleExportRequest(text, config, userData);
       }
       
       answerCallbackQuery(callbackQueryId, config);
-    } else {
+
+    } else { // Ini adalah pesan teks biasa
       const commandParts = text.split(' ');
       let command = commandParts[0].toLowerCase();
       if (command.includes('@')) command = command.split('@')[0];
       
       switch (command) {
         case '/laporan':
-          // [PERBAIKAN] Memastikan fungsi ini dipanggil dengan benar
           buatLaporanHarianVM();
           break;
         case '/sync_laporan':
-          // [PERBAIKAN] Memastikan fungsi ini dipanggil dengan benar
           syncDanBuatLaporanHarian(false);
           break;
         case '/provisioning':
@@ -75,7 +81,7 @@ function doPost(e) {
           break;
         case '/cekvm':
           if (commandParts.length > 1) findVmAndGetInfo(commandParts.slice(1).join(' '), config, userData);
-          else kirimPesanTelegram(`Gunakan format: <code>/cekvm [IP / Nama / PK]</code>`, config);
+          else kirimPesanTelegram(`Gunakan format: <code>/cekvm [IP / Nama / PK]</code>`, config, 'HTML');
           break;
         case '/history':
           if (commandParts.length > 1) getVmHistory(commandParts[1].trim(), config, userData);
@@ -105,16 +111,33 @@ function doPost(e) {
                             "Menampilkan daftar perintah ini.";
           kirimPesanTelegram(infoPesan, config, 'HTML');
           break;
+        // === PERBAIKAN UTAMA ADA DI BLOK 'DEFAULT' DI BAWAH INI ===
         default:
-          kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.`, config);
+          const pesanError = `❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan /info untuk melihat daftar perintah yang tersedia.`;
+          kirimPesanTelegram(pesanError, config, 'HTML');
           break;
       }
     }
   } catch (err) {
     console.error(`Error di doPost: ${err.message}\nStack: ${err.stack}`);
-    kirimPesanTelegram(`<b>⚠️ Terjadi Error pada Bot</b>\n\n<code>${escapeHtml(err.message)}</code>`, bacaKonfigurasi());
+    kirimPesanTelegram(`<b>⚠️ Terjadi Error pada Bot</b>\n\n<code>${escapeHtml(err.message)}</code>`, bacaKonfigurasi(), 'HTML');
   }
   return HtmlService.createHtmlOutput("OK");
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+      .createMenu('⚙️ Menu Otomatis')
+      .addItem('1. SINKRONISASI & BUAT LAPORAN', 'syncDanBuatLaporanHarian')
+      .addItem('2. BUAT LAPORAN DARI DATA SAAT INI', 'buatLaporanHarianVM')
+      .addSeparator()
+      .addItem('3. REKOMENDASI MIGRASI DATASTORE', 'runDailyMigrationCheck')
+      .addItem('4. PERIKSA AMBANG BATAS (WARNING)', 'runDailyWarningCheck')
+      .addSeparator()
+      .addItem('5. Tes Koneksi Telegram', 'tesKoneksiTelegram')
+      .addSeparator()
+      .addItem('SETUP: Set Webhook (Jalankan 1x)', 'setWebhook')
+      .addToUi();
 }
 
 function kirimMenuEkspor(config) {
@@ -148,19 +171,76 @@ function kirimMenuEkspor(config) {
     kirimPesanTelegram(message, config, 'HTML', keyboard);
 }
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-      .createMenu('⚙️ Menu Otomatis')
-      .addItem('1. SINKRONISASI & BUAT LAPORAN', 'syncDanBuatLaporanHarian')
-      .addItem('2. BUAT LAPORAN DARI DATA SAAT INI', 'buatLaporanHarianVM')
-      .addSeparator()
-      .addItem('3. REKOMENDASI MIGRASI DATASTORE', 'runDailyMigrationCheck')
-      .addItem('4. PERIKSA AMBANG BATAS (WARNING)', 'runDailyWarningCheck')
-      .addSeparator()
-      .addItem('5. Tes Koneksi Telegram', 'tesKoneksiTelegram')
-      .addSeparator()
-      .addItem('SETUP: Set Webhook (Jalankan 1x)', 'setWebhook')
-      .addToUi();
+function generateVcenterSummary(config) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+  if (!sheet || sheet.getLastRow() <= 1) {
+    return { message: "<i>Data VM tidak ditemukan untuk membuat ringkasan.</i>\n\n", keyboard: null };
+  }
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const vCenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
+  const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
+  const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
+  if (vCenterIndex === -1 || stateIndex === -1) {
+    return { message: `<i>Gagal membuat ringkasan: Kolom '${KONSTANTA.HEADER_VM.VCENTER}' atau '${KONSTANTA.HEADER_VM.STATE}' tidak ditemukan di header.</i>\n\n`, keyboard: null };
+  }
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+  const vCenterSummary = {};
+  let totalGlobal = { on: 0, off: 0, total: 0 };
+  const uptimeCategories = { '0_1': 0, '1_2': 0, '2_3': 0, 'over_3': 0, 'invalid': 0 };
+  let totalUptimeValid = 0;
+  data.forEach(row => {
+    const vCenter = row[vCenterIndex] || 'Lainnya';
+    if (!vCenterSummary[vCenter]) {
+      vCenterSummary[vCenter] = { on: 0, off: 0, total: 0 };
+    }
+    const state = String(row[stateIndex] || '').toLowerCase();
+    vCenterSummary[vCenter].total++;
+    totalGlobal.total++;
+    if (state.includes('on')) {
+      vCenterSummary[vCenter].on++;
+      totalGlobal.on++;
+    } else {
+      vCenterSummary[vCenter].off++;
+      totalGlobal.off++;
+    }
+    if (uptimeIndex !== -1) {
+      const uptimeValue = row[uptimeIndex];
+      const uptimeDays = parseInt(uptimeValue, 10);
+      if (uptimeValue !== '' && uptimeValue !== '-' && !isNaN(uptimeDays)) {
+        totalUptimeValid++;
+        if (uptimeDays <= 365) uptimeCategories['0_1']++;
+        else if (uptimeDays <= 730) uptimeCategories['1_2']++;
+        else if (uptimeDays <= 1095) uptimeCategories['2_3']++;
+        else uptimeCategories['over_3']++;
+      } else {
+        uptimeCategories['invalid']++;
+      }
+    }
+  });
+  let message = "";
+  const vCenterOrder = Object.keys(vCenterSummary).sort();
+  vCenterOrder.forEach(vc => {
+    if (vCenterSummary[vc]) {
+      message += `<b>🏢 vCenter: ${vc}</b>\n`;
+      message += `🟢 Power On: ${vCenterSummary[vc].on}\n`;
+      message += `🔴 Power Off: ${vCenterSummary[vc].off}\n`;
+      message += `Total VM: ${vCenterSummary[vc].total}\n\n`;
+    }
+  });
+  message += `<b>--- GRAND TOTAL ---</b>\n`;
+  message += `🟢 Power On: <b>${totalGlobal.on}</b>\n`;
+  message += `🔴 Power Off: <b>${totalGlobal.off}</b>\n`;
+  message += `<b>Total VM: ${totalGlobal.total}</b>\n\n`;
+  let uptimeKeyboard = null;
+  if (uptimeIndex !== -1) {
+    message += `<b>📊 Ringkasan Uptime (dari total ${totalGlobal.total} VM)</b>\n`;
+    message += `- Di bawah 1 Tahun: <b>${uptimeCategories['0_1']} VM</b>\n`;
+    message += `- 1 sampai 2 Tahun: <b>${uptimeCategories['1_2']} VM</b>\n`;
+    message += `- 2 sampai 3 Tahun: <b>${uptimeCategories['2_3']} VM</b>\n`;
+    message += `- Di atas 3 Tahun: <b>${uptimeCategories['over_3']} VM</b>\n`;
+    message += `- Data Tidak Valid/Kosong: <b>${uptimeCategories['invalid']} VM</b>\n`;
+  }
+  return { message: message, keyboard: null }; // Keyboard sengaja dibuat null untuk laporan harian
 }
 
 function runDailySyncReportForTrigger() {
