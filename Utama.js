@@ -91,9 +91,9 @@ function doPost(e) {
           getTodaysHistory(config, userData);
           break;
         case '/arsipkanlog':
-          kirimPesanTelegram("⚙️ Menerima perintah arsip manual. Memulai proses pengarsipan...", config);
-          // Panggil fungsi pengarsipan utama yang sudah ada
-          jalankanPengarsipanLogKeJson(); 
+          kirimPesanTelegram("⚙️ Menerima perintah arsip. Memeriksa jumlah log...", config);
+          // [PERBAIKAN] Panggil fungsi pengecekan, bukan pengarsipan langsung.
+          cekDanArsipkanLogJikaPenuh(config);
           break;
         case '/info':
           const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
@@ -112,6 +112,8 @@ function doPost(e) {
                             "Menampilkan riwayat perubahan VM tertentu.\n\n" +
                             "<code>/cekhistory</code>\n" +
                             "Menampilkan semua log perubahan yang terjadi hari ini.\n\n" +
+                            "<code>/arsipkanlog</code>\n" +
+                            "Memeriksa & menjalankan pengarsipan jika log melebihi batas.\n\n" +
                             "<code>/info</code>\n" +
                             "Menampilkan daftar perintah ini.";
           kirimPesanTelegram(infoPesan, config, 'HTML');

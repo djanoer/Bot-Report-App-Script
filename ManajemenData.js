@@ -789,11 +789,82 @@ function processUptimeExport(exportType, config) {
 }
 
 /**
- * [FUNGSI PUSAT BARU] Mengendalikan semua permintaan ekspor dari menu interaktif.
+ * [FUNGSI HELPER BARU]
+ * Mengumpulkan entri log dari sheet aktif DAN semua file arsip JSON berdasarkan rentang tanggal.
+ * @param {Date} startDate - Tanggal mulai untuk filter log.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {{headers: Array<string>, data: Array<Array<any>>}} Objek berisi header dan data log gabungan.
+ */
+function getCombinedLogs(startDate, config) {
+  let combinedLogEntries = [];
+  let logHeaders = [];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
+
+  // --- 1. Ambil Log dari Sheet Aktif ---
+  if (sheetLog && sheetLog.getLastRow() > 1) {
+    const allLogData = sheetLog.getDataRange().getValues();
+    logHeaders = allLogData.shift(); // Ambil header
+    
+    const activeLogs = allLogData.filter(row => {
+      // Pastikan baris memiliki data dan kolom timestamp valid
+      return row.length > 0 && row[0] && new Date(row[0]) >= startDate;
+    });
+    combinedLogEntries.push(...activeLogs);
+  } else if (sheetLog) {
+    // Jika sheet ada tapi kosong, tetap ambil headernya
+    logHeaders = sheetLog.getRange(1, 1, 1, sheetLog.getLastColumn()).getValues()[0];
+  }
+
+  // --- 2. Ambil Log dari Arsip JSON ---
+  const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP];
+  if (FOLDER_ARSIP_ID && logHeaders.length > 0) {
+    try {
+      const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
+      const arsipFiles = folderArsip.getFilesByType(MimeType.PLAIN_TEXT); // Lebih spesifik
+
+      while (arsipFiles.hasNext()) {
+        const file = arsipFiles.next();
+        if (file.getName().startsWith('Arsip Log -') && file.getName().endsWith('.json')) {
+          console.log(`Membaca file arsip untuk ekspor: ${file.getName()}`);
+          const jsonContent = file.getBlob().getDataAsString();
+          const archivedLogs = JSON.parse(jsonContent);
+
+          // Filter log dari arsip berdasarkan tanggal
+          const relevantLogs = archivedLogs.filter(logObject => 
+            logObject[KONSTANTA.HEADER_LOG.TIMESTAMP] && new Date(logObject[KONSTANTA.HEADER_LOG.TIMESTAMP]) >= startDate
+          );
+
+          // Ubah kembali dari objek ke array agar formatnya sama
+          const relevantLogsAsArray = relevantLogs.map(logObject => logHeaders.map(header => logObject[header] || ''));
+          combinedLogEntries.push(...relevantLogsAsArray);
+        }
+      }
+    } catch(e) {
+      console.error(`Gagal membaca file arsip log: ${e.message}`);
+      // Proses tetap lanjut dengan data yang sudah ada
+    }
+  }
+
+  // --- 3. Urutkan semua hasil dari yang terbaru ke terlama ---
+  if (combinedLogEntries.length > 0) {
+    const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+    if (timestampIndex !== -1) {
+      combinedLogEntries.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
+    }
+  }
+
+  return { headers: logHeaders, data: combinedLogEntries };
+}
+
+
+/**
+ * [FUNGSI PUSAT] Mengendalikan semua permintaan ekspor dari menu interaktif.
+ * Versi ini telah diperbarui untuk mengambil data dari log aktif dan arsip.
  */
 function handleExportRequest(exportType, config, userData) {
   try {
-    kirimPesanTelegram(`⚙️ Permintaan ekspor diterima. Sedang memproses data...`, config);
+    kirimPesanTelegram(`⚙️ Permintaan ekspor diterima. Mengumpulkan data dari log aktif dan arsip...`, config, 'HTML');
 
     let headers, data, title, highlightColumn = null;
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -804,26 +875,26 @@ function handleExportRequest(exportType, config, userData) {
       case KONSTANTA.CALLBACK.EXPORT_LOG_TODAY:
       case KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS:
       case KONSTANTA.CALLBACK.EXPORT_LOG_30_DAYS: {
-        const logSheet = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
-        if (!logSheet) throw new Error(`Sheet '${KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN}' tidak ditemukan.`);
-        
-        headers = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
-        const allLogData = logSheet.getLastRow() > 1 ? logSheet.getRange(2, 1, logSheet.getLastRow() - 1, logSheet.getLastColumn()).getValues() : [];
         const now = new Date();
         let startDate = new Date();
         
         if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_TODAY) {
             startDate.setHours(0, 0, 0, 0);
-            title = "Log Perubahan Hari Ini";
+            title = "Log Perubahan Hari Ini (Termasuk Arsip)";
         } else if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS) {
             startDate.setDate(now.getDate() - 7);
-            title = "Log Perubahan 7 Hari Terakhir";
-        } else {
+            title = "Log Perubahan 7 Hari Terakhir (Termasuk Arsip)";
+        } else { // 30 hari
             startDate.setDate(now.getDate() - 30);
-            title = "Log Perubahan 30 Hari Terakhir";
+            title = "Log Perubahan 30 Hari Terakhir (Termasuk Arsip)";
         }
-        data = allLogData.filter(row => row.length > 0 && new Date(row[0]) >= startDate);
+
+        // Panggil fungsi baru untuk mendapatkan data gabungan
+        const combinedLogResult = getCombinedLogs(startDate, config);
+        headers = combinedLogResult.headers;
+        data = combinedLogResult.data;
         highlightColumn = KONSTANTA.HEADER_LOG.ACTION;
+        
         break;
       }
         
@@ -868,23 +939,25 @@ function handleExportRequest(exportType, config, userData) {
       }
     }
 
-    if (data && headers) {
+    // --- Logika Pengiriman Hasil ---
+    if (data && headers && headers.length > 0) {
         if (data.length > 0) {
-            const fileUrl = exportResultsToSheet(headers, data, title, config, userData, highlightColumn);
-            if (fileUrl) {
-                const userMention = `<a href="tg://user?id=${userData.userId}">${escapeHtml(userData.firstName || 'Pengguna')}</a>`;
-                kirimPesanTelegram(`${userMention}, file ekspor Anda untuk "<b>${title}</b>" sudah siap.\n\nFile ini telah dibagikan secara pribadi ke email Anda yang terdaftar.\n\n<a href="${fileUrl}">Buka File Laporan</a>`, config, 'HTML');
-            }
+            // Fungsi exportResultsToSheet akan menangani pembuatan file dan pengiriman notifikasi
+            exportResultsToSheet(headers, data, title, config, userData, highlightColumn);
         } else {
-            kirimPesanTelegram(`ℹ️ Tidak ada data yang dapat diekspor untuk kategori "<b>${title}</b>".`, config);
+            kirimPesanTelegram(`ℹ️ Tidak ada data yang dapat diekspor untuk kategori "<b>${title}</b>".`, config, 'HTML');
         }
+    } else if (exportType.includes('LOG')) {
+        // Kondisi khusus jika header log tidak ditemukan
+        console.warn(`Tidak ada header yang dihasilkan untuk tipe ekspor: ${exportType}`);
+        kirimPesanTelegram(`⚠️ Gagal memproses permintaan: Tidak dapat menemukan header log. Pastikan sheet 'Log Perubahan' memiliki header.`, config);
     } else {
         console.warn(`Tidak ada data atau header yang dihasilkan untuk tipe ekspor: ${exportType}`);
     }
 
   } catch (e) {
       console.error(`Gagal menangani permintaan ekspor: ${e.message}\nStack: ${e.stack}`);
-      kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses permintaan ekspor Anda.\n<code>${escapeHtml(e.message)}</code>`, config);
+      kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses permintaan ekspor Anda.\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
   }
 }
 
@@ -893,17 +966,20 @@ function handleExportRequest(exportType, config, userData) {
  * Tugasnya adalah memindahkan log lama ke file JSON dan membersihkan sheet.
  * Fungsi ini dipanggil oleh fungsi cekDanArsipkanLogJikaPenuh().
  */
-function jalankanPengarsipanLogKeJson() {
-  const config = bacaKonfigurasi();
+function jalankanPengarsipanLogKeJson(config) { // [DIUBAH] Tambahkan parameter
+  // [DIUBAH] activeConfig sekarang diambil dari parameter
+  const activeConfig = config || bacaKonfigurasi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
 
   if (!sheetLog || sheetLog.getLastRow() <= 1) {
     console.log("Tidak ada log untuk diarsipkan.");
+    // Kirim pesan juga ke Telegram jika ada config (dipanggil manual)
+    if (config) kirimPesanTelegram("ℹ️ Tidak ada data log yang bisa diarsipkan saat ini.", activeConfig);
     return;
   }
 
-  const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP];
+  const FOLDER_ARSIP_ID = activeConfig[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP];
   if (!FOLDER_ARSIP_ID) {
     throw new Error("Folder ID untuk arsip belum diatur di Konfigurasi.");
   }
@@ -937,41 +1013,186 @@ function jalankanPengarsipanLogKeJson() {
     // Bersihkan sheet log utama, sisakan hanya header
     sheetLog.getRange(2, 1, sheetLog.getLastRow(), sheetLog.getLastColumn()).clearContent();
 
-    const pesanSukses = `✅ Pengarsipan log otomatis berhasil.\n\nSebanyak ${allLogData.length} baris log telah dipindahkan ke file "${namaFileArsip}" karena telah melebihi ambang batas.`;
-    kirimPesanTelegram(pesanSukses, config);
+    // [PERBAIKAN] Pesan dibuat lebih generik agar cocok untuk manual & otomatis
+    const pesanSukses = `✅ Pengarsipan log berhasil.\n\nSebanyak ${allLogData.length} baris log telah dipindahkan ke file "${namaFileArsip}".`;
+    kirimPesanTelegram(pesanSukses, activeConfig);
     console.log(pesanSukses);
 
+    // Bersihkan sheet log utama, sisakan hanya header
+    sheetLog.getRange(2, 1, sheetLog.getLastRow(), sheetLog.getLastColumn()).clearContent();
+
   } catch (e) {
-    const pesanGagal = `❌ Gagal melakukan pengarsipan log otomatis. Error: ${e.message}\nStack: ${e.stack}`;
-    kirimPesanTelegram(pesanGagal, config);
+    const pesanGagal = `❌ Gagal melakukan pengarsipan log. Error: ${e.message}\nStack: ${e.stack}`;
+    kirimPesanTelegram(pesanGagal, activeConfig);
     console.error(pesanGagal);
   }
 }
 
 /**
  * FUNGSI PENGECЕK
- * Fungsi ini akan dijalankan oleh pemicu harian.
+ * Fungsi ini akan dijalankan oleh pemicu harian atau perintah manual.
  * Tugasnya adalah memeriksa jumlah baris dan memanggil fungsi pengarsipan jika perlu.
+ * [PERBAIKAN] Menambahkan parameter 'config' dan logika feedback ke Telegram.
  */
-function cekDanArsipkanLogJikaPenuh() {
-  const BATAS_BARIS = 5000; // Arsipkan jika baris sudah lebih dari 5000
+function cekDanArsipkanLogJikaPenuh(config = null) { // [DIUBAH] Tambahkan parameter
+  const BATAS_BARIS = 5000;
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
+  // Jika dipanggil dari trigger, config null. Jika dari perintah, config ada.
+  const activeConfig = config || bacaKonfigurasi();
 
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
+
+    if (!sheetLog) {
+      const errorMsg = "Sheet 'Log Perubahan' tidak ditemukan. Pengecekan dibatalkan.";
+      console.error(errorMsg);
+      if (config) kirimPesanTelegram(`❌ Gagal: ${errorMsg}`, activeConfig);
+      return;
+    }
+
+    const jumlahBaris = sheetLog.getLastRow();
+    console.log(`Pengecekan jumlah baris log: ${jumlahBaris} baris.`);
+
+    if (jumlahBaris > BATAS_BARIS) {
+      console.log(`Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan...`);
+      // Teruskan config ke fungsi pengarsipan
+      jalankanPengarsipanLogKeJson(activeConfig);
+    } else {
+      const feedbackMsg = `ℹ️ Pengarsipan belum diperlukan. Jumlah baris log saat ini adalah ${jumlahBaris}, masih di bawah ambang batas ${BATAS_BARIS} baris.`;
+      console.log(feedbackMsg);
+      // [LOGIKA BARU] Kirim feedback ke Telegram jika dipanggil manual
+      if (config) {
+        kirimPesanTelegram(feedbackMsg, activeConfig);
+      }
+    }
+  } catch(e) {
+      const errorMsg = `❌ Gagal saat memeriksa log untuk pengarsipan: ${e.message}`;
+      console.error(errorMsg);
+      if (config) kirimPesanTelegram(errorMsg, activeConfig, 'HTML');
+  }
+}
+
+/**
+ * [FUNGSI OPTIMALISASI BARU]
+ * Fungsi generik untuk mendeteksi perubahan antara data lama (arsip) dan data baru (sheet),
+ * kemudian mencatat perbedaan ke dalam Log Perubahan.
+ *
+ * @param {object} config - Objek konfigurasi utama.
+ * @param {string} sheetName - Nama sheet sumber data baru.
+ * @param {string} archiveFileName - Nama file arsip .json di Google Drive.
+ * @param {string} primaryKeyHeader - Nama kolom yang menjadi kunci unik (e.g., 'Primary Key' atau 'Name').
+ * @param {Array<object>} columnsToTrack - Array objek kolom yg dipantau, format: [{nama: 'HeaderName', index: 0}].
+ * @param {string} entityName - Nama entitas untuk pesan log (e.g., 'VM' atau 'Datastore').
+ * @returns {Array<Array<any>>} Array berisi entri log yang baru ditambahkan.
+ */
+function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, entityName) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error(`Sheet "${sheetName}" tidak ditemukan.`);
+  }
+
+  const sheetLog = spreadsheet.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
   if (!sheetLog) {
-    console.error("Sheet 'Log Perubahan' tidak ditemukan. Pengecekan dibatalkan.");
-    return;
+    throw new Error(`Sheet Log Perubahan tidak ditemukan.`);
   }
 
-  const jumlahBaris = sheetLog.getLastRow();
-  console.log(`Pengecekan jumlah baris log: ${jumlahBaris} baris.`);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const pkIndex = headers.indexOf(primaryKeyHeader);
+  if (pkIndex === -1) {
+    throw new Error(`Kolom Primary Key "${primaryKeyHeader}" tidak ditemukan di sheet "${sheetName}".`);
+  }
 
-  if (jumlahBaris > BATAS_BARIS) {
-    console.log(`Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan...`);
-    // Panggil fungsi pengarsipan utama
-    jalankanPengarsipanLogKeJson(); 
+  // 1. Baca Arsip Lama
+  const folderArsip = DriveApp.getFolderById(config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP]);
+  const files = folderArsip.getFilesByName(archiveFileName);
+  let mapDataKemarin = new Map();
+  let fileArsip;
+  if (files.hasNext()) {
+    fileArsip = files.next();
+    try {
+      mapDataKemarin = new Map(JSON.parse(fileArsip.getBlob().getDataAsString()));
+    } catch (e) {
+      console.warn(`Gagal parse arsip "${archiveFileName}": ${e.message}`);
+    }
+  }
+
+  // 2. Baca Data Baru dan buat Map
+  const dataHariIni = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
+  const mapDataHariIni = new Map();
+  
+  // Update indeks kolom yang dipantau berdasarkan header terbaru
+  columnsToTrack.forEach(kolom => {
+    kolom.index = headers.indexOf(kolom.nama);
+  });
+  
+  const buatObjekData = (row) => {
+    const data = {};
+    columnsToTrack.forEach(kolom => {
+      if (kolom.index !== -1) data[kolom.nama] = row[kolom.index];
+    });
+    return data;
+  };
+
+  dataHariIni.forEach(row => {
+    const pk = row[pkIndex];
+    if (pk) {
+      const rowData = buatObjekData(row);
+      // Menggunakan fungsi hash yang sudah ada
+      mapDataHariIni.set(pk, { data: rowData, hash: computeVmHash(rowData) });
+    }
+  });
+
+  // 3. Bandingkan Data dan Siapkan Log
+  let logEntriesToAdd = [];
+  const timestamp = new Date();
+  const nameHeaderForLog = entityName === 'VM' ? KONSTANTA.HEADER_VM.VM_NAME : primaryKeyHeader;
+
+  for (const [id, dataBaru] of mapDataHariIni.entries()) {
+    const dataLama = mapDataKemarin.get(id);
+    const entityDisplayName = dataBaru.data[nameHeaderForLog] || id;
+
+    if (!dataLama) {
+      // PENAMBAHAN
+      const detail = `${entityName} baru dibuat/ditemukan.`;
+      const logEntry = [timestamp, 'PENAMBAHAN', id, entityDisplayName, sheetName, '', '', detail];
+      logEntriesToAdd.push(logEntry);
+    } else if (dataBaru.hash !== dataLama.hash) {
+      // MODIFIKASI
+      for (const key in dataBaru.data) {
+        if (String(dataBaru.data[key]) !== String(dataLama.data[key])) {
+          const detail = `Kolom '${key}' diubah`;
+          const logEntry = [timestamp, 'MODIFIKASI', id, entityDisplayName, sheetName, dataLama.data[key] || '', dataBaru.data[key] || '', detail];
+          logEntriesToAdd.push(logEntry);
+        }
+      }
+    }
+    mapDataKemarin.delete(id); // Hapus dari map lama agar sisanya adalah data yang dihapus
+  }
+
+  for (const [id, dataLama] of mapDataKemarin.entries()) {
+    // PENGHAPUSAN
+    const entityDisplayName = (dataLama.data && dataLama.data[nameHeaderForLog]) || id;
+    const detail = `${entityName} telah dihapus.`;
+    const logEntry = [timestamp, 'PENGHAPUSAN', id, entityDisplayName, sheetName, '', '', detail];
+    logEntriesToAdd.push(logEntry);
+  }
+
+  // 4. Catat Perubahan ke Log
+  if (logEntriesToAdd.length > 0) {
+    sheetLog.getRange(sheetLog.getLastRow() + 1, 1, logEntriesToAdd.length, 8).setValues(logEntriesToAdd);
+    console.log(`${logEntriesToAdd.length} log perubahan untuk ${entityName} telah ditambahkan.`);
+  }
+
+  // 5. Simpan Arsip Baru
+  const dataUntukArsip = JSON.stringify(Array.from(mapDataHariIni.entries()));
+  if (fileArsip) {
+    fileArsip.setContent(dataUntukArsip);
   } else {
-    console.log("Jumlah baris masih di bawah ambang batas. Tidak ada tindakan yang diambil.");
+    folderArsip.createFile(archiveFileName, dataUntukArsip, MimeType.PLAIN_TEXT);
   }
+  console.log(`Pengarsipan ${entityName} selesai.`);
+  
+  return logEntriesToAdd;
 }

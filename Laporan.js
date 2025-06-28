@@ -79,91 +79,33 @@ function buatLaporanHarianVM() {
   pesanLaporan += `<i>Analisis dijalankan pada: ${startTime.toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>\n`;
   pesanLaporan += `--------------------------------------------------\n`;
   
+  // Bagian ringkasan vCenter tetap sama
   const summary = generateVcenterSummary(config);
   pesanLaporan += summary.message;
   pesanLaporan += `\n--------------------------------------------------`;
 
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetLog = spreadsheet.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN) || spreadsheet.insertSheet(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
-  const expectedLogHeader = [
-    KONSTANTA.HEADER_LOG.TIMESTAMP, KONSTANTA.HEADER_LOG.ACTION, 
-    KONSTANTA.HEADER_VM.PK, KONSTANTA.HEADER_VM.VM_NAME, 
-    "Sheet Name", KONSTANTA.HEADER_LOG.OLD_VAL, KONSTANTA.HEADER_LOG.NEW_VAL, KONSTANTA.HEADER_LOG.DETAIL
-  ];
-  if (sheetLog.getLastRow() === 0) {
-    sheetLog.appendRow(expectedLogHeader);
-  }
-
   try {
-    const sheetDataUtama = spreadsheet.getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-    if (!sheetDataUtama) throw new Error(`Sheet data utama "${config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]}" tidak ditemukan.`);
-    const headers = sheetDataUtama.getRange(1, 1, 1, sheetDataUtama.getLastColumn()).getValues()[0];
-    const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-    if (pkIndex === -1) throw new Error(`Kolom '${KONSTANTA.HEADER_VM.PK}' tidak ditemukan.`);
+    // [OPTIMALISASI] Definisikan parameter untuk fungsi generik
+    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+    const archiveFileName = KONSTANTA.NAMA_FILE.ARSIP_VM;
+    const primaryKeyHeader = KONSTANTA.HEADER_VM.PK;
+    // Ambil kolom yang dipantau dari konfigurasi
+    const columnsToTrack = config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU].map(nama => ({nama: nama}));
 
-    const folderArsip = DriveApp.getFolderById(config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP]);
-    const files = folderArsip.getFilesByName(KONSTANTA.NAMA_FILE.ARSIP_VM);
-    let mapVmKemarin = new Map();
-    let fileArsip;
-    if (files.hasNext()) {
-      fileArsip = files.next();
-      try { mapVmKemarin = new Map(JSON.parse(fileArsip.getBlob().getDataAsString())); } 
-      catch (e) { console.warn(`Gagal parse arsip VM: ${e.message}`); }
-    }
-
-    const dataHariIni = sheetDataUtama.getLastRow() > 1 ? sheetDataUtama.getRange(2, 1, sheetDataUtama.getLastRow() - 1, sheetDataUtama.getLastColumn()).getValues() : [];
-    const mapVmHariIni = new Map();
-    const buatObjekDataVM = (row) => {
-      const data = {};
-      config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU].forEach(kolom => { data[kolom.nama] = row[kolom.index]; });
-      return data;
-    };
-    dataHariIni.forEach(row => {
-      const pk = row[pkIndex];
-      if (pk) {
-        const vmData = buatObjekDataVM(row);
-        mapVmHariIni.set(pk, { data: vmData, hash: computeVmHash(vmData) });
-      }
-    });
+    // [OPTIMALISASI] Panggil fungsi generik untuk proses deteksi perubahan
+    const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, 'VM');
     
-    let logEntriesToAdd = [];
-    const timestamp = new Date();
-
-    for (const [id, dataHariIniObj] of mapVmHariIni.entries()) {
-      const dataKemarinObj = mapVmKemarin.get(id);
-      if (!dataKemarinObj) {
-        const logEntry = [timestamp, 'PENAMBAHAN', id, dataHariIniObj.data[KONSTANTA.HEADER_VM.VM_NAME], sheetDataUtama.getName(), '', '', 'VM baru dibuat'];
-        logEntriesToAdd.push(logEntry);
-      } else if (dataHariIniObj.hash !== dataKemarinObj.hash) {
-        for (const key in dataHariIniObj.data) {
-          if (key === KONSTANTA.HEADER_VM.UPTIME || key === KONSTANTA.HEADER_VM.PROV_TB) continue; 
-          if (String(dataHariIniObj.data[key]) !== String(dataKemarinObj.data[key])) {
-            const logEntry = [timestamp, 'MODIFIKASI', id, dataHariIniObj.data[KONSTANTA.HEADER_VM.VM_NAME], sheetDataUtama.getName(), dataKemarinObj.data[key] || '', dataHariIniObj.data[key] || '', `Kolom '${key}' diubah`];
-            logEntriesToAdd.push(logEntry);
-          }
-        }
-      }
-      mapVmKemarin.delete(id);
-    }
-    for (const [id, dataKemarinObj] of mapVmKemarin.entries()) {
-      const vmName = (dataKemarinObj.data && dataKemarinObj.data[KONSTANTA.HEADER_VM.VM_NAME]) || 'Nama tidak diketahui';
-      const logEntry = [timestamp, 'PENGHAPUSAN', id, vmName, sheetDataUtama.getName(), '', '', 'VM telah dihapus'];
-      logEntriesToAdd.push(logEntry);
-    }
-    
+    // Logika untuk mengirim pesan ringkasan perubahan tetap sama
     if (logEntriesToAdd.length > 0) {
-      sheetLog.getRange(sheetLog.getLastRow() + 1, 1, logEntriesToAdd.length, expectedLogHeader.length).setValues(logEntriesToAdd);
-      
       const counts = { penambahan: 0, modifikasi: 0, pengurangan: 0 };
-      const actionIndex = expectedLogHeader.indexOf(KONSTANTA.HEADER_LOG.ACTION);
       logEntriesToAdd.forEach(log => {
-        const action = log[actionIndex];
+        const action = log[1]; // Indeks aksi adalah 1
         if (action.includes('PENAMBAHAN')) counts.penambahan++;
         else if (action.includes('MODIFIKASI')) counts.modifikasi++;
         else if (action.includes('PENGHAPUSAN')) counts.pengurangan++;
       });
 
-      pesanLaporan += `\n\n📈 <b>Ringkasan Perubahan</b>\n\n`;
+      pesanLaporan += `\n\n📈 <b>Ringkasan Perubahan VM</b>\n\n`;
       pesanLaporan += `• Total Perubahan Hari Ini: <b>${logEntriesToAdd.length} entri</b>\n`;
       pesanLaporan += `  - Penambahan: ${counts.penambahan}\n`;
       pesanLaporan += `  - Modifikasi: ${counts.modifikasi}\n`;
@@ -171,22 +113,14 @@ function buatLaporanHarianVM() {
       pesanLaporan += `<i>(Gunakan /cekhistory untuk detail atau /export untuk mengunduh log)</i>`;
 
     } else {
-      pesanLaporan += "\n\n✅ Tidak ada perubahan data terdeteksi hari ini.";
+      pesanLaporan += "\n\n✅ Tidak ada perubahan data VM terdeteksi hari ini.";
     }
 
     kirimPesanTelegram(pesanLaporan, config, 'HTML');
-
-    const dataUntukArsip = JSON.stringify(Array.from(mapVmHariIni.entries()));
-    if (fileArsip) {
-      fileArsip.setContent(dataUntukArsip);
-    } else {
-      folderArsip.createFile(KONSTANTA.NAMA_FILE.ARSIP_VM, dataUntukArsip, MimeType.PLAIN_TEXT);
-    }
-    console.log("Pengarsipan VM selesai.");
     
   } catch (e) {
-    console.error(`Error saat membuat laporan harian: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`<b>⚠️ Peringatan: Proses Laporan VM Gagal!</b>\n\n<code>${escapeHtml(e.message)}</code>`, config);
+    console.error(`Error saat membuat laporan harian VM: ${e.message}\nStack: ${e.stack}`);
+    kirimPesanTelegram(`<b>⚠️ Peringatan: Proses Laporan VM Gagal!</b>\n\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
   }
 }
 
