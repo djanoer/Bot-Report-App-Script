@@ -9,6 +9,7 @@ function jalankanPemeriksaanAmbangBatas() {
     const config = bacaKonfigurasi();
     let semuaPeringatan = [];
 
+    // Menggabungkan hasil dari semua fungsi pemeriksaan
     semuaPeringatan.push(...cekKapasitasDatastore(config));
     semuaPeringatan.push(...cekUptimeVmKritis(config));
     semuaPeringatan.push(...cekVmKritisMati(config));
@@ -16,8 +17,8 @@ function jalankanPemeriksaanAmbangBatas() {
     if (semuaPeringatan.length > 0) {
       const BATAS_PESAN_DETAIL = 20;
 
+      // Jika jumlah peringatan melebihi batas, kirim ringkasan dan file ekspor
       if (semuaPeringatan.length > BATAS_PESAN_DETAIL) {
-        // --- LOGIKA JIKA PERINGATAN BANYAK: KIRIM RINGKASAN & EKSPOR ---
         const counts = {
             datastore: 0,
             uptime: { total: 0, byCrit: {} },
@@ -40,7 +41,6 @@ function jalankanPemeriksaanAmbangBatas() {
           dataUntukEkspor.push([alert.tipe, alert.item, alert.detailRaw, alert.kritikalitas || 'N/A']);
         });
         
-        // [PERBAIKAN PESAN] Mengambil nilai threshold untuk ditampilkan
         const dsThreshold = config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_DS_USED] || 'N/A';
         const uptimeThreshold = config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME] || 'N/A';
         
@@ -65,11 +65,20 @@ function jalankanPemeriksaanAmbangBatas() {
             }
         }
 
+        // Mengirim pesan ringkasan terlebih dahulu
         kirimPesanTelegram(ringkasanPesan, config, 'HTML');
-        exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Peringatan Sistem", config, null, true, KONSTANTA.HEADER_VM.KRITIKALITAS); 
+
+        // [PERBAIKAN] Memanggil fungsi ekspor, menangkap URL, dan mengirimkannya
+        // Argumen juga diperbaiki urutannya
+        const fileUrl = exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Peringatan Sistem", config, true, "Kritikalitas", null);
+        
+        if (fileUrl) {
+          const pesanFile = `📄 Tautan untuk Laporan Detail Peringatan Sistem dapat diakses di sini:\n${fileUrl}`;
+          kirimPesanTelegram(pesanFile, config, 'HTML');
+        }
 
       } else {
-        // --- LOGIKA JIKA PERINGATAN SEDIKIT (TIDAK BERUBAH) ---
+        // Jika jumlah peringatan di bawah batas, kirim pesan detail langsung
         let pesanDetail = `🚨 <b>Laporan Peringatan Dini Sistem</b> 🚨\n`;
         pesanDetail += `<i>Ditemukan ${semuaPeringatan.length} potensi masalah yang memerlukan perhatian Anda:</i>\n`;
         pesanDetail += `------------------------------------\n\n`;
