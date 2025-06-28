@@ -1,4 +1,4 @@
-// ===== FILE: Datastore.js (Telah Diperbaiki) =====
+// ===== FILE: Datastore.gs =====
 
 function jalankanPemeriksaanDatastore() {
   console.log("Memulai pemeriksaan perubahan datastore...");

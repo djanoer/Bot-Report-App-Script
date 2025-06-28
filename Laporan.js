@@ -23,27 +23,24 @@ function getProvisioningStatusSummary(config) {
     }
 
     const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
-    const overProvisionedDsNames = [];
+    let isOverProvisioned = false;
     
     for (const row of dsData) {
       const capacity = parseFloat(String(row[capGbIndex]).replace(/,/g, '')) || 0;
       const provisioned = parseFloat(String(row[provGbIndex]).replace(/,/g, '')) || 0;
       
       if (provisioned > capacity) {
-        overProvisionedDsNames.push(row[nameIndex]);
+        isOverProvisioned = true;
+        break; // Cukup temukan satu untuk mengubah status
       }
     }
 
-    if (overProvisionedDsNames.length > 0) {
-      let message = `❗️<b>Status Provisioning:</b> Terdeteksi ${overProvisionedDsNames.length} datastore yang <i>over-provisioned</i>.\n`;
-      overProvisionedDsNames.forEach(dsName => {
-        message += ` • <b>${escapeHtml(dsName)}</b>\n`;
-      });
-      message += `\nGunakan perintah <code>/migrasicheck</code> untuk analisis mendalam.`;
-      return message;
+    if (isOverProvisioned) {
+      // Sesuai permintaan, pesan dibuat lebih ringkas untuk laporan utama
+      return `❗️ Status Provisioning: Terdeteksi datastore over-provisioned. Gunakan /migrasicheck untuk detail.`;
     }
 
-    return "✅ <b>Status Provisioning:</b> Semua datastore dalam rasio aman (1:1).";
+    return "✅ Status Provisioning: Semua datastore dalam rasio aman (1:1).";
 
   } catch (e) {
     console.error(`Gagal memeriksa status provisioning: ${e.message}`);
@@ -55,20 +52,20 @@ function getProvisioningStatusSummary(config) {
 function generateVcenterSummary(config) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
   if (!sheet || sheet.getLastRow() <= 1) {
-    return { message: "<i>Data VM tidak ditemukan untuk membuat ringkasan.</i>\n\n", keyboard: null };
+    return { message: "<i>Data VM tidak ditemukan untuk membuat ringkasan.</i>\n\n", grandTotal: { on: 0, off: 0, total: 0 }, uptimeCategories: null };
   }
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const vCenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
   const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
   const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
   if (vCenterIndex === -1 || stateIndex === -1) {
-    return { message: `<i>Gagal membuat ringkasan: Kolom '${KONSTANTA.HEADER_VM.VCENTER}' atau '${KONSTANTA.HEADER_VM.STATE}' tidak ditemukan di header.</i>\n\n`, keyboard: null };
+    return { message: `<i>Gagal membuat ringkasan: Kolom '${KONSTANTA.HEADER_VM.VCENTER}' atau '${KONSTANTA.HEADER_VM.STATE}' tidak ditemukan.</i>\n\n`, grandTotal: { on: 0, off: 0, total: 0 }, uptimeCategories: null };
   }
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
   const vCenterSummary = {};
   let totalGlobal = { on: 0, off: 0, total: 0 };
   const uptimeCategories = { '0_1': 0, '1_2': 0, '2_3': 0, 'over_3': 0, 'invalid': 0 };
-  let totalUptimeValid = 0;
+  
   data.forEach(row => {
     const vCenter = row[vCenterIndex] || 'Lainnya';
     if (!vCenterSummary[vCenter]) {
@@ -88,7 +85,6 @@ function generateVcenterSummary(config) {
       const uptimeValue = row[uptimeIndex];
       const uptimeDays = parseInt(uptimeValue, 10);
       if (uptimeValue !== '' && uptimeValue !== '-' && !isNaN(uptimeDays)) {
-        totalUptimeValid++;
         if (uptimeDays <= 365) uptimeCategories['0_1']++;
         else if (uptimeDays <= 730) uptimeCategories['1_2']++;
         else if (uptimeDays <= 1095) uptimeCategories['2_3']++;
@@ -102,43 +98,39 @@ function generateVcenterSummary(config) {
   const vCenterOrder = Object.keys(vCenterSummary).sort();
   vCenterOrder.forEach(vc => {
     if (vCenterSummary[vc]) {
-      message += `<b>🏢 vCenter: ${vc}</b>\n`;
+      message += `🏢 vCenter: ${vc}\n`;
       message += `🟢 Power On: ${vCenterSummary[vc].on}\n`;
       message += `🔴 Power Off: ${vCenterSummary[vc].off}\n`;
       message += `Total VM: ${vCenterSummary[vc].total}\n\n`;
     }
   });
-  message += `<b>--- GRAND TOTAL ---</b>\n`;
-  message += `🟢 Power On: <b>${totalGlobal.on}</b>\n`;
-  message += `🔴 Power Off: <b>${totalGlobal.off}</b>\n`;
-  message += `<b>Total VM: ${totalGlobal.total}</b>\n\n`;
-  let uptimeKeyboard = null;
-  if (uptimeIndex !== -1) {
-    message += `<b>📊 Ringkasan Uptime (dari total ${totalGlobal.total} VM)</b>\n`;
-    message += `- Di bawah 1 Tahun: <b>${uptimeCategories['0_1']} VM</b>\n`;
-    message += `- 1 sampai 2 Tahun: <b>${uptimeCategories['1_2']} VM</b>\n`;
-    message += `- 2 sampai 3 Tahun: <b>${uptimeCategories['2_3']} VM</b>\n`;
-    message += `- Di atas 3 Tahun: <b>${uptimeCategories['over_3']} VM</b>\n`;
-    message += `- Data Tidak Valid/Kosong: <b>${uptimeCategories['invalid']} VM</b>\n`;
-  }
-  return { message: message, keyboard: null };
+  message += `--- GRAND TOTAL ---\n`;
+  message += `🟢 Power On: ${totalGlobal.on}\n`;
+  message += `🔴 Power Off: ${totalGlobal.off}\n`;
+  message += `Total VM: ${totalGlobal.total}\n\n`;
+  
+  // Uptime summary is built separately
+  let uptimeMessage = `📊 Ringkasan Uptime (dari total ${totalGlobal.total} VM)\n`;
+  uptimeMessage += `- Di bawah 1 Tahun: ${uptimeCategories['0_1']} VM\n`;
+  uptimeMessage += `- 1 sampai 2 Tahun: ${uptimeCategories['1_2']} VM\n`;
+  uptimeMessage += `- 2 sampai 3 Tahun: ${uptimeCategories['2_3']} VM\n`;
+  uptimeMessage += `- Di atas 3 Tahun: ${uptimeCategories['over_3']} VM\n`;
+  uptimeMessage += `- Data Tidak Valid/Kosong: ${uptimeCategories['invalid']} VM`;
+
+  return { vCenterMessage: message, uptimeMessage: uptimeMessage };
 }
 
+/**
+ * [PERBAIKAN SESUAI PERMINTAAN]
+ * Laporan harian sekarang memiliki format yang lebih ringkas dan konsisten
+ * dengan laporan periodik.
+ */
 function buatLaporanHarianVM() {
   const startTime = new Date();
   const config = bacaKonfigurasi();
   let pesanLaporan = `🚨 <b>Laporan Harian VM & Datastore</b>\n`;
-  pesanLaporan += `<i>Analisis dijalankan pada: ${startTime.toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>\n`;
-  pesanLaporan += `--------------------------------------------------\n`;
+  pesanLaporan += `--------------------------------------------------\n\n`;
   
-  const summary = generateVcenterSummary(config);
-  pesanLaporan += summary.message;
-  
-  const provisioningSummary = getProvisioningStatusSummary(config);
-  pesanLaporan += `\n--------------------------------------------------\n`;
-  pesanLaporan += `${provisioningSummary}\n`;
-  pesanLaporan += `--------------------------------------------------`;
-
   try {
     const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
     const archiveFileName = KONSTANTA.NAMA_FILE.ARSIP_VM;
@@ -147,80 +139,65 @@ function buatLaporanHarianVM() {
 
     const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, 'VM');
     
+    // Ringkasan Perubahan
     if (logEntriesToAdd.length > 0) {
-      const counts = { penambahan: 0, modifikasi: 0, pengurangan: 0 };
-      logEntriesToAdd.forEach(log => {
+      pesanLaporan += `Ringkasan Perubahan Hari Ini:\n`;
+      const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
+       logEntriesToAdd.forEach(log => {
         const action = log[1];
-        if (action.includes('PENAMBAHAN')) counts.penambahan++;
-        else if (action.includes('MODIFIKASI')) counts.modifikasi++;
-        else if (action.includes('PENGHAPUSAN')) counts.pengurangan++;
+        if (action.includes('PENAMBAHAN')) counts.baru++;
+        else if (action.includes('MODIFIKASI')) counts.dimodifikasi++;
+        else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
       });
 
-      pesanLaporan += `\n\n📈 <b>Ringkasan Perubahan VM</b>\n\n`;
-      pesanLaporan += `• Total Perubahan Hari Ini: <b>${logEntriesToAdd.length} entri</b>\n`;
-      pesanLaporan += `  - Penambahan: ${counts.penambahan}\n`;
-      pesanLaporan += `  - Modifikasi: ${counts.modifikasi}\n`;
-      pesanLaporan += `  - Pengurangan: ${counts.pengurangan}\n\n`;
-      pesanLaporan += `<i>(Gunakan /cekhistory untuk detail atau /export untuk mengunduh log)</i>`;
-
+      if (counts.baru > counts.dihapus) {
+        pesanLaporan += `📈 Tren hari ini menunjukkan adanya pertumbuhan infrastruktur.\n`;
+      } else if (counts.dihapus > counts.baru) {
+        pesanLaporan += `📉 Tren hari ini menunjukkan adanya perampingan infrastruktur.\n`;
+      } else {
+        pesanLaporan += `⚙️ Aktivitas infrastruktur hari ini cenderung stabil.\n`;
+      }
     } else {
-      pesanLaporan += "\n\n✅ Tidak ada perubahan data VM terdeteksi hari ini.";
+      pesanLaporan += "✅ Tidak ada perubahan data VM terdeteksi hari ini.";
     }
+    pesanLaporan += `\n\n--------------------------------------------------\n\n`;
+
+    const summary = generateVcenterSummary(config);
+    pesanLaporan += summary.vCenterMessage;
+    pesanLaporan += summary.uptimeMessage;
+    
+    const provisioningSummary = getProvisioningStatusSummary(config);
+    pesanLaporan += `\n\n--------------------------------------------------\n`;
+    pesanLaporan += `${provisioningSummary}\n`;
+    pesanLaporan += `--------------------------------------------------\n\n`;
+    
+    // Ringkasan Jumlah Perubahan
+    if (logEntriesToAdd.length > 0) {
+       const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
+       logEntriesToAdd.forEach(log => {
+        const action = log[1];
+        if (action.includes('PENAMBAHAN')) counts.baru++;
+        else if (action.includes('MODIFIKASI')) counts.dimodifikasi++;
+        else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
+      });
+      pesanLaporan += `✅ Baru: ${counts.baru} entri\n`;
+      pesanLaporan += `✏️ Dimodifikasi: ${counts.dimodifikasi} entri\n`;
+      pesanLaporan += `❌ Dihapus: ${counts.dihapus} entri\n\n`;
+    }
+    pesanLaporan += `Gunakan perintah /export untuk melihat detail perubahan.`;
 
     kirimPesanTelegram(pesanLaporan, config, 'HTML');
     
   } catch (e) {
     console.error(`Error saat membuat laporan harian VM: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`<b>⚠️ Peringatan: Proses Laporan VM Gagal!</b>\n\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+    kirimPesanTelegram(`<b>⚠️ Peringatan: Proses Laporan VM Harian Gagal!</b>\n\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
   }
 }
-
-
-function formatBatchNotification(vmBaru, vmDihapus, vmDimodifikasi) {
-  let message = `<b>Log Perubahan Terdeteksi:</b>\n`;
-  let buttons = [];
-
-  if (vmBaru.length > 0) {
-    message += `\n<b>✅ VM Baru (${vmBaru.length}):</b>\n`;
-    vmBaru.forEach(log => message += `- ${escapeHtml(log[3])}\n`);
-  }
-  
-  if (vmDihapus.length > 0) {
-    message += `\n<b>❌ VM Dihapus (${vmDihapus.length}):</b>\n`;
-    vmDihapus.forEach(log => message += `- ${escapeHtml(log[3])}\n`);
-  }
-  
-  if (vmDimodifikasi.length > 0) {
-    const modifiedSummary = new Map();
-    vmDimodifikasi.forEach(log => {
-      const pk = log[2];
-      const vmName = log[3];
-      const detail = log[7];
-      if (!modifiedSummary.has(vmName)) {
-        modifiedSummary.set(vmName, { pk: pk, changes: [] });
-      }
-      modifiedSummary.get(vmName).changes.push(detail.replace("Kolom '", "").replace("' diubah", ""));
-    });
-
-    message += `\n<b>✏️ VM Dimodifikasi (${modifiedSummary.size}):</b>\n`;
-    modifiedSummary.forEach((value, vmName) => {
-      message += `- <b>${escapeHtml(vmName)}</b>: <i>${escapeHtml(value.changes.join(', '))}</i>\n`;
-      buttons.push([{ text: `📜 Riwayat: ${vmName.substring(0,40)}`, callback_data: `history_${value.pk}` }]);
-    });
-  }
-  
-  let keyboard = null;
-  if (buttons.length > 0) {
-    keyboard = { inline_keyboard: buttons };
-  }
-
-  return { message: message, keyboard: keyboard };
-}
-
 
 /**
- * [FUNGSI LAPORAN PERIODIK - STRUKTUR DIPERBAIKI]
- * Fungsi ini sekarang akan menampilkan ringkasan perubahan di bagian atas.
+ * [FUNGSI LAPORAN PERIODIK - DIROMBAK TOTAL SESUAI PERMINTAAN]
+ * Fungsi ini menghasilkan laporan mingguan/bulanan dengan format baru yang diminta.
+ * Tidak lagi menyertakan file log secara langsung.
  */
 function buatLaporanPeriodik(periode) {
   const config = bacaKonfigurasi();
@@ -230,18 +207,21 @@ function buatLaporanPeriodik(periode) {
 
   if (periode === 'mingguan') {
     startDate.setDate(today.getDate() - 7);
-    title = `Laporan Mingguan VM & Datastore (${startDate.toLocaleDateString('id-ID')} - ${today.toLocaleDateString('id-ID')})`;
+    const tglMulai = startDate.toLocaleDateString('id-ID', {day: '2-digit', month: 'long'});
+    const tglSelesai = today.toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'});
+    title = `Laporan Mingguan VM & Datastore (${tglMulai} - ${tglSelesai})`;
   } else if (periode === 'bulanan') {
     startDate.setMonth(today.getMonth() - 1);
-    title = `Laporan Bulanan VM & Datastore (Bulan ${today.toLocaleString('id-ID', { month: 'long' })})`;
+    title = `Laporan Bulanan VM & Datastore (Bulan ${today.toLocaleString('id-ID', { month: 'long', year: 'numeric' })})`;
   } else {
     return;
   }
 
-  // --- Langkah 1: Persiapkan semua data ---
-  const summary = generateVcenterSummary(config);
+  // --- Langkah 1: Kumpulkan semua data yang diperlukan ---
+  const { vCenterMessage, uptimeMessage } = generateVcenterSummary(config);
   const provisioningSummary = getProvisioningStatusSummary(config);
   
+  // Mengambil log gabungan dari sheet aktif dan arsip
   const combinedLogResult = getCombinedLogs(startDate, config);
   const logData = combinedLogResult.data;
   const logHeaders = combinedLogResult.headers;
@@ -251,10 +231,10 @@ function buatLaporanPeriodik(periode) {
 
   if (actionIndex !== -1) {
     logData.forEach(row => {
-        const action = row[actionIndex];
-        if (action === 'PENAMBAHAN' || action === 'DATASTORE BARU') changes.baru++;
-        else if (action === 'PENGHAPUSAN' || action === 'DATASTORE DIHAPUS') changes.dihapus++;
-        else if (action === 'MODIFIKASI' || action === 'KAPASITAS DS DIUBAH') changes.dimodifikasi++;
+        const action = String(row[actionIndex] || '');
+        if (action.includes('PENAMBAHAN')) changes.baru++;
+        else if (action.includes('PENGHAPUSAN')) changes.dihapus++;
+        else if (action.includes('MODIFIKASI')) changes.dimodifikasi++;
     });
   }
   const totalChanges = changes.baru + changes.dihapus + changes.dimodifikasi;
@@ -263,47 +243,40 @@ function buatLaporanPeriodik(periode) {
   let pesanLaporan = `<b>${title}</b>\n`;
   pesanLaporan += `--------------------------------------------------\n\n`;
 
-  // Bagian 1: Ringkasan Perubahan
+  // Bagian 1: Ringkasan Tren Perubahan
   pesanLaporan += `<b>Ringkasan Perubahan Periode Ini:</b>\n`;
   if (totalChanges > 0) {
-    if (changes.baru > changes.dihapus) {
-      pesanLaporan += `<i>📈 Tren periode ini menunjukkan adanya pertumbuhan infrastruktur.</i>\n`;
-    } else if (changes.dihapus > changes.baru) {
-      pesanLaporan += `<i>📉 Tren periode ini menunjukkan adanya perampingan infrastruktur.</i>\n`;
+    if (changes.baru > (changes.dihapus + 5)) { // Toleransi 5 agar tidak terlalu sensitif
+      pesanLaporan += `📈 Tren periode ini menunjukkan adanya pertumbuhan infrastruktur.\n`;
+    } else if (changes.dihapus > (changes.baru + 5)) {
+      pesanLaporan += `📉 Tren periode ini menunjukkan adanya perampingan infrastruktur.\n`;
     } else {
-      pesanLaporan += `<i>⚙️ Aktivitas infrastruktur pada periode ini cenderung stabil atau hanya bersifat modifikasi.</i>\n`;
+      pesanLaporan += `⚙️ Aktivitas infrastruktur pada periode ini cenderung stabil atau hanya bersifat modifikasi.\n`;
     }
   } else {
-    pesanLaporan += `<i>✅ Tidak ada perubahan yang tercatat pada periode ini.</i>\n`;
+    pesanLaporan += `✅ Tidak ada perubahan infrastruktur yang tercatat pada periode ini.\n`;
   }
-  pesanLaporan += `--------------------------------------------------\n\n`;
+  pesanLaporan += `\n--------------------------------------------------\n\n`;
 
-  // Bagian 2: Ringkasan vCenter
-  pesanLaporan += summary.message;
-  pesanLaporan += `\n--------------------------------------------------\n`;
+  // Bagian 2: Ringkasan vCenter dan Uptime
+  pesanLaporan += vCenterMessage;
+  pesanLaporan += uptimeMessage;
+  pesanLaporan += `\n\n--------------------------------------------------\n`;
   
   // Bagian 3: Status Provisioning
   pesanLaporan += `${provisioningSummary}\n`;
   pesanLaporan += `--------------------------------------------------\n\n`;
 
-  // Bagian 4: Detail Angka Perubahan (jika ada)
-  if (totalChanges > 0) {
-    pesanLaporan += `✅ Baru: ${changes.baru} entri\n`;
-    pesanLaporan += `✏️ Dimodifikasi: ${changes.dimodifikasi} entri\n`;
-    pesanLaporan += `❌ Dihapus: ${changes.dihapus} entri\n\n`;
-    pesanLaporan += `<i>Gunakan perintah <code>/export</code> untuk melihat detail perubahan.</i>`;
-  }
+  // Bagian 4: Detail Angka Perubahan
+  pesanLaporan += `✅ Baru: ${changes.baru} entri\n`;
+  pesanLaporan += `✏️ Dimodifikasi: ${changes.dimodifikasi} entri\n`;
+  pesanLaporan += `❌ Dihapus: ${changes.dihapus} entri\n\n`;
+  
+  pesanLaporan += `Gunakan perintah /export untuk melihat detail perubahan.`;
 
   // --- Langkah 3: Kirim Pesan ---
-  let inlineKeyboard = null;
-  if (totalChanges > 0) {
-    const fileUrl = exportResultsToSheet(logHeaders, logData, `Log Perubahan - ${periode}`, config, null, true);
-    if (fileUrl) {
-      inlineKeyboard = { inline_keyboard: [[{ text: `📄 Lihat Semua ${totalChanges} Log di Sheet`, url: fileUrl }]] };
-    }
-  }
-  
-  kirimPesanTelegram(pesanLaporan, config, 'HTML', inlineKeyboard);
+  // Tidak ada lagi lampiran file log otomatis sesuai permintaan
+  kirimPesanTelegram(pesanLaporan, config, 'HTML');
 }
 
 

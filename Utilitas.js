@@ -1,4 +1,4 @@
-// ===== FILE: Utilitas.gs =====
+// ===== FILE: Utilitas.gs (VERSI BARU) =====
 
 function escapeHtml(text) {
   if (typeof text !== 'string') text = String(text);
