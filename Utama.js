@@ -7,7 +7,7 @@ function doPost(e) {
     const config = bacaKonfigurasi();
     const update = JSON.parse(e.postData.contents);
     
-    let userId, fromChatId, text, firstName, isCallback = false;
+    let userId, fromChatId, text, firstName, isCallback = false, username;
 
     // Ekstrak informasi dasar dari update Telegram
     if (update.callback_query) {
@@ -16,11 +16,13 @@ function doPost(e) {
       fromChatId = update.callback_query.message.chat.id;
       text = update.callback_query.data;
       firstName = update.callback_query.from.first_name;
+      username = update.callback_query.from.username;
     } else if (update.message && update.message.text) {
       userId = update.message.from.id;
       fromChatId = update.message.chat.id;
       text = update.message.text;
       firstName = update.message.from.first_name;
+      username = update.message.from.username; // Ambil username
     } else {
       return HtmlService.createHtmlOutput("OK"); // Bukan update yang perlu diproses
     }
@@ -30,15 +32,52 @@ function doPost(e) {
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // Validasi Hak Akses di Awal
-    const userData = getUserData(userId);
-    
-    if (!userData || !userData.email) {
-      // Buat pesan penolakan yang informatif
-      const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
-      const pesanDitolak = `❌ ${userMention}, Anda tidak terdaftar untuk menggunakan bot ini.\n\nHarap hubungi administrator untuk mendapatkan hak akses.`;
+    // --- LOGIKA BARU: TANGANI PENDAFTARAN SEBELUM CEK HAK AKSES ---
+    const commandParts = text.split(' ');
+    let command = commandParts[0].toLowerCase();
+    if (command.includes('@')) command = command.split('@')[0];
+
+    // Jika perintahnya adalah /daftar, proses di sini dan hentikan.
+    if (command === '/daftar') {
       
-      // Kirim pesan penolakan dan hentikan eksekusi
+      // ===== LOGIKA TAMBAHAN: Cek apakah pengguna sudah terdaftar =====
+      const existingUserData = getUserData(userId);
+      if (existingUserData && existingUserData.email) {
+        kirimPesanTelegram(`Halo ${escapeHtml(firstName)}, Anda sudah terdaftar di sistem. Tidak perlu mendaftar lagi.`, config, 'HTML');
+        return HtmlService.createHtmlOutput("OK"); // Hentikan proses
+      }
+      // ===== AKHIR LOGIKA TAMBAHAN =====
+
+      const email = commandParts[1];
+      // Validasi sederhana untuk email
+      if (!email || !email.includes('@') || !email.includes('.')) {
+        const pesanFormatSalah = `Format perintah salah, ${escapeHtml(firstName)}.\n\nGunakan format:\n<code>/daftar email.anda@domain.com</code>`;
+        kirimPesanTelegram(pesanFormatSalah, config, 'HTML');
+        return HtmlService.createHtmlOutput("OK");
+      }
+      
+      // Buat dan kirim notifikasi pendaftaran ke grup
+      let notifPesan = "<b>🔔 Permintaan Pendaftaran Baru</b>\n\n";
+      notifPesan += "Admin, mohon verifikasi dan tambahkan pengguna berikut ke sheet 'Hak Akses':\n\n";
+      notifPesan += `<b>Nama:</b> ${escapeHtml(firstName)}\n`;
+      notifPesan += `<b>Username:</b> ${username ? '@' + username : 'N/A'}\n`;
+      notifPesan += `<b>User ID:</b> <code>${userId}</code>\n`;
+      notifPesan += `<b>Email:</b> <code>${escapeHtml(email)}</code>`;
+      
+      kirimPesanTelegram(notifPesan, config, 'HTML');
+      
+      // Kirim pesan konfirmasi kepada pengguna yang mendaftar
+      kirimPesanTelegram(`Terima kasih, ${escapeHtml(firstName)}. Permintaan Anda telah diteruskan kepada admin untuk persetujuan.`, config, 'HTML', null, fromChatId);
+
+      // Hentikan eksekusi skrip setelah menangani pendaftaran
+      return HtmlService.createHtmlOutput("OK");
+    }
+
+    // --- PEMERIKSAAN HAK AKSES UNTUK SEMUA PERINTAH LAINNYA ---
+    const userData = getUserData(userId);
+    if (!userData || !userData.email) {
+      const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
+      const pesanDitolak = `❌ Maaf ${userMention}, Anda tidak terdaftar untuk menggunakan bot ini.\n\nSilakan gunakan perintah <code>/daftar [email_anda]</code> untuk meminta akses.`;
       kirimPesanTelegram(pesanDitolak, config, 'HTML'); 
       return HtmlService.createHtmlOutput("Unauthorized"); 
     }
@@ -62,10 +101,6 @@ function doPost(e) {
       answerCallbackQuery(callbackQueryId, config);
 
     } else { // Ini adalah pesan teks biasa
-      const commandParts = text.split(' ');
-      let command = commandParts[0].toLowerCase();
-      if (command.includes('@')) command = command.split('@')[0];
-      
       switch (command) {
         case '/laporan':
           buatLaporanHarianVM();
@@ -76,13 +111,10 @@ function doPost(e) {
         case '/provisioning':
           generateProvisioningReport(config);
           break;
-        // ===== [FITUR BARU] =====
         case '/migrasicheck':
-          // Mengirim pesan konfirmasi sebelum menjalankan analisis yang mungkin lama
           kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore... Proses ini mungkin memerlukan waktu beberapa saat.", config, 'HTML');
-          jalankanRekomendasiMigrasi(); // Memanggil fungsi dari ManajemenData.js
+          jalankanRekomendasiMigrasi();
           break;
-        // ===== [AKHIR FITUR BARU] =====
         case '/export':
           kirimMenuEkspor(config);
           break;
@@ -102,30 +134,30 @@ function doPost(e) {
           cekDanArsipkanLogJikaPenuh(config);
           break;
         case '/info':
-          // ===== [PEMBARUAN PESAN INFO] =====
           const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
                             "------------------------------------\n\n" +
+                            "<code>/daftar [email]</code>\n" +
+                            "Meminta hak akses untuk menggunakan bot.\n\n" +
                             "<code>/laporan</code>\n" +
-                            "(Cepat) Membuat laporan instan berdasarkan data terakhir yang tersimpan di bot.\n\n" +
-                            "<code>/sync_laporan</code>\n" +
-                            "(Lengkap) Menyalin data terbaru dari semua sumber, lalu membuat laporan lengkap.\n\n" +
-                            "<code>/provisioning</code>\n" +
-                            "Menampilkan laporan analisis alokasi resource (CPU, Mem, Disk).\n\n" +
-                            "<code>/migrasicheck</code>\n" +
-                            "Menjalankan analisis untuk mencari datastore yang over-provisioned dan memberikan rekomendasi migrasi VM.\n\n" +
-                            "<code>/export</code>\n" +
-                            "Menampilkan menu untuk mengunduh berbagai jenis laporan.\n\n" +
-                            "<code>/cekvm [IP/Nama/PK]</code>\n" +
-                            "Mencari detail sebuah VM.\n\n" +
-                            "<code>/history [PK]</code>\n" +
-                            "Menampilkan riwayat perubahan VM tertentu.\n\n" +
-                            "<code>/cekhistory</code>\n" +
-                            "Menampilkan semua log perubahan yang terjadi hari ini.\n\n" +
-                            "<code>/arsipkanlog</code>\n" +
-                            "Memeriksa & menjalankan pengarsipan jika log melebihi batas.\n\n" +
-                            "<code>/info</code>\n" +
-                            "Menampilkan daftar perintah ini.";
-          // ===== [AKHIR PEMBARUAN PESAN INFO] =====
+                              "(Cepat) Membuat laporan instan berdasarkan data terakhir yang tersimpan di bot.\n\n" +
+                              "<code>/sync_laporan</code>\n" +
+                              "(Lengkap) Menyalin data terbaru dari semua sumber, lalu membuat laporan lengkap.\n\n" +
+                              "<code>/provisioning</code>\n" +
+                              "Menampilkan laporan analisis alokasi resource (CPU, Mem, Disk).\n\n" +
+                              "<code>/migrasicheck</code>\n" +
+                              "Menjalankan analisis untuk mencari datastore yang over-provisioned dan memberikan rekomendasi migrasi VM.\n\n" +
+                              "<code>/export</code>\n" +
+                              "Menampilkan menu untuk mengunduh berbagai jenis laporan.\n\n" +
+                              "<code>/cekvm [IP/Nama/PK]</code>\n" +
+                              "Mencari detail sebuah VM.\n\n" +
+                              "<code>/history [PK]</code>\n" +
+                              "Menampilkan riwayat perubahan VM tertentu.\n\n" +
+                              "<code>/cekhistory</code>\n" +
+                              "Menampilkan semua log perubahan yang terjadi hari ini.\n\n" +
+                              "<code>/arsipkanlog</code>\n" +
+                              "Memeriksa & menjalankan pengarsipan jika log melebihi batas.\n\n" +
+                              "<code>/info</code>\n" +
+                              "Menampilkan daftar perintah ini.";
           kirimPesanTelegram(infoPesan, config, 'HTML');
           break;
         default:
