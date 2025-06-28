@@ -205,21 +205,23 @@ function findVmAndGetInfo(searchTerm, config, userData) {
 }
 
 /**
- * [KEAMANAN DITINGKATKAN & DIPERBAIKI] Mengekspor data ke Google Sheet baru.
- * File yang dihasilkan sekarang HANYA dapat diakses oleh pengguna yang meminta
- * dan fungsi ini akan OTOMATIS mengirimkan pesan berisi tautan file.
+ * [FUNGSI VERSI FINAL YANG DISEMPURNAKAN]
+ * Mengekspor data ke Google Sheet baru dengan logika pembagian yang jelas:
+ * 1. Jika dijalankan oleh PENGGUNA via Telegram, file akan dibagikan secara PRIBADI ke email pengguna.
+ * 2. Jika dijalankan oleh SISTEM (trigger/manual dari editor), file akan dibagikan secara PUBLIK
+ * (siapa saja yang memiliki link) untuk menjamin kelancaran proses.
  */
 function exportResultsToSheet(headers, dataRows, title, config, userData, highlightColumnName = null) {
   const folderId = config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR];
   if (!folderId) {
     kirimPesanTelegram(`⚠️ Gagal membuat file ekspor: Konfigurasi FOLDER_ID_HASIL_EKSPOR tidak ditemukan.`, config);
-    return; // Tidak mengembalikan apa pun karena pesan sudah dikirim
+    return;
   }
   
-  // Memeriksa userData dan email secara ketat di awal
-  if (!userData || !userData.email) {
-    kirimPesanTelegram(`⚠️ Gagal membagikan file: Email untuk pengguna dengan ID ${userData.userId} tidak ditemukan di sheet 'Hak Akses'.`, config);
-    return; // Tidak mengembalikan apa pun
+  // Validasi email HANYA jika dieksekusi oleh pengguna spesifik
+  if (userData && !userData.email) {
+    kirimPesanTelegram(`⚠️ Gagal membagikan file: Email untuk pengguna dengan ID ${userData.userId || 'tidak dikenal'} tidak ditemukan di sheet 'Hak Akses'.`, config);
+    return;
   }
 
   try {
@@ -252,17 +254,29 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
     const file = DriveApp.getFileById(newSs.getId());
     const folder = DriveApp.getFolderById(folderId);
     file.moveTo(folder);
-    
-    file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
-    file.addViewer(userData.email);
-    
     const fileUrl = file.getUrl();
-    console.log(`Hasil ekspor berhasil dibuat dan dibagikan ke ${userData.email}: ${fileUrl}`);
     
-    // === BAGIAN KRUSIAL YANG DIPERBAIKI ===
-    // Secara proaktif mengirimkan pesan berisi tautan file ke grup
-    const userMention = `<a href="tg://user?id=${userData.userId}">${escapeHtml(userData.firstName || 'Pengguna')}</a>`;
-    const pesanFile = `${userMention}, file ekspor Anda untuk "<b>${title}</b>" sudah siap.\n\nFile ini telah dibagikan secara pribadi ke email Anda yang terdaftar.\n\n<a href="${fileUrl}">Buka File Laporan</a>`;
+    let pesanFile;
+
+    // Logika pembagian hak akses dan pembuatan pesan
+    if (userData && userData.email) {
+      // Skenario 1: Permintaan dari PENGGUNA -> Bagikan secara PRIBADI
+      file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+      file.addViewer(userData.email);
+      console.log(`Hasil ekspor berhasil dibuat dan dibagikan secara pribadi ke ${userData.email}: ${fileUrl}`);
+      const userMention = `<a href="tg://user?id=${userData.userId}">${escapeHtml(userData.firstName || 'Pengguna')}</a>`;
+      pesanFile = `${userMention}, file ekspor Anda untuk "<b>${escapeHtml(title)}</b>" sudah siap.\n\nFile ini telah dibagikan secara pribadi ke email Anda.\n\n<a href="${fileUrl}">Buka File Laporan</a>`;
+    
+    } else {
+      // Skenario 2: Dijalankan oleh SISTEM -> Bagikan secara PUBLIK
+      console.log("Proses sistem terdeteksi. Membagikan file ke siapa saja dengan tautan.");
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      
+      console.log(`Hasil ekspor sistem berhasil dibuat dan dibagikan secara publik: ${fileUrl}`);
+      pesanFile = `📄 Laporan sistem "<b>${escapeHtml(title)}</b>" telah dibuat.\n\nSilakan akses file melalui tautan di bawah ini.\n\n<a href="${fileUrl}">Buka File Laporan</a>`;
+    }
+
+    // Kirim pesan ke Telegram
     kirimPesanTelegram(pesanFile, config, 'HTML');
 
   } catch (e) {

@@ -90,6 +90,11 @@ function doPost(e) {
         case '/cekhistory':
           getTodaysHistory(config, userData);
           break;
+        case '/arsipkanlog':
+          kirimPesanTelegram("⚙️ Menerima perintah arsip manual. Memulai proses pengarsipan...", config);
+          // Panggil fungsi pengarsipan utama yang sudah ada
+          jalankanPengarsipanLogKeJson(); 
+          break;
         case '/info':
           const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
                             "------------------------------------\n\n" +

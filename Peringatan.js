@@ -68,14 +68,10 @@
           // Mengirim pesan ringkasan terlebih dahulu
           kirimPesanTelegram(ringkasanPesan, config, 'HTML');
 
-          // [PERBAIKAN] Memanggil fungsi ekspor, menangkap URL, dan mengirimkannya
-          // Argumen juga diperbaiki urutannya
-          const fileUrl = exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Peringatan Sistem", config, true, "Kritikalitas", null);
-          
-          if (fileUrl) {
-            const pesanFile = `📄 Tautan untuk Laporan Detail Peringatan Sistem dapat diakses di sini:\n${fileUrl}`;
-            kirimPesanTelegram(pesanFile, config, 'HTML');
-          }
+          // Memanggil fungsi ekspor. Karena ini adalah proses sistem,
+          // kita sengaja mengirim 'null' untuk argumen userData.
+          // Fungsi ini akan menangani pembuatan file dan pengiriman notifikasi secara mandiri.
+          exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Peringatan Sistem", config, null, "Kritikalitas");
 
         } else {
           // Jika jumlah peringatan di bawah batas, kirim pesan detail langsung
