@@ -23,14 +23,15 @@ function doPost(e) {
     const userData = getUserData(userId);
     if (!userData) {
       const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(update.message.from.first_name || userId)}</a>`;
-      kirimPesanTelegram(`❌ ${userMention}, akses Anda ditolak.`, config, 'HTML'); 
+      // [PERBAIKAN] Pesan akses ditolak diperbarui
+      const pesanDitolak = `❌ ${userMention}, akses Anda ditolak.\nAnda tidak terdaftar untuk menggunakan bot ini. Silakan hubungi administrator.`;
+      kirimPesanTelegram(pesanDitolak, config, 'HTML'); 
       return HtmlService.createHtmlOutput("Unauthorized"); 
     }
     
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
       
-      // [LOGIKA BARU] Routing yang lebih spesifik
       if (text.startsWith("history_") || text.startsWith("cekvm_")) {
         const pk = text.split("_")[1];
         if (text.startsWith("history_")) getVmHistory(pk, config, userData);
@@ -74,15 +75,26 @@ function doPost(e) {
           getTodaysHistory(config, userData);
           break;
         case '/info':
-          const infoPesan = "<b>Daftar Perintah Bot</b>\n\n" +
-                            "<code>/laporan</code> - Laporan cepat dari data terakhir.\n\n" +
-                            "<code>/sync_laporan</code> - Sinkronisasi data & buat laporan lengkap.\n\n" +
-                            "<code>/provisioning</code> - Laporan analisis resource.\n\n" +
-                            "<code>/export</code> - Menu unduh laporan detail.\n\n" +
-                            "<code>/cekvm [kriteria]</code> - Cari detail VM.\n\n" +
-                            "<code>/history [PK]</code> - Lihat riwayat perubahan VM.\n\n" +
-                            "<code>/cekhistory</code> - Lihat semua perubahan hari ini.";
-          kirimPesanTelegram(infoPesan, config);
+          // [PERBAIKAN] Pesan /info diperbarui dengan format dan konten baru
+          const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
+                            "------------------------------------\n\n" +
+                            "<code>/laporan</code>\n" +
+                            "(Cepat) Membuat laporan instan berdasarkan data terakhir yang tersimpan di bot. Perintah ini TIDAK menyalin data baru dari sumber.\n\n" +
+                            "<code>/sync_laporan</code>\n" +
+                            "(Lengkap) Menyalin data terbaru dari semua sheet sumber (VM & Datastore), lalu membuat laporan lengkap. Gunakan ini untuk mendapatkan data paling up-to-date.\n\n" +
+                            "<code>/provisioning</code>\n" +
+                            "Menampilkan laporan analisis alokasi resource (CPU, Mem, Disk).\n\n" +
+                            "<code>/export</code>\n" +
+                            "Menampilkan menu untuk mengunduh berbagai jenis laporan dalam format file.\n\n" +
+                            "<code>/cekvm [IP Address / Virtual Machine / Primary Key]</code>\n" +
+                            "Mencari detail sebuah VM.\n\n" +
+                            "<code>/history [Primary Key]</code>\n" +
+                            "Menampilkan riwayat perubahan VM tertentu.\n\n" +
+                            "<code>/cekhistory</code>\n" +
+                            "Menampilkan semua log perubahan yang terjadi hari ini.\n\n" +
+                            "<code>/info</code>\n" +
+                            "Menampilkan daftar perintah ini.";
+          kirimPesanTelegram(infoPesan, config, 'HTML');
           break;
         default:
           kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.`, config);
@@ -134,7 +146,7 @@ function onOpen() {
       .addItem('2. BUAT LAPORAN DARI DATA SAAT INI', 'buatLaporanHarianVM')
       .addSeparator()
       .addItem('3. REKOMENDASI MIGRASI DATASTORE', 'runDailyMigrationCheck')
-      .addItem('4. PERIKSA AMBANG BATAS (WARNING)', 'runDailyWarningCheck') // [BARU] Menu untuk testing
+      .addItem('4. PERIKSA AMBANG BATAS (WARNING)', 'runDailyWarningCheck')
       .addSeparator()
       .addItem('5. Tes Koneksi Telegram', 'tesKoneksiTelegram')
       .addSeparator()

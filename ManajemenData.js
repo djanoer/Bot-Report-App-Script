@@ -10,14 +10,21 @@ function syncDanBuatLaporanHarian(showUiAlert = true) {
   }
   try {
     const config = bacaKonfigurasi();
-    console.log(`Memulai sinkronisasi untuk sheet: ${config.NAMA_SHEET_DATA_UTAMA}`);
-    salinDataSheet(config.NAMA_SHEET_DATA_UTAMA, config.SUMBER_SPREADSHEET_ID);
-    if (config.NAMA_SHEET_DATASTORE) {
-      console.log(`Memulai sinkronisasi untuk sheet: ${config.NAMA_SHEET_DATASTORE}`);
-      salinDataSheet(config.NAMA_SHEET_DATASTORE, config.SUMBER_SPREADSHEET_ID);
+    const sheetVmKey = KONSTANTA.KUNCI_KONFIG.SHEET_VM;
+    const sheetDsKey = KONSTANTA.KUNCI_KONFIG.SHEET_DS;
+    const sumberIdKey = KONSTANTA.KUNCI_KONFIG.ID_SUMBER;
+
+    console.log(`Memulai sinkronisasi untuk sheet: ${config[sheetVmKey]}`);
+    salinDataSheet(config[sheetVmKey], config[sumberIdKey]);
+
+    if (config[sheetDsKey]) {
+      console.log(`Memulai sinkronisasi untuk sheet: ${config[sheetDsKey]}`);
+      salinDataSheet(config[sheetDsKey], config[sumberIdKey]);
     }
+    
     buatLaporanHarianVM();
     jalankanPemeriksaanDatastore();
+    
     if (showUiAlert) {
       showUiFeedback("Sukses!", "Semua data telah diimpor dan semua laporan telah diproses.");
     }
@@ -157,7 +164,9 @@ function findVmAndGetInfo(searchTerm, config, userData) {
     kirimPesanTelegram(info, config, 'HTML');
 
     if (results.length > 15) {
-      exportResultsToSheet(headers, results, `Pencarian '${searchTerm}'`, config, userData);
+    info += `\n<i>...dan ${results.length - 15} hasil lainnya. File ekspor akan dikirimkan ke grup.</i>`;
+    kirimPesanTelegram(info, config, 'HTML');
+    exportResultsToSheet(headers, results, `Pencarian '${searchTerm}'`, config);
     }
     
   } else {
@@ -165,15 +174,10 @@ function findVmAndGetInfo(searchTerm, config, userData) {
   }
 }
 
-function exportResultsToSheet(headers, dataRows, title, config, isSystemReport = false, highlightColumnName = null, userData = null) {
+function exportResultsToSheet(headers, dataRows, title, config, highlightColumnName = null) {
   const folderId = config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR];
   if (!folderId) {
     kirimPesanTelegram(`⚠️ Gagal membuat file ekspor: Konfigurasi folder ekspor tidak ditemukan.`, config);
-    return null;
-  }
-  
-  if (!isSystemReport && (!userData || !userData.email)) {
-    kirimPesanTelegram(`⚠️ Gagal membagikan file secara pribadi karena email Anda tidak terdaftar.`, config);
     return null;
   }
 
@@ -184,6 +188,7 @@ function exportResultsToSheet(headers, dataRows, title, config, isSystemReport =
     const sheet = newSs.getSheets()[0];
     sheet.setName(title.substring(0, 100));
 
+    // Menambahkan Judul dan memformatnya
     sheet.getRange("A1").setValue(title).setFontWeight("bold").setFontSize(12).setHorizontalAlignment("center");
     sheet.getRange(1, 1, 1, headers.length).merge();
     sheet.getRange(2, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
@@ -192,12 +197,16 @@ function exportResultsToSheet(headers, dataRows, title, config, isSystemReport =
     }
     
     const dataRange = sheet.getRange(2, 1, sheet.getLastRow() > 2 ? sheet.getLastRow() - 1 : 1, headers.length);
+    
+    // Menyorot kolom penting
     if (highlightColumnName) {
       const highlightColIndex = headers.indexOf(highlightColumnName) + 1;
       if (highlightColIndex > 0) {
         sheet.getRange(2, highlightColIndex, dataRange.getNumRows()).setBackground("#FFF2CC");
       }
     }
+
+    // Mengaktifkan filter otomatis
     dataRange.createFilter();
     headers.forEach((_, i) => sheet.autoResizeColumn(i + 1));
     
@@ -205,14 +214,13 @@ function exportResultsToSheet(headers, dataRows, title, config, isSystemReport =
     const folder = DriveApp.getFolderById(folderId);
     file.moveTo(folder);
     
-    if (isSystemReport) {
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    } else {
-      file.addViewer(userData.email);
-    }
+    // [PERBAIKAN] Selalu bagikan dengan link, tidak ada lagi logika private sharing
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     
     const fileUrl = file.getUrl();
     console.log(`Hasil ekspor berhasil dibuat: ${fileUrl}`);
+    
+    // Hanya kembalikan URL, tidak mengirim pesan dari sini
     return fileUrl;
 
   } catch (e) {
