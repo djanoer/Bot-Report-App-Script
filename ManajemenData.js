@@ -115,7 +115,6 @@ function findVmAndGetInfo(searchTerm, config, userData) {
     let info = `✅ Data ditemukan untuk "<b>${escapeHtml(searchTerm)}</b>"\n`;
     info += `------------------------------------\n`;
     
-    // [PENYEMPURNAAN] Semua label sekarang berasal dari KONSTANTA
     const orderedLabels = [
         KONSTANTA.HEADER_VM.VM_NAME, KONSTANTA.HEADER_VM.PK, KONSTANTA.HEADER_VM.IP, 
         KONSTANTA.HEADER_VM.STATE, KONSTANTA.HEADER_VM.UPTIME, KONSTANTA.HEADER_VM.VCENTER, 
@@ -131,7 +130,11 @@ function findVmAndGetInfo(searchTerm, config, userData) {
         if (label === KONSTANTA.HEADER_VM.CPU && value && !isNaN(value)) value = `${value} vCPU`;
         if (label === KONSTANTA.HEADER_VM.MEMORY && value && !isNaN(value)) value = `${value} GB`;
 
-        info += `<b>${label}:</b> ${label === KONSTANTA.HEADER_VM.PK ? '<code>' + escapeHtml(value) + '</code>' : escapeHtml(value)}\n`;
+        if (label === KONSTANTA.HEADER_VM.PK || label === KONSTANTA.HEADER_VM.IP) {
+          info += `<b>${label}:</b> <code>${escapeHtml(value)}</code>\n`;
+        } else {
+          info += `<b>${label}:</b> ${escapeHtml(value)}\n`;
+        }
       }
     });
     const inlineKeyboard = { inline_keyboard: [[{ text: "📜 Lihat Histori Perubahan", callback_data: `history_${pk}` }]] };
@@ -140,33 +143,40 @@ function findVmAndGetInfo(searchTerm, config, userData) {
   } else if (results.length > 1) {
     let info = `✅ Ditemukan <b>${results.length}</b> hasil untuk "<b>${escapeHtml(searchTerm)}</b>".\n`;
     info += `------------------------------------\n`;
-    results.slice(0, 15).forEach((row, i) => { info += `${i + 1}. <b>${escapeHtml(row[nameIndex])}</b> (<code>${escapeHtml(row[pkIndex])}</code>)\n`; });
+    // [PERBAIKAN] Menambahkan IP Address ke dalam daftar hasil ganda
+    results.slice(0, 15).forEach((row, i) => { 
+      const vmName = escapeHtml(row[nameIndex]);
+      const vmIp = escapeHtml(row[ipIndex]);
+      const vmPk = escapeHtml(row[pkIndex]);
+      info += `${i + 1}. <b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)\n`;
+    });
     
-    let inlineKeyboard = null;
     if (results.length > 15) {
-      info += `\n<i>...dan ${results.length - 15} hasil lainnya. Klik tombol di bawah untuk melihat semua.</i>`;
-      const fileUrl = exportResultsToSheet(headers, results, searchTerm, config, userData);
-      if (fileUrl) {
-        inlineKeyboard = { inline_keyboard: [[{ text: `📄 Lihat Semua ${results.length} Hasil di Sheet`, url: fileUrl }]] };
-      }
+      info += `\n<i>...dan ${results.length - 15} hasil lainnya. File ekspor akan dikirimkan ke grup.</i>`;
     }
-    kirimPesanTelegram(info, config, 'HTML', inlineKeyboard);
+    kirimPesanTelegram(info, config, 'HTML');
+
+    if (results.length > 15) {
+      exportResultsToSheet(headers, results, `Pencarian '${searchTerm}'`, config, userData);
+    }
     
   } else {
     kirimPesanTelegram(`❌ VM dengan nama/IP/Primary Key yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config);
   }
 }
 
-/**
- * [DIPERBAIKI] Fungsi ini sekarang hanya mengembalikan URL, tidak lagi mengirim pesan.
- * Pemanggilnya yang bertanggung jawab mengirim notifikasi.
- */
-function exportResultsToSheet(headers, dataRows, title, config, isSystemReport = false, highlightColumnName = null) {
+function exportResultsToSheet(headers, dataRows, title, config, isSystemReport = false, highlightColumnName = null, userData = null) {
   const folderId = config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR];
   if (!folderId) {
     kirimPesanTelegram(`⚠️ Gagal membuat file ekspor: Konfigurasi folder ekspor tidak ditemukan.`, config);
     return null;
   }
+  
+  if (!isSystemReport && (!userData || !userData.email)) {
+    kirimPesanTelegram(`⚠️ Gagal membagikan file secara pribadi karena email Anda tidak terdaftar.`, config);
+    return null;
+  }
+
   try {
     const timestamp = Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd HH.mm.ss");
     const fileName = `Laporan - ${title.replace(/<|>/g, '')} - ${timestamp}`;
@@ -174,13 +184,13 @@ function exportResultsToSheet(headers, dataRows, title, config, isSystemReport =
     const sheet = newSs.getSheets()[0];
     sheet.setName(title.substring(0, 100));
 
-    // Menambahkan Judul dan memformatnya
     sheet.getRange("A1").setValue(title).setFontWeight("bold").setFontSize(12).setHorizontalAlignment("center");
     sheet.getRange(1, 1, 1, headers.length).merge();
     sheet.getRange(2, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
     if (dataRows.length > 0) {
       sheet.getRange(3, 1, dataRows.length, headers.length).setValues(dataRows);
     }
+    
     const dataRange = sheet.getRange(2, 1, sheet.getLastRow() > 2 ? sheet.getLastRow() - 1 : 1, headers.length);
     if (highlightColumnName) {
       const highlightColIndex = headers.indexOf(highlightColumnName) + 1;
@@ -194,10 +204,16 @@ function exportResultsToSheet(headers, dataRows, title, config, isSystemReport =
     const file = DriveApp.getFileById(newSs.getId());
     const folder = DriveApp.getFolderById(folderId);
     file.moveTo(folder);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     
-    console.log(`Hasil ekspor berhasil dibuat: ${file.getUrl()}`);
-    return file.getUrl(); // HANYA KEMBALIKAN URL
+    if (isSystemReport) {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } else {
+      file.addViewer(userData.email);
+    }
+    
+    const fileUrl = file.getUrl();
+    console.log(`Hasil ekspor berhasil dibuat: ${fileUrl}`);
+    return fileUrl;
 
   } catch (e) {
     console.error(`Gagal mengekspor hasil ke sheet: ${e.message}`);
@@ -383,10 +399,15 @@ function sortVmForMigration(a, b) {
   if (isAOff && !isBOff) return -1;
   if (!isAOff && isBOff) return 1;
 
-  // Prioritas 2: Kritikalitas terendah didahulukan (menggunakan KONSTANTA)
-  const critA = KONSTANTA.TINGKAT_KRITIKALITAS[String(a.criticality || '').toUpperCase()] || KONSTANTA.TINGKAT_KRITIKALITAS.DEFAULT;
-  const critB = KONSTANTA.TINGKAT_KRITIKALITAS[String(b.criticality || '').toUpperCase()] || KONSTANTA.TINGKAT_KRITIKALITAS.DEFAULT;
-  if (critA !== critB) return critA - critB;
+  // [PERBAIKAN] Prioritas 2: Kritikalitas berdasarkan daftar pantauan
+  const config = bacaKonfigurasi(); // Perlu baca config untuk dapat daftar pantauan
+  const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
+  
+  const isACritical = monitoredCrit.includes(String(a.criticality || '').toUpperCase());
+  const isBCritical = monitoredCrit.includes(String(b.criticality || '').toUpperCase());
+
+  if (isACritical && !isBCritical) return 1;  // VM non-kritis (other) didahulukan
+  if (!isACritical && isBCritical) return -1; // VM non-kritis (other) didahulukan
 
   // Prioritas 3: Ukuran provisioned terkecil didahulukan
   return a.provisionedGb - b.provisionedGb;
@@ -619,33 +640,16 @@ function jalankanRekomendasiMigrasi() {
  * Fungsi spesialis untuk menangani semua permintaan ekspor kategori Uptime.
  */
 function processUptimeExport(exportType, config) {
-  try {
     let categoryName, minDays, maxDays, isInvalidCheck = false, sortAscending = true;
-
     switch (exportType) {
-      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_1:
-        minDays = 0; maxDays = 365; categoryName = "Uptime < 1 Tahun";
-        break;
-      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_2:
-        minDays = 366; maxDays = 730; categoryName = "Uptime 1-2 Tahun";
-        break;
-      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_3:
-        minDays = 731; maxDays = 1095; categoryName = "Uptime 2-3 Tahun";
-        break;
-      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_4:
-        minDays = 1096; maxDays = Infinity; categoryName = "Uptime > 3 Tahun";
-        sortAscending = false;
-        break;
-      case KONSTANTA.CALLBACK.EXPORT_UPTIME_INVALID:
-        isInvalidCheck = true; categoryName = "Data Uptime Tidak Valid";
-        break;
-      default:
-        // Jika callback tidak dikenali, abaikan saja.
-        return;
+        case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_1: minDays = 0; maxDays = 365; categoryName = "Uptime < 1 Tahun"; break;
+        case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_2: minDays = 366; maxDays = 730; categoryName = "Uptime 1-2 Tahun"; break;
+        case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_3: minDays = 731; maxDays = 1095; categoryName = "Uptime 2-3 Tahun"; break;
+        case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_4: minDays = 1096; maxDays = Infinity; categoryName = "Uptime > 3 Tahun"; sortAscending = false; break;
+        case KONSTANTA.CALLBACK.EXPORT_UPTIME_INVALID: isInvalidCheck = true; categoryName = "Data Uptime Tidak Valid"; break;
+        default: return null;
     }
     
-    kirimPesanTelegram(`⚙️ Sedang memproses ekspor untuk kategori "${categoryName}"...`, config);
-
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
     if (!sheet) throw new Error("Sheet Data Utama tidak ditemukan.");
     
@@ -654,61 +658,42 @@ function processUptimeExport(exportType, config) {
     if (uptimeIndex === -1) throw new Error(`Kolom '${KONSTANTA.HEADER_VM.UPTIME}' tidak ditemukan.`);
 
     const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-
     let filteredData = allData.filter(row => {
-      const uptimeValue = row[uptimeIndex];
-      const uptimeDays = parseInt(uptimeValue, 10);
-      if (isInvalidCheck) {
-        return uptimeValue === '' || uptimeValue === '-' || isNaN(uptimeDays);
-      } else {
-        return !isNaN(uptimeDays) && uptimeDays >= minDays && uptimeDays <= maxDays;
-      }
+        const uptimeValue = row[uptimeIndex];
+        const uptimeDays = parseInt(uptimeValue, 10);
+        if (isInvalidCheck) return uptimeValue === '' || uptimeValue === '-' || isNaN(uptimeDays);
+        else return !isNaN(uptimeDays) && uptimeDays >= minDays && uptimeDays <= maxDays;
     });
 
-    if (filteredData.length > 0) {
-      if (!isInvalidCheck) {
+    if (filteredData.length > 0 && !isInvalidCheck) {
         filteredData.sort((a, b) => {
-          const uptimeA = parseInt(a[uptimeIndex], 10) || 0;
-          const uptimeB = parseInt(b[uptimeIndex], 10) || 0;
-          return sortAscending ? uptimeA - uptimeB : uptimeB - uptimeA;
+            const uptimeA = parseInt(a[uptimeIndex], 10) || 0;
+            const uptimeB = parseInt(b[uptimeIndex], 10) || 0;
+            return sortAscending ? uptimeA - uptimeB : uptimeB - uptimeA;
         });
-      }
-
-      const reportDate = new Date().toLocaleDateString('id-ID');
-      const dynamicTitle = `Laporan VM - ${categoryName} per ${reportDate}`;
-      
-      const fileUrl = exportResultsToSheet(headers, filteredData, dynamicTitle, config, false, KONSTANTA.HEADER_VM.UPTIME);
-      
-      if (fileUrl) {
-        kirimPesanTelegram(`✅ File ekspor Anda untuk "<b>${categoryName}</b>" sudah siap:\n\n${fileUrl}`, config, 'HTML');
-      }
-    } else {
-      kirimPesanTelegram(`ℹ️ Tidak ada data VM untuk diekspor pada kategori "${categoryName}".`, config);
     }
-  } catch (e) {
-      console.error(`Gagal memproses ekspor uptime: ${e.message}\nStack: ${e.stack}`);
-      kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses ekspor uptime.`, config);
-  }
+
+    const reportDate = new Date().toLocaleDateString('id-ID');
+    const dynamicTitle = `Laporan VM - ${categoryName} per ${reportDate}`;
+    
+    return { headers: headers, data: filteredData, title: dynamicTitle };
 }
 
 /**
  * [FUNGSI BARU] Pusat kendali yang menangani semua jenis permintaan ekspor dari menu.
  */
-function handleExportRequest(exportType, config) {
+function handleExportRequest(exportType, config, userData) {
   try {
     kirimPesanTelegram(`⚙️ Permintaan ekspor diterima. Sedang memproses...`, config);
 
+    let headers, data, title, highlightColumn = null;
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const vmSheet = ss.getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
     const logSheet = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
+    let isSystemReport = false;
 
-    let headers, data, title, highlightColumn = null;
-
-    switch (exportType) {
-      // --- KASUS LOG PERUBAHAN ---
-      case KONSTANTA.CALLBACK.EXPORT_LOG_TODAY:
-      case KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS:
-      case KONSTANTA.CALLBACK.EXPORT_LOG_30_DAYS:
+    // --- LOGIKA PERUTEAN (ROUTING) YANG BARU DAN JELAS ---
+    if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_TODAY || exportType === KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS || exportType === KONSTANTA.CALLBACK.EXPORT_LOG_30_DAYS) {
         if (!logSheet) throw new Error("Sheet Log Perubahan tidak ditemukan.");
         headers = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
         const allLogData = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, logSheet.getLastColumn()).getValues();
@@ -716,59 +701,193 @@ function handleExportRequest(exportType, config) {
         let startDate = new Date();
         
         if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_TODAY) {
-          startDate.setHours(0, 0, 0, 0);
-          title = "Log Perubahan Hari Ini";
+            startDate.setHours(0, 0, 0, 0);
+            title = "Log Perubahan Hari Ini";
         } else if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS) {
-          startDate.setDate(now.getDate() - 7);
-          title = "Log Perubahan 7 Hari Terakhir";
+            startDate.setDate(now.getDate() - 7);
+            title = "Log Perubahan 7 Hari Terakhir";
         } else { // 30 hari
-          startDate.setDate(now.getDate() - 30);
-          title = "Log Perubahan 30 Hari Terakhir";
+            startDate.setDate(now.getDate() - 30);
+            title = "Log Perubahan 30 Hari Terakhir";
         }
         data = allLogData.filter(row => row.length > 0 && new Date(row[0]) >= startDate);
         highlightColumn = KONSTANTA.HEADER_LOG.ACTION;
-        break;
 
-      // --- KASUS DATA MASTER VM ---
-      case KONSTANTA.CALLBACK.EXPORT_ALL_VMS:
-      case KONSTANTA.CALLBACK.EXPORT_VC01_VMS:
-      case KONSTANTA.CALLBACK.EXPORT_VC02_VMS:
+    } else if (exportType === KONSTANTA.CALLBACK.EXPORT_ALL_VMS || exportType === KONSTANTA.CALLBACK.EXPORT_VC01_VMS || exportType === KONSTANTA.CALLBACK.EXPORT_VC02_VMS) {
         if (!vmSheet) throw new Error("Sheet Data Utama tidak ditemukan.");
         headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
         const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
         
         if (exportType === KONSTANTA.CALLBACK.EXPORT_ALL_VMS) {
-          data = allVmData;
-          title = "Semua Data VM";
+            data = allVmData;
+            title = "Semua Data VM";
         } else {
-          const vcenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
-          if (vcenterIndex === -1) throw new Error("Kolom vCenter tidak ditemukan.");
-          // Ini contoh sederhana, bisa dikembangkan jika ada lebih dari 2 vCenter
-          const vcenter = (exportType === KONSTANTA.CALLBACK.EXPORT_VC01_VMS) ? 'VC01' : 'VC02';
-          data = allVmData.filter(row => row[vcenterIndex] === vcenter);
-          title = `Data VM di ${vcenter}`;
+            const vcenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
+            if (vcenterIndex === -1) throw new Error("Kolom vCenter tidak ditemukan.");
+            const vcenter = exportType.split('_').pop().toUpperCase();
+            data = allVmData.filter(row => String(row[vcenterIndex]).toUpperCase() === vcenter);
+            title = `Data VM di ${vcenter}`;
         }
         highlightColumn = KONSTANTA.HEADER_VM.VCENTER;
-        break;
 
-      // --- KASUS UPTIME DI DELEGASIKAN ---
-      default:
-        // Panggil fungsi spesialis uptime
-        processUptimeExport(exportType, config); 
-        return; // Hentikan eksekusi di sini karena processUptimeExport akan menangani sisanya
+    } else if (exportType.startsWith('export_uptime_')) {
+        const result = processUptimeExport(exportType, config); // Dapatkan data dari fungsi spesialis
+        if(result) {
+            headers = result.headers;
+            data = result.data;
+            title = result.title;
+            highlightColumn = KONSTANTA.HEADER_VM.UPTIME;
+        }
     }
-    
-    // Bagian ini hanya berjalan untuk ekspor Log dan Master VM
+
+    // --- EKSEKUSI EKSPOR ---
     if (data && data.length > 0) {
-      const fileUrl = exportResultsToSheet(headers, data, title, config, false, highlightColumn);
+      const fileUrl = exportResultsToSheet(headers, data, title, config, userData, isSystemReport, highlightColumn);
+      if (fileUrl) {
+          kirimPesanTelegram(`✅ File ekspor Anda untuk "<b>${title}</b>" sudah siap (dibagikan khusus ke email Anda):\n\n${fileUrl}`, config, 'HTML');
+      }
+    } else if (data) { // Jika 'data' ada tapi kosong
+      kirimPesanTelegram(`ℹ️ Tidak ada data untuk diekspor pada kategori "${title}".`, config);
+    }
+    // Jika tidak masuk ke kondisi manapun, berarti sudah ditangani oleh processUptimeExport
+  } catch (e) {
+      console.error(`Gagal menangani permintaan ekspor: ${e.message}\nStack: ${e.stack}`);
+      kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses permintaan ekspor Anda.`, config);
+  }
+}
+
+/**
+ * [HELPER EKSPOR BARU] Khusus menangani ekspor Log Perubahan.
+ */
+function handleLogExport(exportType, config, userData) {
+  try {
+    kirimPesanTelegram(`⚙️ Permintaan ekspor log diterima. Sedang memproses...`, config);
+
+    let headers, data, title;
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
+    if (!logSheet) throw new Error("Sheet Log Perubahan tidak ditemukan.");
+    
+    headers = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
+    const allLogData = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, logSheet.getLastColumn()).getValues();
+    const now = new Date();
+    let startDate = new Date();
+    
+    if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_TODAY) {
+      startDate.setHours(0, 0, 0, 0);
+      title = "Log Perubahan Hari Ini";
+    } else if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS) {
+      startDate.setDate(now.getDate() - 7);
+      title = "Log Perubahan 7 Hari Terakhir";
+    } else {
+      startDate.setDate(now.getDate() - 30);
+      title = "Log Perubahan 30 Hari Terakhir";
+    }
+    data = allLogData.filter(row => row.length > 0 && new Date(row[0]) >= startDate);
+
+    if (data && data.length > 0) {
+      const fileUrl = exportResultsToSheet(headers, data, title, config, userData, true, KONSTANTA.HEADER_LOG.ACTION);
       if (fileUrl) {
           kirimPesanTelegram(`✅ File ekspor Anda untuk "<b>${title}</b>" sudah siap:\n\n${fileUrl}`, config, 'HTML');
       }
     } else {
-      kirimPesanTelegram(`ℹ️ Tidak ada data untuk diekspor pada kategori yang Anda pilih.`, config);
+      kirimPesanTelegram(`ℹ️ Tidak ada data log untuk diekspor pada periode yang Anda pilih.`, config);
+    }
+  } catch(e) {
+      console.error(`Gagal menangani ekspor log: ${e.message}`);
+      kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses ekspor log.`, config);
+  }
+}
+
+/**
+ * [HELPER EKSPOR BARU] Khusus menangani ekspor Data Master VM.
+ */
+function handleVmsExport(exportType, config, userData) {
+  try {
+    let headers, data, title;
+    const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+    if (!vmSheet) throw new Error("Sheet Data Utama tidak ditemukan.");
+
+    kirimPesanTelegram(`⚙️ Permintaan ekspor data VM diterima. Sedang memproses...`, config);
+
+    headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
+    const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
+    
+    if (exportType === KONSTANTA.CALLBACK.EXPORT_ALL_VMS) {
+      data = allVmData;
+      title = "Semua Data VM";
+    } else {
+      const vcenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
+      if (vcenterIndex === -1) throw new Error("Kolom vCenter tidak ditemukan.");
+      const vcenter = exportType.split('_').pop().toUpperCase();
+      data = allVmData.filter(row => String(row[vcenterIndex]).toUpperCase() === vcenter);
+      title = `Data VM di ${vcenter}`;
+    }
+    
+    if (data && data.length > 0) {
+      const fileUrl = exportResultsToSheet(headers, data, title, config, userData, false, KONSTANTA.HEADER_VM.VCENTER);
+      if (fileUrl) {
+          kirimPesanTelegram(`✅ File ekspor Anda untuk "<b>${title}</b>" sudah siap (dibagikan khusus ke email Anda):\n\n${fileUrl}`, config, 'HTML');
+      }
+    } else {
+      kirimPesanTelegram(`ℹ️ Tidak ada data VM untuk diekspor pada kategori yang Anda pilih.`, config);
     }
   } catch (e) {
-      console.error(`Gagal menangani permintaan ekspor: ${e.message}\nStack: ${e.stack}`);
-      kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses permintaan ekspor Anda.`, config);
+    console.error(`Gagal menangani ekspor VM: ${e.message}`);
+    kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses ekspor data VM.`, config);
+  }
+}
+
+/**
+ * [HELPER EKSPOR BARU] Khusus menangani ekspor Uptime.
+ */
+function handleUptimeExport(exportType, config, userData) {
+  try {
+    let categoryName, minDays, maxDays, isInvalidCheck = false, sortAscending = true;
+    switch (exportType) {
+      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_1: minDays = 0; maxDays = 365; categoryName = "Uptime < 1 Tahun"; break;
+      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_2: minDays = 366; maxDays = 730; categoryName = "Uptime 1-2 Tahun"; break;
+      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_3: minDays = 731; maxDays = 1095; categoryName = "Uptime 2-3 Tahun"; break;
+      case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_4: minDays = 1096; maxDays = Infinity; categoryName = "Uptime > 3 Tahun"; sortAscending = false; break;
+      case KONSTANTA.CALLBACK.EXPORT_UPTIME_INVALID: isInvalidCheck = true; categoryName = "Data Uptime Tidak Valid"; break;
+      default: return;
+    }
+    
+    kirimPesanTelegram(`⚙️ Sedang memproses ekspor untuk kategori "${categoryName}"...`, config);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+    if (!sheet) throw new Error("Sheet Data Utama tidak ditemukan.");
+    
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
+    if (uptimeIndex === -1) throw new Error(`Kolom '${KONSTANTA.HEADER_VM.UPTIME}' tidak ditemukan.`);
+
+    const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+    let filteredData = allData.filter(row => {
+      const uptimeDays = parseInt(row[uptimeIndex], 10);
+      if (isInvalidCheck) return String(row[uptimeIndex]) === '' || String(row[uptimeIndex]) === '-' || isNaN(uptimeDays);
+      else return !isNaN(uptimeDays) && uptimeDays >= minDays && uptimeDays <= maxDays;
+    });
+
+    if (filteredData.length > 0) {
+      if (!isInvalidCheck) {
+        filteredData.sort((a, b) => {
+            const uptimeA = parseInt(a[uptimeIndex], 10) || 0;
+            const uptimeB = parseInt(b[uptimeIndex], 10) || 0;
+            return sortAscending ? uptimeA - uptimeB : b[uptimeIndex] - a[uptimeIndex];
+        });
+      }
+      const reportDate = new Date().toLocaleDateString('id-ID');
+      const dynamicTitle = `Laporan VM - ${categoryName} per ${reportDate}`;
+      
+      const fileUrl = exportResultsToSheet(headers, filteredData, dynamicTitle, config, userData, false, KONSTANTA.HEADER_VM.UPTIME);
+      
+      if (fileUrl) {
+        kirimPesanTelegram(`✅ File ekspor Anda untuk "<b>${categoryName}</b>" sudah siap (dibagikan khusus ke email Anda):\n\n${fileUrl}`, config, 'HTML');
+      }
+    } else {
+      kirimPesanTelegram(`ℹ️ Tidak ada data VM untuk diekspor pada kategori "${categoryName}".`, config);
+    }
+  } catch (e) {
+    console.error(`Gagal memproses ekspor uptime: ${e.message}\nStack: ${e.stack}`);
+    kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses ekspor uptime.`, config);
   }
 }
