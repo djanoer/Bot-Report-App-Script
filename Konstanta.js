@@ -64,6 +64,7 @@ const KONSTANTA = {
   },
   // Nama-nama kunci di sheet Konfigurasi
   KUNCI_KONFIG: {
+    ID_SUMBER: 'SUMBER_SPREADSHEET_ID',
     SHEET_VM: 'NAMA_SHEET_DATA_UTAMA',
     SHEET_DS: 'NAMA_SHEET_DATASTORE',
     FOLDER_ARSIP: 'FOLDER_ID_ARSIP',

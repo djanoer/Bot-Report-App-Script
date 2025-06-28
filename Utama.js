@@ -5,25 +5,35 @@ function doPost(e) {
   try {
     const config = bacaKonfigurasi();
     const update = JSON.parse(e.postData.contents);
-    let userId, fromChatId, text, isCallback = false, firstName;
+    let userId, fromChatId, text, isCallback = false, userData;
 
     if (update.callback_query) {
       isCallback = true;
       userId = update.callback_query.from.id;
       fromChatId = update.callback_query.message.chat.id;
       text = update.callback_query.data;
+      // Ambil userData untuk callback
+      userData = getUserData(userId);
+      // Sertakan nama depan untuk pesan yang lebih personal
+      userData.firstName = update.callback_query.from.first_name;
+      userData.userId = userId;
+      
     } else if (update.message && update.message.text) {
       userId = update.message.from.id;
       fromChatId = update.message.chat.id;
       text = update.message.text;
+      // Ambil userData untuk pesan biasa
+      userData = getUserData(userId);
+      // Sertakan nama depan untuk pesan yang lebih personal
+      userData.firstName = update.message.from.first_name;
+      userData.userId = userId;
+
     } else { return HtmlService.createHtmlOutput("OK"); }
     
     if (String(fromChatId) !== String(config.TELEGRAM_CHAT_ID)) return HtmlService.createHtmlOutput("OK");
     
-    const userData = getUserData(userId);
-    if (!userData) {
-      const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(update.message.from.first_name || userId)}</a>`;
-      // [PERBAIKAN] Pesan akses ditolak diperbarui
+    if (!userData.email) { // Periksa berdasarkan email yang ada di Hak Akses
+      const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(userData.firstName || userId)}</a>`;
       const pesanDitolak = `❌ ${userMention}, akses Anda ditolak.\nAnda tidak terdaftar untuk menggunakan bot ini. Silakan hubungi administrator.`;
       kirimPesanTelegram(pesanDitolak, config, 'HTML'); 
       return HtmlService.createHtmlOutput("Unauthorized"); 
@@ -32,16 +42,14 @@ function doPost(e) {
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
       
+      // [PERBAIKAN] Logika routing callback disesuaikan dengan KONSTANTA baru Anda
       if (text.startsWith("history_") || text.startsWith("cekvm_")) {
         const pk = text.split("_")[1];
         if (text.startsWith("history_")) getVmHistory(pk, config, userData);
         else findVmAndGetInfo(pk, config, userData);
-      } else if (text.startsWith("export_log_")) {
-        handleLogExport(text, config, userData);
-      } else if (text.startsWith("export_vms_")) {
-        handleVmsExport(text, config, userData);
-      } else if (text.startsWith("export_uptime_")) {
-        handleUptimeExport(text, config, userData);
+      } else if (text.startsWith("run_export_log_") || text.startsWith("export_")) {
+        // Semua jenis ekspor sekarang ditangani oleh satu fungsi pusat
+        handleExportRequest(text, config, userData);
       }
       
       answerCallbackQuery(callbackQueryId, config);
@@ -52,9 +60,11 @@ function doPost(e) {
       
       switch (command) {
         case '/laporan':
+          // [PERBAIKAN] Memastikan fungsi ini dipanggil dengan benar
           buatLaporanHarianVM();
           break;
         case '/sync_laporan':
+          // [PERBAIKAN] Memastikan fungsi ini dipanggil dengan benar
           syncDanBuatLaporanHarian(false);
           break;
         case '/provisioning':
@@ -75,20 +85,19 @@ function doPost(e) {
           getTodaysHistory(config, userData);
           break;
         case '/info':
-          // [PERBAIKAN] Pesan /info diperbarui dengan format dan konten baru
           const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
                             "------------------------------------\n\n" +
                             "<code>/laporan</code>\n" +
-                            "(Cepat) Membuat laporan instan berdasarkan data terakhir yang tersimpan di bot. Perintah ini TIDAK menyalin data baru dari sumber.\n\n" +
+                            "(Cepat) Membuat laporan instan berdasarkan data terakhir yang tersimpan di bot.\n\n" +
                             "<code>/sync_laporan</code>\n" +
-                            "(Lengkap) Menyalin data terbaru dari semua sheet sumber (VM & Datastore), lalu membuat laporan lengkap. Gunakan ini untuk mendapatkan data paling up-to-date.\n\n" +
+                            "(Lengkap) Menyalin data terbaru dari semua sumber, lalu membuat laporan lengkap.\n\n" +
                             "<code>/provisioning</code>\n" +
                             "Menampilkan laporan analisis alokasi resource (CPU, Mem, Disk).\n\n" +
                             "<code>/export</code>\n" +
-                            "Menampilkan menu untuk mengunduh berbagai jenis laporan dalam format file.\n\n" +
-                            "<code>/cekvm [IP Address / Virtual Machine / Primary Key]</code>\n" +
+                            "Menampilkan menu untuk mengunduh berbagai jenis laporan.\n\n" +
+                            "<code>/cekvm [IP/Nama/PK]</code>\n" +
                             "Mencari detail sebuah VM.\n\n" +
-                            "<code>/history [Primary Key]</code>\n" +
+                            "<code>/history [PK]</code>\n" +
                             "Menampilkan riwayat perubahan VM tertentu.\n\n" +
                             "<code>/cekhistory</code>\n" +
                             "Menampilkan semua log perubahan yang terjadi hari ini.\n\n" +
