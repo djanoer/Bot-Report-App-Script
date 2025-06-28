@@ -1160,15 +1160,25 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
       logEntriesToAdd.push(logEntry);
     } else if (dataBaru.hash !== dataLama.hash) {
       // MODIFIKASI
-      for (const key in dataBaru.data) {
-        if (String(dataBaru.data[key]) !== String(dataLama.data[key])) {
-          const detail = `Kolom '${key}' diubah`;
-          const logEntry = [timestamp, 'MODIFIKASI', id, entityDisplayName, sheetName, dataLama.data[key] || '', dataBaru.data[key] || '', detail];
-          logEntriesToAdd.push(logEntry);
+        // ===== [PERBAIKAN ERROR] =====
+        // Menambahkan pengecekan untuk memastikan dataLama.data ada sebelum membandingkan propertinya.
+        // Ini mencegah error "Cannot read properties of undefined" jika struktur arsip tidak lengkap.
+        if (dataLama && dataLama.data) {
+          for (const key in dataBaru.data) {
+            // Bandingkan nilai lama dan baru. Gunakan '' sebagai default jika nilai tidak ada.
+            const oldValue = dataLama.data[key] || '';
+            const newValue = dataBaru.data[key] || '';
+  
+            if (String(newValue) !== String(oldValue)) {
+              const detail = `Kolom '${key}' diubah`;
+              const logEntry = [timestamp, 'MODIFIKASI', id, entityDisplayName, sheetName, oldValue, newValue, detail];
+              logEntriesToAdd.push(logEntry);
+            }
+          }
         }
+        // ===== [AKHIR PERBAIKAN] =====
       }
-    }
-    mapDataKemarin.delete(id); // Hapus dari map lama agar sisanya adalah data yang dihapus
+      mapDataKemarin.delete(id); // Hapus dari map lama agar sisanya adalah data yang dihapus
   }
 
   for (const [id, dataLama] of mapDataKemarin.entries()) {

@@ -76,6 +76,13 @@ function doPost(e) {
         case '/provisioning':
           generateProvisioningReport(config);
           break;
+        // ===== [FITUR BARU] =====
+        case '/migrasicheck':
+          // Mengirim pesan konfirmasi sebelum menjalankan analisis yang mungkin lama
+          kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore... Proses ini mungkin memerlukan waktu beberapa saat.", config, 'HTML');
+          jalankanRekomendasiMigrasi(); // Memanggil fungsi dari ManajemenData.js
+          break;
+        // ===== [AKHIR FITUR BARU] =====
         case '/export':
           kirimMenuEkspor(config);
           break;
@@ -92,10 +99,10 @@ function doPost(e) {
           break;
         case '/arsipkanlog':
           kirimPesanTelegram("⚙️ Menerima perintah arsip. Memeriksa jumlah log...", config);
-          // [PERBAIKAN] Panggil fungsi pengecekan, bukan pengarsipan langsung.
           cekDanArsipkanLogJikaPenuh(config);
           break;
         case '/info':
+          // ===== [PEMBARUAN PESAN INFO] =====
           const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
                             "------------------------------------\n\n" +
                             "<code>/laporan</code>\n" +
@@ -104,6 +111,8 @@ function doPost(e) {
                             "(Lengkap) Menyalin data terbaru dari semua sumber, lalu membuat laporan lengkap.\n\n" +
                             "<code>/provisioning</code>\n" +
                             "Menampilkan laporan analisis alokasi resource (CPU, Mem, Disk).\n\n" +
+                            "<code>/migrasicheck</code>\n" +
+                            "Menjalankan analisis untuk mencari datastore yang over-provisioned dan memberikan rekomendasi migrasi VM.\n\n" +
                             "<code>/export</code>\n" +
                             "Menampilkan menu untuk mengunduh berbagai jenis laporan.\n\n" +
                             "<code>/cekvm [IP/Nama/PK]</code>\n" +
@@ -116,9 +125,9 @@ function doPost(e) {
                             "Memeriksa & menjalankan pengarsipan jika log melebihi batas.\n\n" +
                             "<code>/info</code>\n" +
                             "Menampilkan daftar perintah ini.";
+          // ===== [AKHIR PEMBARUAN PESAN INFO] =====
           kirimPesanTelegram(infoPesan, config, 'HTML');
           break;
-        // === PERBAIKAN UTAMA ADA DI BLOK 'DEFAULT' DI BAWAH INI ===
         default:
           const pesanError = `❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan /info untuk melihat daftar perintah yang tersedia.`;
           kirimPesanTelegram(pesanError, config, 'HTML');
