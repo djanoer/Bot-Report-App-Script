@@ -45,6 +45,7 @@ const KONSTANTA = {
     PK: 'Primary Key',
     VM_NAME: 'Virtual Machine',
     IP: 'IP Address',
+    GUEST_OS: 'Guest OS (Manual)',
     STATE: 'State',
     VCENTER: 'vCenter',
     CLUSTER: 'Cluster',

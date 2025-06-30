@@ -104,6 +104,7 @@ function salinDataSheet(namaSheet, sumberId) {
  * Mencari informasi VM berdasarkan kata kunci dan mengirimkan hasilnya.
  * [DIREFACTOR] Mencari informasi VM, kini sepenuhnya menggunakan konstanta.
  * [PERBAIKAN] Memperbaiki logika pengiriman pesan ganda dan error ekspor.
+ * [DIPERBARUI] Menambahkan informasi Guest OS ke dalam detail VM.
 */
 function findVmAndGetInfo(searchTerm, config, userData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -118,6 +119,7 @@ function findVmAndGetInfo(searchTerm, config, userData) {
   const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
   const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
 
+  // Periksa kolom esensial
   if (pkIndex === -1 || nameIndex === -1 || ipIndex === -1) {
     let missingCols = [];
     if(pkIndex === -1) missingCols.push(`'${KONSTANTA.HEADER_VM.PK}'`);
@@ -151,21 +153,27 @@ function findVmAndGetInfo(searchTerm, config, userData) {
     let info = `✅ Data ditemukan untuk "<b>${escapeHtml(searchTerm)}</b>"\n`;
     info += `------------------------------------\n`;
     
+    // [PERUBAHAN] Menambahkan GUEST_OS ke dalam urutan tampilan
     const orderedLabels = [
         KONSTANTA.HEADER_VM.VM_NAME, KONSTANTA.HEADER_VM.PK, KONSTANTA.HEADER_VM.IP, 
+        KONSTANTA.HEADER_VM.GUEST_OS,
         KONSTANTA.HEADER_VM.STATE, KONSTANTA.HEADER_VM.UPTIME, KONSTANTA.HEADER_VM.VCENTER, 
         KONSTANTA.HEADER_VM.CLUSTER, KONSTANTA.HEADER_VM.CPU, KONSTANTA.HEADER_VM.MEMORY, 
         KONSTANTA.HEADER_VM.PROV_GB, KONSTANTA.HEADER_VM.PROV_TB,
         KONSTANTA.HEADER_VM.KRITIKALITAS, KONSTANTA.HEADER_VM.KELOMPOK_APP, KONSTANTA.HEADER_VM.DEV_OPS
     ];
+
     orderedLabels.forEach(label => {
+      // Pastikan untuk memeriksa apakah kolom Guest OS ada di header sebelum mencoba menampilkannya
       if (vmData.hasOwnProperty(label)) {
         let value = vmData[label] || 'N/A';
         
+        // Logika format tambahan
         if (label === KONSTANTA.HEADER_VM.UPTIME && value && !isNaN(value)) value = `${value} hari`;
         if (label === KONSTANTA.HEADER_VM.CPU && value && !isNaN(value)) value = `${value} vCPU`;
         if (label === KONSTANTA.HEADER_VM.MEMORY && value && !isNaN(value)) value = `${value} GB`;
 
+        // Logika format pesan
         if (label === KONSTANTA.HEADER_VM.PK || label === KONSTANTA.HEADER_VM.IP) {
           info += `<b>${label}:</b> <code>${escapeHtml(value)}</code>\n`;
         } else {
@@ -180,7 +188,6 @@ function findVmAndGetInfo(searchTerm, config, userData) {
     let info = `✅ Ditemukan <b>${results.length}</b> hasil untuk "<b>${escapeHtml(searchTerm)}</b>".\n`;
     info += `------------------------------------\n`;
     
-    // Tampilkan hingga 15 hasil teratas di pesan
     results.slice(0, 15).forEach((row, i) => { 
       const vmName = escapeHtml(row[nameIndex]);
       const vmIp = escapeHtml(row[ipIndex]);
@@ -188,18 +195,14 @@ function findVmAndGetInfo(searchTerm, config, userData) {
       info += `${i + 1}. <b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)\n`;
     });
     
-    // Kirim pesan ringkasan terlebih dahulu
     kirimPesanTelegram(info, config, 'HTML');
 
-    // Jika lebih dari 15, panggil fungsi ekspor yang sekarang akan otomatis mengirim pesan file
     if (results.length > 15) {
-      // Kirim pesan bahwa proses ekspor sedang berjalan
       kirimPesanTelegram(`<i>Membuat file ekspor untuk ${results.length - 15} hasil lainnya...</i>`, config, 'HTML');
       exportResultsToSheet(headers, results, `Pencarian '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
     }
     
   } else {
-    // [PERBAIKAN] Pesan 'tidak ditemukan' menggunakan format HTML agar konsisten
     kirimPesanTelegram(`❌ VM dengan nama/IP/Primary Key yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
   }
 }
