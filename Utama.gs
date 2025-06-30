@@ -9,7 +9,6 @@ function doPost(e) {
     
     let userId, fromChatId, text, firstName, isCallback = false, username;
 
-    // Ekstrak informasi dasar dari update Telegram
     if (update.callback_query) {
       isCallback = true;
       userId = update.callback_query.from.id;
@@ -27,37 +26,29 @@ function doPost(e) {
       return HtmlService.createHtmlOutput("OK");
     }
     
-    // Blokir interaksi dari chat yang tidak diizinkan
     if (String(fromChatId) !== String(config.TELEGRAM_CHAT_ID)) {
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // ===== OPTIMASI BARU: Abaikan pesan yang tidak diawali dengan "/" =====
-    // Cek ini hanya berlaku untuk pesan teks biasa, bukan callback dari tombol.
     if (!isCallback && text && !text.startsWith('/')) {
-        return HtmlService.createHtmlOutput("OK"); // Hentikan eksekusi untuk pesan biasa
+        return HtmlService.createHtmlOutput("OK");
     }
-    // ===== AKHIR OPTIMASI =====
 
     const commandParts = text.split(' ');
     let command = commandParts[0].toLowerCase();
     if (command.includes('@')) command = command.split('@')[0];
 
-    // Jika perintahnya adalah /daftar, proses di sini dan hentikan.
     if (command === '/daftar') {
       const existingUserData = getUserData(userId);
       if (existingUserData && existingUserData.email) {
         kirimPesanTelegram(`Halo ${escapeHtml(firstName)}, Anda sudah terdaftar di sistem. Tidak perlu mendaftar lagi.`, config, 'HTML');
         return HtmlService.createHtmlOutput("OK");
       }
-
       const email = commandParts[1];
       if (!email || !email.includes('@') || !email.includes('.')) {
-        const pesanFormatSalah = `Format perintah salah, ${escapeHtml(firstName)}.\n\nGunakan format:\n<code>/daftar email.anda@domain.com</code>`;
-        kirimPesanTelegram(pesanFormatSalah, config, 'HTML');
+        kirimPesanTelegram(`Format perintah salah, ${escapeHtml(firstName)}.\n\nGunakan format:\n<code>/daftar email.anda@domain.com</code>`, config, 'HTML');
         return HtmlService.createHtmlOutput("OK");
       }
-      
       let notifPesan = "<b>🔔 Permintaan Pendaftaran Baru</b>\n\n";
       notifPesan += "Admin, mohon verifikasi dan tambahkan pengguna berikut ke sheet 'Hak Akses':\n\n";
       notifPesan += `<b>Nama:</b> ${escapeHtml(firstName)}\n`;
@@ -65,18 +56,14 @@ function doPost(e) {
       notifPesan += `<b>User ID:</b> <code>${userId}</code>\n`;
       notifPesan += `<b>Email:</b> <code>${escapeHtml(email)}</code>`;
       kirimPesanTelegram(notifPesan, config, 'HTML');
-      
       kirimPesanTelegram(`Terima kasih, ${escapeHtml(firstName)}. Permintaan Anda telah diteruskan kepada admin untuk persetujuan.`, config, 'HTML', null, fromChatId);
-
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // --- PEMERIKSAAN HAK AKSES UNTUK SEMUA PERINTAH LAINNYA ---
-    const userData = getUserData(userId); //
+    const userData = getUserData(userId);
     if (!userData || !userData.email) {
       const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
-      const pesanDitolak = `❌ Maaf ${userMention}, Anda tidak terdaftar untuk menggunakan bot ini.\n\nSilakan gunakan perintah <code>/daftar [email_anda]</code> untuk meminta akses.`; //
-      kirimPesanTelegram(pesanDitolak, config, 'HTML'); 
+      kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar untuk menggunakan bot ini.\n\nSilakan gunakan perintah <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML'); 
       return HtmlService.createHtmlOutput("Unauthorized"); 
     }
     
@@ -86,11 +73,15 @@ function doPost(e) {
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
       
-      if (text.startsWith("history_") || text.startsWith("cekvm_")) { //
+      if (text.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
+        handleTicketInteraction(update);
+      }
+      else if (text.startsWith("history_") || text.startsWith("cekvm_")) {
         const pk = text.split("_")[1];
         if (text.startsWith("history_")) getVmHistory(pk, config, userData);
         else findVmAndGetInfo(pk, config, userData);
-      } else if (text.startsWith("run_export_log_") || text.startsWith("export_")) { //
+      } 
+      else if (text.startsWith("run_export_log_") || text.startsWith("export_")) {
         handleExportRequest(text, config, userData);
       }
       
@@ -98,77 +89,85 @@ function doPost(e) {
 
     } else { 
       switch (command) {
-        case '/laporan': //
+        case '/laporan':
           buatLaporanHarianVM();
           break;
-        case '/sync_laporan': //
+        case '/sync_laporan':
           syncDanBuatLaporanHarian(false);
           break;
-        case '/provisioning': //
+        case '/provisioning':
           generateProvisioningReport(config);
           break;
-        case '/migrasicheck': //
-          kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore... Proses ini mungkin memerlukan waktu beberapa saat.", config, 'HTML');
+        
+        // Alur /cektiket yang sudah diperbaiki
+        case '/cektiket':
+          kirimPesanTelegram("⏳ Sedang menyinkronkan data tiket terbaru...", config, 'HTML');
+          // Jalankan sinkronisasi terlebih dahulu. Jika ini gagal, blok catch utama akan menangani error.
+          syncTiketDataForTrigger();
+          // Jika sinkronisasi berhasil, baru panggil fungsi untuk menampilkan laporan.
+          handleTicketInteraction(update);
+          break;
+          
+        case '/migrasicheck':
+          kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore...", config, 'HTML');
           jalankanRekomendasiMigrasi();
           break;
-        case '/export': //
+        case '/export':
           kirimMenuEkspor(config);
           break;
-        case '/cekvm': //
+        case '/cekvm':
           if (commandParts.length > 1) findVmAndGetInfo(commandParts.slice(1).join(' '), config, userData);
           else kirimPesanTelegram(`Gunakan format: <code>/cekvm [IP / Nama / PK]</code>`, config, 'HTML');
           break;
-        case '/history': //
+        case '/history':
           if (commandParts.length > 1) getVmHistory(commandParts[1].trim(), config, userData);
           else kirimPesanTelegram(`Gunakan format: <code>/history [PK]</code>`, config, 'HTML');
           break;
-        case '/cekhistory': //
+        case '/cekhistory':
           getTodaysHistory(config, userData);
           break;
-        case '/arsipkanlog': //
+        case '/arsipkanlog':
           kirimPesanTelegram("⚙️ Menerima perintah arsip. Memeriksa jumlah log...", config);
           cekDanArsipkanLogJikaPenuh(config);
           break;
         case '/clearcache':
           const isCleared = clearUserAccessCache();
-          if (isCleared) {
-            kirimPesanTelegram("✅ Cache hak akses telah berhasil dibersihkan. Perubahan pada sheet 'Hak Akses' sekarang sudah aktif.", config);
-          } else {
-            kirimPesanTelegram("❌ Gagal membersihkan cache.", config);
-          }
+          kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
           break;
-        case '/info': //
+        
+        case '/info':
           const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
                             "------------------------------------\n\n" +
                             "<code>/daftar [email]</code>\n" +
                             "Meminta hak akses untuk menggunakan bot.\n\n" +
                             "<code>/laporan</code>\n" +
-                            "(Cepat) Membuat laporan instan berdasarkan data terakhir yang tersimpan di bot.\n\n" +
+                            "(Cepat) Membuat laporan instan.\n\n" +
                             "<code>/sync_laporan</code>\n" +
-                            "(Lengkap) Menyalin data terbaru dari semua sumber, lalu membuat laporan lengkap.\n\n" +
+                            "(Lengkap) Menyalin data terbaru, lalu membuat laporan.\n\n" +
                             "<code>/provisioning</code>\n" +
-                            "Menampilkan laporan analisis alokasi resource (CPU, Mem, Disk).\n\n" +
+                            "Menampilkan laporan analisis alokasi resource.\n\n" +
+                            "<code>/cektiket</code>\n" +
+                            "Menampilkan laporan monitoring tiket utilisasi interaktif.\n\n" +
                             "<code>/migrasicheck</code>\n" +
-                            "Menjalankan analisis untuk mencari datastore yang over-provisioned dan memberikan rekomendasi migrasi VM.\n\n" +
+                            "Menjalankan analisis & rekomendasi migrasi datastore.\n\n" +
                             "<code>/export</code>\n" +
-                            "Menampilkan menu untuk mengunduh berbagai jenis laporan.\n\n" +
+                            "Menampilkan menu untuk mengunduh laporan.\n\n" +
                             "<code>/cekvm [IP/Nama/PK]</code>\n" +
                             "Mencari detail sebuah VM.\n\n" +
                             "<code>/history [PK]</code>\n" +
-                            "Menampilkan riwayat perubahan VM tertentu.\n\n" +
+                            "Menampilkan riwayat perubahan VM.\n\n" +
                             "<code>/cekhistory</code>\n" +
-                            "Menampilkan semua log perubahan yang terjadi hari ini.\n\n" +
+                            "Menampilkan semua log perubahan hari ini.\n\n" +
                             "<code>/arsipkanlog</code>\n" +
-                            "Memeriksa & menjalankan pengarsipan jika log melebihi batas.\n\n" +
+                            "Memeriksa & menjalankan pengarsipan log.\n\n" +
                             "<code>/clearcache</code>\n" +
-                            "Membersihkan cache agar perubahan di 'Hak Akses' langsung aktif.\n\n" +
+                            "Membersihkan cache hak akses.\n\n" +
                             "<code>/info</code>\n" +
                             "Menampilkan daftar perintah ini.";
           kirimPesanTelegram(infoPesan, config, 'HTML');
           break;
         default:
-          const pesanError = `❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan /info untuk melihat daftar perintah yang tersedia.`;
-          kirimPesanTelegram(pesanError, config, 'HTML');
+          kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan /info untuk melihat daftar perintah.`, config, 'HTML');
           break;
       }
     }

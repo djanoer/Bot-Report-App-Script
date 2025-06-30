@@ -66,6 +66,40 @@ function syncDanBuatLaporanHarian(showUiAlert = true) {
 }
 
 /**
+ * Fungsi untuk menjalankan sinkronisasi data tiket secara berkala.
+ * Fungsi ini dimaksudkan untuk dipanggil oleh pemicu waktu (trigger)
+ * atau saat perintah /cektiket dijalankan.
+ * [DIPERBARUI] Menggunakan nama sheet sumber sebagai nama sheet tujuan secara otomatis.
+ */
+function syncTiketDataForTrigger() {
+  console.log("Memulai sinkronisasi data tiket...");
+  try {
+    const config = bacaKonfigurasi();
+    const sumberId = config[KONSTANTA.KUNCI_KONFIG.TIKET_SPREADSHEET_ID];
+    const namaSheet = config[KONSTANTA.KUNCI_KONFIG.NAMA_SHEET_TIKET]; // Hanya butuh satu nama sheet
+
+    if (!sumberId || !namaSheet) {
+      console.error("Sinkronisasi tiket dibatalkan. Konfigurasi TIKET_SPREADSHEET_ID atau NAMA_SHEET_TIKET tidak lengkap.");
+      // Jika konfigurasi penting ini tidak ada, hentikan fungsi.
+      return;
+    }
+
+    // Panggil fungsi `salinDataSheet` yang sudah ada tanpa argumen ketiga.
+    // Ini akan membuat sheet tujuan di dalam spreadsheet bot memiliki 
+    // nama yang sama dengan sheet sumber di spreadsheet tiket.
+    salinDataSheet(namaSheet, sumberId);
+    
+    console.log("Sinkronisasi data tiket berhasil diselesaikan.");
+    
+  } catch (e) {
+    // Mencatat error jika proses sinkronisasi gagal.
+    console.error(`Gagal menjalankan sinkronisasi tiket: ${e.message}`);
+    // Opsional: Anda bisa menambahkan notifikasi kegagalan ke Telegram di sini jika diperlukan.
+    // kirimPesanTelegram(`⚠️ Gagal menyalin data tiket secara otomatis. Error: ${e.message}`, bacaKonfigurasi());
+  }
+}
+
+/**
  * Helper untuk menyalin konten sebuah sheet dari spreadsheet sumber ke tujuan.
  */
 function salinDataSheet(namaSheet, sumberId) {

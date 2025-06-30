@@ -23,6 +23,18 @@ const KONSTANTA = {
     EXPORT_VC01_VMS: 'export_vms_vc01',
     EXPORT_VC02_VMS: 'export_vms_vc02'
   },
+  // Menambahkan konstanta untuk callback data tiket
+  CALLBACK_TIKET: {
+    // Awalan untuk semua callback terkait tiket agar mudah diidentifikasi
+    PREFIX: 'ticket_',
+    // Aksi untuk melihat kategori usia tiket
+    VIEW_CATEGORY: 'ticket_view_cat_', // akan diikuti nama kategori, misal: ticket_view_cat_gt1Month
+    // Aksi untuk melihat detail tiket spesifik
+    VIEW_DETAIL: 'ticket_view_detail_', // akan diikuti nomor tiket, misal: ticket_view_detail_CPR-283
+    // Aksi untuk navigasi kembali
+    BACK_TO_SUMMARY: 'ticket_back_summary',
+    BACK_TO_LIST: 'ticket_back_list_' // akan diikuti nama kategori, misal: ticket_back_list_gt1Month
+  },
   // Nama-nama untuk urutan kritikalitas
   TINGKAT_KRITIKALITAS: {
     'BRONZE': 1,
@@ -63,17 +75,33 @@ const KONSTANTA = {
     CAPACITY_GB: 'Capacity (GB)',
     CAPACITY_TB: 'Capacity (TB)'
   },
+  // Nama-nama header kolom Tiket
+  HEADER_TIKET: {
+    NAMA_VM: 'Name', // Kolom B
+    KRITIKALITAS: 'Krtikalitas VM', // Kolom C
+    LINK_TIKET: 'Link Tiket', // Kolom D
+    KATEGORI: 'Kategori', // Kolom E
+    TGL_CREATE: 'Tanggal Created Tiket', // Kolom F
+    TGL_FU: 'Tanggal FU ke User', // Kolom H
+    STATUS: 'Status Tiket', // Kolom I
+    ACTION: 'Action', // Kolom J
+    TGL_DONE: 'Tanggal Done Tiket', // Kolom K
+    DEV_OPS: 'DEV/OPS by BIA 2024', // Kolom M
+    KETERANGAN: 'Keterangan'
+  },
   // Nama-nama kunci di sheet Konfigurasi
   KUNCI_KONFIG: {
     ID_SUMBER: 'SUMBER_SPREADSHEET_ID',
     SHEET_VM: 'NAMA_SHEET_DATA_UTAMA',
     SHEET_DS: 'NAMA_SHEET_DATASTORE',
+    TIKET_SPREADSHEET_ID: 'TIKET_SPREADSHEET_ID',
+    NAMA_SHEET_TIKET: 'NAMA_SHEET_TIKET',
     FOLDER_ARSIP: 'FOLDER_ID_ARSIP',
     FOLDER_EKSPOR: 'FOLDER_ID_HASIL_EKSPOR',
     KOLOM_PANTAU: 'KOLOM_YANG_DIPANTAU',
     MAP_ENV: 'PEMETAAN_ENVIRONMENT',
     DS_KECUALI: 'KATA_KUNCI_DS_DIKECUALIKAN',
-    //DS_UTAMA: 'KATA_KUNCI_DS_DIUTAMAKAN',
+    //DS_UTAMA: 'KATA_KUNCI_DS_DIUTAMAKAN', tidak digunakan
     SHEET_LOGIKA_MIGRASI: 'NAMA_SHEET_LOGIKA_MIGRASI',
     DS_NAME_HEADER: 'HEADER_DATASTORE_NAME',
     VM_DS_COLUMN_HEADER: 'HEADER_VM_DATASTORE_COLUMN',

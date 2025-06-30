@@ -59,3 +59,35 @@ function answerCallbackQuery(callbackQueryId, config) {
   try { UrlFetchApp.fetch(url, payload); } 
   catch (e) { console.error(`Gagal menjawab callback query. Error: ${e.message}`); }
 }
+
+/**
+ * Mengedit teks dan tombol dari pesan yang sudah ada di Telegram.
+ * Ini adalah inti dari fitur navigasi menu yang elegan.
+ * @param {string} teksPesan - Teks baru untuk pesan.
+ * @param {object} inlineKeyboard - Objek keyboard baru.
+ * @param {string} chatId - ID dari chat.
+ * @param {string} messageId - ID dari pesan yang akan diedit.
+ * @param {object} config - Objek konfigurasi bot.
+ */
+function editMessageText(teksPesan, inlineKeyboard, chatId, messageId, config) {
+  const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/editMessageText`;
+  const payloadData = {
+    chat_id: String(chatId),
+    message_id: parseInt(messageId),
+    text: teksPesan,
+    parse_mode: 'HTML',
+    reply_markup: JSON.stringify(inlineKeyboard)
+  };
+  
+  const payload = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payloadData)
+  };
+
+  try {
+    UrlFetchApp.fetch(url, payload);
+  } catch (e) {
+    console.error(`Gagal mengedit pesan (ID: ${messageId}). Error: ${e.message}`);
+  }
+}
