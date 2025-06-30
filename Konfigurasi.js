@@ -25,11 +25,11 @@ function bacaKonfigurasi() {
           try { config[key] = JSON.parse(value); } 
           catch (e) { throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}.`); }
         
-        // [PERBAIKAN] Menambahkan KRITIKALITAS_PANTAU ke dalam logika parsing koma
-        } else if (key === KONSTANTA.KUNCI_KONFIG.DS_KECUALI || key === KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU) {
-          config[key] = value ? value.toString().toUpperCase().split(',').map(k => k.trim()).filter(Boolean) : [];
-        
-        } else {
+        // logika parsing koma
+        } else if (key === KONSTANTA.KUNCI_KONFIG.DS_KECUALI || key === KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU || key === KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF) { 
+        config[key] = value ? value.toString().toLowerCase().split(',').map(k => k.trim()).filter(Boolean) : [];
+      
+      } else {
           if (key !== 'TELEGRAM_BOT_TOKEN' && key !== 'WEBHOOK_BOT_TOKEN') {
             config[key] = value;
           }
@@ -113,4 +113,19 @@ function tesKoneksiTelegram() {
       console.error("Gagal menjalankan tes koneksi Telegram: " + e.message);
       showUiFeedback("Gagal", `Gagal mengirim pesan tes. Error: ${e.message}`);
     }
+}
+
+/**
+* Menghapus cache hak akses pengguna secara manual.
+*/
+function clearUserAccessCache() {
+try {
+  const cache = CacheService.getScriptCache();
+  cache.remove('USER_ACCESS_MAP');
+  console.log("Cache hak akses pengguna berhasil dihapus.");
+  return true;
+} catch (e) {
+  console.error("Gagal menghapus cache: " + e.message);
+  return false;
+}
 }

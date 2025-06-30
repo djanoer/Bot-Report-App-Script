@@ -109,11 +109,28 @@ const KONSTANTA = {
     VM_PROV_GB_HEADER: 'HEADER_VM_PROVISIONED_GB',
     THRESHOLD_DS_USED: 'THRESHOLD_DS_USED_PERCENT',
     THRESHOLD_VM_UPTIME: 'THRESHOLD_VM_UPTIME_DAYS',
-    KRITIKALITAS_PANTAU: 'KRITIKALITAS_VM_DIPANTAU'
+    KRITIKALITAS_PANTAU: 'KRITIKALITAS_VM_DIPANTAU',
+    STATUS_TIKET_AKTIF: 'STATUS_TIKET_AKTIF'
   },
   // Nama-nama file arsip
   NAMA_FILE: {
     ARSIP_VM: 'archive.json',
     ARSIP_DS: 'archive_datastore.json'
-  }
+  },
+  // [BARU] Menambahkan konstanta untuk nama perintah bot
+  PERINTAH_BOT: {
+    DAFTAR: '/daftar',
+    LAPORAN: '/laporan',
+    SYNC_LAPORAN: '/sync_laporan',
+    PROVISIONING: '/provisioning',
+    CEK_TIKET: '/cektiket',
+    MIGRASI_CHECK: '/migrasicheck',
+    EXPORT: '/export',
+    CEK_VM: '/cekvm',
+    HISTORY: '/history',
+    CEK_HISTORY: '/cekhistory',
+    ARSIPKAN_LOG: '/arsipkanlog',
+    CLEAR_CACHE: '/clearcache',
+    INFO: '/info'
+  },
 };

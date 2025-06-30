@@ -76,26 +76,22 @@ function syncTiketDataForTrigger() {
   try {
     const config = bacaKonfigurasi();
     const sumberId = config[KONSTANTA.KUNCI_KONFIG.TIKET_SPREADSHEET_ID];
-    const namaSheet = config[KONSTANTA.KUNCI_KONFIG.NAMA_SHEET_TIKET]; // Hanya butuh satu nama sheet
+    const namaSheet = config[KONSTANTA.KUNCI_KONFIG.NAMA_SHEET_TIKET];
 
     if (!sumberId || !namaSheet) {
-      console.error("Sinkronisasi tiket dibatalkan. Konfigurasi TIKET_SPREADSHEET_ID atau NAMA_SHEET_TIKET tidak lengkap.");
-      // Jika konfigurasi penting ini tidak ada, hentikan fungsi.
-      return;
+      // Melemparkan error agar bisa ditangkap di level yang lebih tinggi
+      throw new Error("Konfigurasi TIKET_SPREADSHEET_ID atau NAMA_SHEET_TIKET tidak lengkap.");
     }
-
-    // Panggil fungsi `salinDataSheet` yang sudah ada tanpa argumen ketiga.
-    // Ini akan membuat sheet tujuan di dalam spreadsheet bot memiliki 
-    // nama yang sama dengan sheet sumber di spreadsheet tiket.
+    
+    // salinDataSheet sudah melemparkan error jika gagal, jadi kita tidak perlu mengulanginya.
     salinDataSheet(namaSheet, sumberId);
     
     console.log("Sinkronisasi data tiket berhasil diselesaikan.");
     
   } catch (e) {
-    // Mencatat error jika proses sinkronisasi gagal.
     console.error(`Gagal menjalankan sinkronisasi tiket: ${e.message}`);
-    // Opsional: Anda bisa menambahkan notifikasi kegagalan ke Telegram di sini jika diperlukan.
-    // kirimPesanTelegram(`⚠️ Gagal menyalin data tiket secara otomatis. Error: ${e.message}`, bacaKonfigurasi());
+    // Melemparkan error kembali agar bisa ditangani oleh fungsi pemanggil (/cektiket)
+    throw new Error(`Gagal sinkronisasi data tiket. Penyebab: ${e.message}`);
   }
 }
 

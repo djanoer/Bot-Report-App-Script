@@ -1,10 +1,13 @@
 // ===== FILE: Utama.gs =====
 
 function doPost(e) {
-  if (!e || !e.postData || !e.postData.contents) return HtmlService.createHtmlOutput("Bad Request");
-  
+  if (!e || !e.postData || !e.postData.contents) {
+    return HtmlService.createHtmlOutput("Bad Request");
+  }
+
+  let config;
   try {
-    const config = bacaKonfigurasi();
+    config = bacaKonfigurasi();
     const update = JSON.parse(e.postData.contents);
     
     let userId, fromChatId, text, firstName, isCallback = false, username;
@@ -34,47 +37,46 @@ function doPost(e) {
         return HtmlService.createHtmlOutput("OK");
     }
 
+    // --- PERBAIKAN KRITIS PADA PEMROSESAN PERINTAH ---
     const commandParts = text.split(' ');
-    let command = commandParts[0].toLowerCase();
-    if (command.includes('@')) command = command.split('@')[0];
+    // Ambil bagian pertama (perintah), ubah ke huruf kecil, dan hapus nama bot jika ada.
+    let command = commandParts[0].toLowerCase().split('@')[0];
 
-    if (command === '/daftar') {
+    // --- ALUR PENDAFTARAN ---
+    if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
       const existingUserData = getUserData(userId);
       if (existingUserData && existingUserData.email) {
-        kirimPesanTelegram(`Halo ${escapeHtml(firstName)}, Anda sudah terdaftar di sistem. Tidak perlu mendaftar lagi.`, config, 'HTML');
+        kirimPesanTelegram(`Halo ${escapeHtml(firstName)}, Anda sudah terdaftar.`, config, 'HTML');
         return HtmlService.createHtmlOutput("OK");
       }
       const email = commandParts[1];
       if (!email || !email.includes('@') || !email.includes('.')) {
-        kirimPesanTelegram(`Format perintah salah, ${escapeHtml(firstName)}.\n\nGunakan format:\n<code>/daftar email.anda@domain.com</code>`, config, 'HTML');
+        kirimPesanTelegram(`Format salah. Gunakan:\n<code>/daftar email.anda@domain.com</code>`, config, 'HTML');
         return HtmlService.createHtmlOutput("OK");
       }
-      let notifPesan = "<b>🔔 Permintaan Pendaftaran Baru</b>\n\n";
-      notifPesan += "Admin, mohon verifikasi dan tambahkan pengguna berikut ke sheet 'Hak Akses':\n\n";
-      notifPesan += `<b>Nama:</b> ${escapeHtml(firstName)}\n`;
-      notifPesan += `<b>Username:</b> ${username ? '@' + username : 'N/A'}\n`;
-      notifPesan += `<b>User ID:</b> <code>${userId}</code>\n`;
-      notifPesan += `<b>Email:</b> <code>${escapeHtml(email)}</code>`;
+      let notifPesan = `<b>🔔 Permintaan Pendaftaran Baru</b>\n\n<b>Nama:</b> ${escapeHtml(firstName)}\n<b>Username:</b> ${username ? '@' + username : 'N/A'}\n<b>User ID:</b> <code>${userId}</code>\n<b>Email:</b> <code>${escapeHtml(email)}</code>`;
       kirimPesanTelegram(notifPesan, config, 'HTML');
-      kirimPesanTelegram(`Terima kasih, ${escapeHtml(firstName)}. Permintaan Anda telah diteruskan kepada admin untuk persetujuan.`, config, 'HTML', null, fromChatId);
+      kirimPesanTelegram(`Terima kasih, ${escapeHtml(firstName)}. Permintaan Anda telah diteruskan.`, config, 'HTML', null, fromChatId);
       return HtmlService.createHtmlOutput("OK");
     }
 
+    // --- PEMBATASAN AKSES ---
     const userData = getUserData(userId);
     if (!userData || !userData.email) {
       const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
-      kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar untuk menggunakan bot ini.\n\nSilakan gunakan perintah <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML'); 
+      kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML'); 
       return HtmlService.createHtmlOutput("Unauthorized"); 
     }
     
     userData.firstName = firstName;
     userData.userId = userId;
 
+    // --- PENGENDALI INTERAKSI ---
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
       
       if (text.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
-        handleTicketInteraction(update);
+        handleTicketInteraction(update, config);
       }
       else if (text.startsWith("history_") || text.startsWith("cekvm_")) {
         const pk = text.split("_")[1];
@@ -88,94 +90,96 @@ function doPost(e) {
       answerCallbackQuery(callbackQueryId, config);
 
     } else { 
+      // Menggunakan konstanta untuk semua case
       switch (command) {
-        case '/laporan':
+        case KONSTANTA.PERINTAH_BOT.LAPORAN:
           buatLaporanHarianVM();
           break;
-        case '/sync_laporan':
+        case KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN:
           syncDanBuatLaporanHarian(false);
           break;
-        case '/provisioning':
+        case KONSTANTA.PERINTAH_BOT.PROVISIONING:
           generateProvisioningReport(config);
           break;
-        
-        // Alur /cektiket yang sudah diperbaiki
-        case '/cektiket':
-          kirimPesanTelegram("⏳ Sedang menyinkronkan data tiket terbaru...", config, 'HTML');
-          // Jalankan sinkronisasi terlebih dahulu. Jika ini gagal, blok catch utama akan menangani error.
-          syncTiketDataForTrigger();
-          // Jika sinkronisasi berhasil, baru panggil fungsi untuk menampilkan laporan.
-          handleTicketInteraction(update);
+        case KONSTANTA.PERINTAH_BOT.CEK_TIKET:
+          try {
+            kirimPesanTelegram("⏳ Sedang membuat laporan tiket lengkap...", config, 'HTML');
+
+            // Panggil fungsi laporan final yang komprehensif
+            const laporanTeks = generateFinalTicketReportText(config);
+            
+            kirimPesanTelegram(laporanTeks, config, 'HTML');
+
+          } catch (e) {
+            console.error(`Gagal memproses /cektiket (laporan final): ${e.message}\nStack: ${e.stack}`);
+            kirimPesanTelegram(`❌ Gagal membuat laporan tiket lengkap.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+          }
           break;
-          
-        case '/migrasicheck':
+        case KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK:
           kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore...", config, 'HTML');
           jalankanRekomendasiMigrasi();
           break;
-        case '/export':
+        case KONSTANTA.PERINTAH_BOT.EXPORT:
           kirimMenuEkspor(config);
           break;
-        case '/cekvm':
+        case KONSTANTA.PERINTAH_BOT.CEK_VM:
           if (commandParts.length > 1) findVmAndGetInfo(commandParts.slice(1).join(' '), config, userData);
-          else kirimPesanTelegram(`Gunakan format: <code>/cekvm [IP / Nama / PK]</code>`, config, 'HTML');
+          else kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP/Nama/PK]</code>`, config, 'HTML');
           break;
-        case '/history':
+        case KONSTANTA.PERINTAH_BOT.HISTORY:
           if (commandParts.length > 1) getVmHistory(commandParts[1].trim(), config, userData);
-          else kirimPesanTelegram(`Gunakan format: <code>/history [PK]</code>`, config, 'HTML');
+          else kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
           break;
-        case '/cekhistory':
+        case KONSTANTA.PERINTAH_BOT.CEK_HISTORY:
           getTodaysHistory(config, userData);
           break;
-        case '/arsipkanlog':
+        case KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG:
           kirimPesanTelegram("⚙️ Menerima perintah arsip. Memeriksa jumlah log...", config);
           cekDanArsipkanLogJikaPenuh(config);
           break;
-        case '/clearcache':
+        case KONSTANTA.PERINTAH_BOT.CLEAR_CACHE:
           const isCleared = clearUserAccessCache();
           kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
           break;
-        
-        case '/info':
-          const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
-                            "------------------------------------\n\n" +
-                            "<code>/daftar [email]</code>\n" +
-                            "Meminta hak akses untuk menggunakan bot.\n\n" +
-                            "<code>/laporan</code>\n" +
-                            "(Cepat) Membuat laporan instan.\n\n" +
-                            "<code>/sync_laporan</code>\n" +
-                            "(Lengkap) Menyalin data terbaru, lalu membuat laporan.\n\n" +
-                            "<code>/provisioning</code>\n" +
-                            "Menampilkan laporan analisis alokasi resource.\n\n" +
-                            "<code>/cektiket</code>\n" +
-                            "Menampilkan laporan monitoring tiket utilisasi interaktif.\n\n" +
-                            "<code>/migrasicheck</code>\n" +
-                            "Menjalankan analisis & rekomendasi migrasi datastore.\n\n" +
-                            "<code>/export</code>\n" +
-                            "Menampilkan menu untuk mengunduh laporan.\n\n" +
-                            "<code>/cekvm [IP/Nama/PK]</code>\n" +
-                            "Mencari detail sebuah VM.\n\n" +
-                            "<code>/history [PK]</code>\n" +
-                            "Menampilkan riwayat perubahan VM.\n\n" +
-                            "<code>/cekhistory</code>\n" +
-                            "Menampilkan semua log perubahan hari ini.\n\n" +
-                            "<code>/arsipkanlog</code>\n" +
-                            "Memeriksa & menjalankan pengarsipan log.\n\n" +
-                            "<code>/clearcache</code>\n" +
-                            "Membersihkan cache hak akses.\n\n" +
-                            "<code>/info</code>\n" +
-                            "Menampilkan daftar perintah ini.";
-          kirimPesanTelegram(infoPesan, config, 'HTML');
+        case KONSTANTA.PERINTAH_BOT.INFO:
+          // Panggil fungsi terpisah untuk mengirim pesan info
+          kirimPesanInfo(config);
           break;
         default:
-          kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan /info untuk melihat daftar perintah.`, config, 'HTML');
+          kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
           break;
       }
     }
   } catch (err) {
     console.error(`Error di doPost: ${err.message}\nStack: ${err.stack}`);
-    kirimPesanTelegram(`<b>⚠️ Terjadi Error pada Bot</b>\n\n<code>${escapeHtml(err.message)}</code>`, bacaKonfigurasi(), 'HTML');
+    const errorConfig = config || bacaKonfigurasi();
+    kirimPesanTelegram(`<b>⚠️ Terjadi Error pada Bot</b>\n\n<code>${escapeHtml(err.message)}</code>`, errorConfig, 'HTML');
   }
   return HtmlService.createHtmlOutput("OK");
+}
+
+/**
+ * [FUNGSI BARU]
+ * Mengirim pesan bantuan (/info) yang dinamis menggunakan konstanta.
+ */
+function kirimPesanInfo(config) {
+  const K = KONSTANTA.PERINTAH_BOT; // Alias untuk kemudahan
+  const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
+                    "------------------------------------\n\n" +
+                    `<code>${K.DAFTAR} [email]</code>\nMeminta hak akses untuk menggunakan bot.\n\n` +
+                    `<code>${K.LAPORAN}</code>\n(Cepat) Membuat laporan instan.\n\n` +
+                    `<code>${K.SYNC_LAPORAN}</code>\n(Lengkap) Menyalin data terbaru, lalu membuat laporan.\n\n` +
+                    `<code>${K.PROVISIONING}</code>\nMenampilkan laporan analisis alokasi resource.\n\n` +
+                    `<code>${K.CEK_TIKET}</code>\nMenampilkan laporan monitoring tiket interaktif.\n\n` +
+                    `<code>${K.MIGRASI_CHECK}</code>\nMenjalankan analisis & rekomendasi migrasi datastore.\n\n` +
+                    `<code>${K.EXPORT}</code>\nMenampilkan menu untuk mengunduh laporan.\n\n` +
+                    `<code>${K.CEK_VM} [IP/Nama/PK]</code>\nMencari detail sebuah VM.\n\n` +
+                    `<code>${K.HISTORY} [PK]</code>\nMenampilkan riwayat perubahan VM.\n\n` +
+                    `<code>${K.CEK_HISTORY}</code>\nMenampilkan semua log perubahan hari ini.\n\n` +
+                    `<code>${K.ARSIPKAN_LOG}</code>\nMemeriksa & menjalankan pengarsipan log.\n\n` +
+                    `<code>${K.CLEAR_CACHE}</code>\nMembersihkan cache hak akses.\n\n` +
+                    `<code>${K.INFO}</code>\nMenampilkan daftar perintah ini.`;
+  kirimPesanTelegram(infoPesan, config, 'HTML');
 }
 
 function onOpen() {
@@ -223,7 +227,6 @@ function kirimMenuEkspor(config) {
     };
     kirimPesanTelegram(message, config, 'HTML', keyboard);
 }
-
 
 function runDailySyncReportForTrigger() {
   console.log("runDailySyncReportForTrigger dipanggil oleh pemicu waktu.");
