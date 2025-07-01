@@ -101,7 +101,7 @@ function doPost(e) {
           }
           break;
         case KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN:
-          syncDanBuatLaporanHarian(false);
+          syncDanBuatLaporanHarian(false, "PERINTAH MANUAL"); 
           break;
         case KONSTANTA.PERINTAH_BOT.PROVISIONING:
           generateProvisioningReport(config);
@@ -166,10 +166,13 @@ function doPost(e) {
           const isCleared = clearUserAccessCache();
           kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
           break;
+        // ===== [PERBAIKAN ADA DI SINI] =====
+        // Pastikan case untuk INFO ada dan bisa dijangkau.
         case KONSTANTA.PERINTAH_BOT.INFO:
           // Panggil fungsi terpisah untuk mengirim pesan info
           kirimPesanInfo(config);
           break;
+        // ===================================
         default:
           kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
           break;
@@ -255,7 +258,8 @@ function kirimMenuEkspor(config) {
 
 function runDailySyncReportForTrigger() {
   console.log("runDailySyncReportForTrigger dipanggil oleh pemicu waktu.");
-  syncDanBuatLaporanHarian(false); 
+  // Perbaikan: Tambahkan argumen kedua untuk menandai sumber eksekusi.
+  syncDanBuatLaporanHarian(false, "TRIGGER OTOMATIS"); 
 }
 
 function runDailyMigrationCheck() {

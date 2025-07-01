@@ -1,41 +1,50 @@
 // ===== FILE: ManajemenData.gs =====
 
 /**
- * Menjalankan alur kerja sinkronisasi penuh: menyalin data VM dan Datastore,
- * lalu menjalankan laporan perubahan harian dan pemeriksaan datastore.
- * [PERBAIKAN] Menambahkan pesan awal yang informatif untuk membedakan dari /laporan.
+ * [PERBAIKAN FINAL & ANTI-SPAM]
+ * Menjalankan alur kerja sinkronisasi penuh dengan mekanisme penguncian (LockService)
+ * untuk secara total mencegah eksekusi ganda dan spam laporan.
  */
 function syncDanBuatLaporanHarian(showUiAlert = true) {
-  const config = bacaKonfigurasi(); // Baca config di awal untuk mengirim pesan
+  // 1. Minta "kunci" untuk menjalankan fungsi ini.
+  const lock = LockService.getScriptLock();
+  
+  // 2. Coba dapatkan kunci. Jika gagal (karena fungsi lain sedang berjalan),
+  //    maka hentikan eksekusi ini. Waktu tunggu 10 detik.
+  const lockAcquired = lock.tryLock(10000); 
 
-  // Kirim pesan konfirmasi awal yang informatif ke Telegram
-  try {
-    const startTime = new Date();
-    const timestamp = startTime.toLocaleString('id-ID', { timeZone: "Asia/Jakarta", hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    
-    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n`;
-    pesanAwal += `⚙️ Memulai sinkronisasi penuh & pembuatan laporan...\n`;
-    pesanAwal += `<i>Proses ini akan menyalin data terbaru dari sumber sebelum membuat laporan dan mungkin memerlukan waktu beberapa menit.</i>`;
-    
-    kirimPesanTelegram(pesanAwal, config, 'HTML');
-
-  } catch (e) {
-    console.error(`Gagal mengirim pesan awal untuk /sync_laporan: ${e.message}`);
-    // Jangan hentikan proses utama jika hanya pengiriman pesan awal yang gagal
+  if (!lockAcquired) {
+    console.log("Proses sinkronisasi sudah berjalan. Eksekusi duplikat dibatalkan untuk mencegah spam.");
+    return; // <-- INI BAGIAN PENTING: Fungsi berhenti di sini jika ada duplikat.
   }
-
-  // Lanjutkan dengan proses utama
-  if (showUiAlert && SpreadsheetApp.getActiveSpreadsheet().getUi()) {
-    showUiFeedback("Proses Dimulai", "Mengimpor semua data dan membuat laporan. Proses ini bisa memakan waktu beberapa menit...");
-  }
-
+  
+  // 3. Jika berhasil dapat kunci, jalankan semua proses seperti biasa.
   try {
-    // Gunakan konstanta dari file Anda
+    const config = bacaKonfigurasi();
+
+    // Pesan "Permintaan diterima..." HANYA akan dikirim jika proses ini berhasil mendapatkan kunci.
+    try {
+      const startTime = new Date();
+      const timestamp = startTime.toLocaleString('id-ID', { timeZone: "Asia/Jakarta", hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      
+      let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n`;
+      pesanAwal += `⚙️ Memulai sinkronisasi penuh & pembuatan laporan...\n`;
+      pesanAwal += `<i>Proses ini akan menyalin data terbaru dari sumber sebelum membuat laporan dan mungkin memerlukan waktu beberapa menit.</i>`;
+      
+      kirimPesanTelegram(pesanAwal, config, 'HTML');
+
+    } catch (e) {
+      console.error(`Gagal mengirim pesan awal untuk /sync_laporan: ${e.message}`);
+    }
+
+    if (showUiAlert && SpreadsheetApp.getActiveSpreadsheet().getUi()) {
+      showUiFeedback("Proses Dimulai", "Mengimpor semua data dan membuat laporan...");
+    }
+
     const sumberIdKey = KONSTANTA.KUNCI_KONFIG.ID_SUMBER; 
     const sheetVmKey = KONSTANTA.KUNCI_KONFIG.SHEET_VM;
     const sheetDsKey = KONSTANTA.KUNCI_KONFIG.SHEET_DS;
     
-    // Pastikan kunci konfigurasi ada sebelum digunakan
     if (!config[sumberIdKey]) throw new Error("Konfigurasi SUMBER_SPREADSHEET_ID tidak ditemukan.");
     if (!config[sheetVmKey]) throw new Error("Konfigurasi NAMA_SHEET_DATA_UTAMA tidak ditemukan.");
 
@@ -47,7 +56,7 @@ function syncDanBuatLaporanHarian(showUiAlert = true) {
       salinDataSheet(config[sheetDsKey], config[sumberIdKey]);
     }
     
-    // Memastikan pemanggilan fungsi ini benar
+    // Panggil fungsi laporan hanya satu kali.
     buatLaporanHarianVM();
     jalankanPemeriksaanDatastore();
     
@@ -56,12 +65,16 @@ function syncDanBuatLaporanHarian(showUiAlert = true) {
     }
   } catch (e) {
     console.error(`ERROR UTAMA di syncDanBuatLaporanHarian: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`<b>❌ Proses /sync_laporan Gagal</b>\n\nTerjadi kesalahan saat sinkronisasi data atau pembuatan laporan.\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+    const errorConfig = bacaKonfigurasi(); 
+    kirimPesanTelegram(`<b>❌ Proses /sync_laporan Gagal</b>\n\nTerjadi kesalahan...\n<code>${escapeHtml(e.message)}</code>`, errorConfig, 'HTML');
     if (showUiAlert) {
       showUiFeedback("Terjadi Error", `Proses dihentikan. Error: ${e.message}`);
     }
-    // Lemparkan error kembali agar bisa ditangkap oleh log eksekusi Apps Script
     throw new Error(`Error saat menjalankan syncDanBuatLaporanHarian: ${e.message}`);
+  } finally {
+    // 4. WAJIB: Lepaskan kunci setelah semua proses selesai.
+    lock.releaseLock();
+    console.log("Kunci (Lock) telah dilepaskan.");
   }
 }
 
@@ -438,35 +451,45 @@ function formatHistoryEntry(entry, headers) {
 }
 
 /**
- * [VERSI FINAL DIPERBAIKI]
- * Mengambil semua log perubahan hari ini dari sheet aktif DAN semua file arsip.
+ * [PERBAIKAN & ANTI-SPAM]
+ * Mengambil semua log perubahan hari ini dengan mekanisme penguncian (LockService)
+ * untuk mencegah eksekusi ganda dan spam.
  */
 function getTodaysHistory(config, userData) {
+  // 1. Minta "kunci" untuk menjalankan fungsi ini.
+  const lock = LockService.getScriptLock();
+  
+  // 2. Coba dapatkan kunci. Jika gagal (karena fungsi lain sedang berjalan), hentikan.
+  // Diberi nama kunci spesifik agar tidak bentrok dengan lock dari fungsi lain.
+  const lockAcquired = lock.tryLock(10000); 
+
+  if (!lockAcquired) {
+    console.log("Proses /cekhistory sudah berjalan. Eksekusi duplikat dibatalkan.");
+    return; // <-- HENTIKAN FUNGSI jika ada duplikat.
+  }
+
+  // 3. Jika berhasil dapat kunci, lanjutkan proses.
   try {
     const now = new Date();
-    // Setel waktu ke awal hari ini (00:00:00)
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0); 
     
-    // Panggil helper untuk mendapatkan semua log dari awal hari ini
     const { headers: logHeaders, data: todaysLogEntries } = getCombinedLogs(todayStart, config);
-
     const todayStr = now.toLocaleDateString('id-ID', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
 
     if (todaysLogEntries.length === 0) {
       kirimPesanTelegram(`✅ Tidak ada perubahan yang tercatat pada hari ini, ${todayStr}.`, config);
-      return;
+      // 'return' di sini penting agar 'finally' tetap dieksekusi untuk melepas kunci.
+      return; 
     }
     
     let message = `<b>📜 Log Perubahan Hari Ini (Termasuk Arsip)</b>\n<i>${todayStr}</i>\nTotal Entri: ${todaysLogEntries.length}\n`;
     message += `------------------------------------\n\n`;
     
-    // Jika hasil terlalu banyak, langsung ekspor.
     if (todaysLogEntries.length > 15) {
       message += `Ditemukan lebih dari 15 entri perubahan. Untuk detail lengkap, laporan telah diekspor ke Google Sheet.`;
       kirimPesanTelegram(message, config, 'HTML');
       exportResultsToSheet(logHeaders, todaysLogEntries, `Log Harian`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
     } else {
-      // Jika cukup sedikit, tampilkan langsung di pesan.
       todaysLogEntries.forEach(entry => {
         message += formatHistoryEntry(entry, logHeaders);
       });
@@ -476,6 +499,10 @@ function getTodaysHistory(config, userData) {
   } catch (e) {
     console.error(`Gagal saat getTodaysHistory: ${e.message}\nStack: ${e.stack}`);
     kirimPesanTelegram(`❌ Terjadi kesalahan teknis saat mengambil riwayat hari ini.\nError: ${e.message}`, config);
+  } finally {
+    // 4. WAJIB: Lepaskan kunci setelah semua proses selesai.
+    lock.releaseLock();
+    console.log("Kunci (Lock) untuk /cekhistory telah dilepaskan.");
   }
 }
 

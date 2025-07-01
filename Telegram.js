@@ -3,7 +3,7 @@
 function setWebhook() {
   const config = bacaKonfigurasi();
   // GANTI DENGAN URL WEB APP ANDA YANG DIDAPAT SETELAH DEPLOY
-  const webAppUrlBase = "https://script.google.com/macros/s/AKfycbyaoqKuIwptE6k7WlUCaU49YSouDcUoB63mEApRPS_qRC9J4smIkgcdXNXLq6ZiZlzt/exec"; 
+  const webAppUrlBase = "https://script.google.com/macros/s/AKfycbxi7QjJafg6Zp8NfW6QDcdixlq-ing7Iy5cie-rUNSQCVkoUNuwa86wpPoQq4bEJjV7/exec"; 
   if (webAppUrlBase.includes("MASUKKAN")) {
     SpreadsheetApp.getUi().alert("Harap masukkan URL Web App Anda di dalam fungsi setWebhook sebelum menjalankannya.");
     return;
