@@ -93,7 +93,12 @@ function doPost(e) {
       // Menggunakan konstanta untuk semua case
       switch (command) {
         case KONSTANTA.PERINTAH_BOT.LAPORAN:
-          buatLaporanHarianVM();
+          // --- VALIDASI BARU ---
+          if (commandParts.length > 1) {
+            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.LAPORAN}</code> tanpa argumen tambahan.`, config, 'HTML');
+          } else {
+            buatLaporanHarianVM();
+          }
           break;
         case KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN:
           syncDanBuatLaporanHarian(false);
@@ -102,17 +107,17 @@ function doPost(e) {
           generateProvisioningReport(config);
           break;
         case KONSTANTA.PERINTAH_BOT.CEK_TIKET:
-          try {
-            kirimPesanTelegram("⏳ Sedang membuat laporan tiket lengkap...", config, 'HTML');
-
-            // Panggil fungsi laporan final yang komprehensif
-            const laporanTeks = generateFinalTicketReportText(config);
-            
-            kirimPesanTelegram(laporanTeks, config, 'HTML');
-
-          } catch (e) {
-            console.error(`Gagal memproses /cektiket (laporan final): ${e.message}\nStack: ${e.stack}`);
-            kirimPesanTelegram(`❌ Gagal membuat laporan tiket lengkap.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+          // --- VALIDASI BARU ---
+          if (commandParts.length > 1) {
+            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_TIKET}</code> tanpa argumen tambahan.`, config, 'HTML');
+          } else {
+              try {
+              kirimPesanTelegram("⏳ Menyiapkan laporan tiket...", config, 'HTML');
+              handleTicketInteraction(update, config);
+            } catch (e) {
+              console.error(`Gagal memproses /cektiket (interaktif): ${e.message}\nStack: ${e.stack}`);
+              kirimPesanTelegram(`❌ Gagal membuat laporan tiket interaktif.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+            }
           }
           break;
         case KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK:
@@ -120,18 +125,38 @@ function doPost(e) {
           jalankanRekomendasiMigrasi();
           break;
         case KONSTANTA.PERINTAH_BOT.EXPORT:
-          kirimMenuEkspor(config);
+          // --- VALIDASI BARU ---
+          if (commandParts.length > 1) {
+            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.EXPORT}</code> tanpa argumen tambahan.`, config, 'HTML');
+          } else {
+            kirimMenuEkspor(config);
+          }
           break;
         case KONSTANTA.PERINTAH_BOT.CEK_VM:
-          if (commandParts.length > 1) findVmAndGetInfo(commandParts.slice(1).join(' '), config, userData);
-          else kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP/Nama/PK]</code>`, config, 'HTML');
+          // --- VALIDASI YANG DISEMPURNAKAN ---
+          if (commandParts.length > 1) {
+            findVmAndGetInfo(commandParts.slice(1).join(' '), config, userData);
+          } else {
+            // Memberikan pesan kesalahan jika argumen hilang
+            kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP / Nama / PK]</code>`, config, 'HTML');
+          }
           break;
         case KONSTANTA.PERINTAH_BOT.HISTORY:
-          if (commandParts.length > 1) getVmHistory(commandParts[1].trim(), config, userData);
-          else kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
+          // --- VALIDASI YANG DISEMPURNAKAN ---
+          if (commandParts.length > 1) {
+            getVmHistory(commandParts[1].trim(), config, userData);
+          } else {
+            // Memberikan pesan kesalahan jika argumen hilang
+            kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
+          }
           break;
         case KONSTANTA.PERINTAH_BOT.CEK_HISTORY:
-          getTodaysHistory(config, userData);
+          // --- VALIDASI BARU ---
+          if (commandParts.length > 1) {
+            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_HISTORY}</code> tanpa argumen tambahan.`, config, 'HTML');
+          } else {
+            getTodaysHistory(config, userData);
+          }
           break;
         case KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG:
           kirimPesanTelegram("⚙️ Menerima perintah arsip. Memeriksa jumlah log...", config);

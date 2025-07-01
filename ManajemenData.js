@@ -319,80 +319,52 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
 }
 
 /**
- * [FUNGSI YANG DIPERBARUI SECARA TOTAL]
- * Mencari riwayat lengkap sebuah VM dengan mencari di sheet 'Log Perubahan' aktif
- * DAN di semua file arsip log JSON di Google Drive.
+ * [VERSI FINAL DIPERBAIKI]
+ * Mencari riwayat lengkap sebuah VM dengan mencari di log aktif DAN semua file arsip.
+ * Menggunakan helper getCombinedLogs untuk efisiensi dan konsistensi.
  */
 function getVmHistory(pk, config, userData) {
   if (!pk) {
-    kirimPesanTelegram("❌ Terjadi kesalahan: ID untuk melihat riwayat tidak valid atau kosong.", config);
+    kirimPesanTelegram("❌ Terjadi kesalahan: ID untuk melihat riwayat tidak valid.", config);
     return;
   }
 
   try {
-    kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pk)}</code>...\n<i>Proses ini mungkin memerlukan beberapa saat jika riwayatnya panjang.</i>`, config, 'HTML');
+    kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pk)}</code>...\n<i>Ini mungkin memerlukan beberapa saat...</i>`, config, 'HTML');
 
-    let combinedHistoryEntries = [];
-    const pkTrimmed = pk.trim().toLowerCase();
+    // Gunakan tanggal yang sangat lampau untuk mengambil SEMUA log
+    const allTimeStartDate = new Date('2020-01-01'); 
+    const { headers: logHeaders, data: allLogs } = getCombinedLogs(allTimeStartDate, config);
 
-    // --- 1. Cari di Sheet Log Aktif ---
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheetLog = spreadsheet.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
-    let logHeaders = [];
-
-    if (sheetLog && sheetLog.getLastRow() > 1) {
-      const dataLog = sheetLog.getDataRange().getValues();
-      logHeaders = dataLog.shift(); // Ambil header dan simpan
-      const pkIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.PK);
-
-      if (pkIndex !== -1) {
-        dataLog.forEach(row => {
-          if (row[pkIndex] && String(row[pkIndex]).trim().toLowerCase() === pkTrimmed) {
-            combinedHistoryEntries.push(row);
-          }
-        });
-      }
-    } else if (sheetLog) {
-      logHeaders = sheetLog.getRange(1, 1, 1, sheetLog.getLastColumn()).getValues()[0];
-    }
-
-    // --- 2. Cari di File Arsip JSON ---
-    const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP];
-    if (FOLDER_ARSIP_ID) {
-      const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
-      const arsipFiles = folderArsip.getFiles();
-      
-      while (arsipFiles.hasNext()) {
-        const file = arsipFiles.next();
-        if (file.getName().startsWith('Arsip Log -') && file.getName().endsWith('.json')) {
-          console.log(`Membaca file arsip: ${file.getName()}`);
-          const jsonContent = file.getBlob().getDataAsString();
-          const archivedLogs = JSON.parse(jsonContent);
-
-          // Filter log dari file arsip ini
-          const relevantLogs = archivedLogs.filter(log => 
-            log[KONSTANTA.HEADER_VM.PK] && String(log[KONSTANTA.HEADER_VM.PK]).trim().toLowerCase() === pkTrimmed
-          );
-
-          // Ubah kembali dari objek ke array agar formatnya sama
-          const relevantLogsAsArray = relevantLogs.map(logObject => logHeaders.map(header => logObject[header]));
-          combinedHistoryEntries.push(...relevantLogsAsArray);
-        }
-      }
-    }
-
-    // --- 3. Proses dan Tampilkan Hasil Gabungan ---
-    if (combinedHistoryEntries.length === 0) {
-      kirimPesanTelegram(`ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(pk)}</code> baik di log aktif maupun di arsip.`, config, 'HTML');
+    if (logHeaders.length === 0) {
+      kirimPesanTelegram("❌ Gagal memproses: Tidak dapat menemukan header log. Pastikan sheet 'Log Perubahan' ada.", config);
       return;
     }
 
-    // Urutkan semua hasil berdasarkan timestamp dari yang terbaru ke terlama
-    combinedHistoryEntries.sort((a, b) => new Date(b[0]) - new Date(a[0]));
+    const pkIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.PK);
+    if (pkIndex === -1) {
+      kirimPesanTelegram(`❌ Gagal memproses: Kolom '${KONSTANTA.HEADER_VM.PK}' tidak ditemukan di log.`, config);
+      return;
+    }
 
-    const totalEntries = combinedHistoryEntries.length;
+    // Filter semua log yang terkumpul berdasarkan PK yang dicari
+    const pkTrimmed = pk.trim().toLowerCase();
+    const historyEntries = allLogs.filter(row => 
+      row[pkIndex] && String(row[pkIndex]).trim().toLowerCase() === pkTrimmed
+    );
+
+    if (historyEntries.length === 0) {
+      kirimPesanTelegram(`ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(pk)}</code>.`, config, 'HTML');
+      return;
+    }
+
+    // Urutkan kembali berdasarkan tanggal dari yang terbaru (getCombinedLogs sudah mengurutkan, tapi ini untuk keamanan)
+    const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+    historyEntries.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
+
+    const totalEntries = historyEntries.length;
     const vmNameIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-    const currentVmName = combinedHistoryEntries[0][vmNameIndex] || 'Nama Tidak Ditemukan';
+    const currentVmName = historyEntries[0][vmNameIndex] || pk;
     
     let message = `<b>📜 Riwayat Lengkap untuk VM</b>\n`;
     message += `<b>${KONSTANTA.HEADER_VM.VM_NAME}:</b> ${escapeHtml(currentVmName)}\n`;
@@ -403,7 +375,7 @@ function getVmHistory(pk, config, userData) {
     // Jika hasil terlalu banyak, tampilkan ringkasan dan ekspor sisanya
     if (totalEntries > 8) {
       message += `Menampilkan 5 dari ${totalEntries} perubahan terakhir:\n\n`;
-      const entriesToShow = combinedHistoryEntries.slice(0, 5);
+      const entriesToShow = historyEntries.slice(0, 5);
       
       entriesToShow.forEach(entry => {
         message += formatHistoryEntry(entry, logHeaders);
@@ -414,11 +386,11 @@ function getVmHistory(pk, config, userData) {
       kirimPesanTelegram(message, config, 'HTML');
 
       // Panggil fungsi ekspor untuk membuat laporan lengkap
-      exportResultsToSheet(logHeaders, combinedHistoryEntries, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
+      exportResultsToSheet(logHeaders, historyEntries, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
 
     } else {
       // Jika hasil cukup sedikit, tampilkan semua
-      combinedHistoryEntries.forEach(entry => {
+      historyEntries.forEach(entry => {
         message += formatHistoryEntry(entry, logHeaders);
       });
       kirimPesanTelegram(message, config, 'HTML');
@@ -426,7 +398,7 @@ function getVmHistory(pk, config, userData) {
 
   } catch (e) {
     console.error(`Gagal total saat getVmHistory: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`❌ Terjadi kesalahan teknis saat mencoba mengambil riwayat lengkap. Silakan coba lagi.\nError: ${e.message}`, config);
+    kirimPesanTelegram(`❌ Terjadi kesalahan teknis saat mengambil riwayat.\nError: ${e.message}`, config);
   }
 }
 
@@ -436,7 +408,10 @@ function getVmHistory(pk, config, userData) {
  */
 function formatHistoryEntry(entry, headers) {
   let formattedText = "";
-  const timestamp = new Date(entry[headers.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP)]).toLocaleString('id-ID', { timeZone: "Asia/Jakarta", day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const timestamp = new Date(entry[headers.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP)]).toLocaleString('id-ID', { 
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit' 
+  });
   const action = entry[headers.indexOf(KONSTANTA.HEADER_LOG.ACTION)];
   const oldValue = entry[headers.indexOf(KONSTANTA.HEADER_LOG.OLD_VAL)];
   const newValue = entry[headers.indexOf(KONSTANTA.HEADER_LOG.NEW_VAL)];
@@ -447,88 +422,54 @@ function formatHistoryEntry(entry, headers) {
   if (action === 'MODIFIKASI') {
     const columnName = detail.replace("Kolom '", "").replace("' diubah", "");
     formattedText += `<b>Detail:</b> Kolom '${escapeHtml(columnName)}' diubah\n`;
-    formattedText += `   - Lama: <code>${escapeHtml(oldValue || 'Kosong')}</code>\n`;
-    formattedText += `   - Baru: <code>${escapeHtml(newValue || 'Kosong')}</code>\n\n`;
+    formattedText += `   - <code>${escapeHtml(oldValue || 'Kosong')}</code> ➔ <code>${escapeHtml(newValue || 'Kosong')}</code>\n\n`;
   } else {
-    formattedText += `   <i>Detail: ${escapeHtml(detail)}</i>\n\n`;
+    // Untuk aksi lain (PENAMBAHAN/PENGHAPUSAN), cukup tampilkan detailnya
+    formattedText += `<b>Detail:</b> ${escapeHtml(detail)}\n\n`;
   }
   return formattedText;
 }
 
 /**
- * Mengambil semua log perubahan yang terjadi pada hari ini.
+ * [VERSI FINAL DIPERBAIKI]
+ * Mengambil semua log perubahan hari ini dari sheet aktif DAN semua file arsip.
  */
 function getTodaysHistory(config, userData) {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetLog = spreadsheet.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
-  if (!sheetLog || sheetLog.getLastRow() <= 1) {
-    kirimPesanTelegram("ℹ️ Tidak ada data log perubahan yang ditemukan sama sekali.", config);
-    return;
-  }
+  try {
+    const now = new Date();
+    // Setel waktu ke awal hari ini (00:00:00)
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0); 
+    
+    // Panggil helper untuk mendapatkan semua log dari awal hari ini
+    const { headers: logHeaders, data: todaysLogEntries } = getCombinedLogs(todayStart, config);
 
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0); 
-  
-  const allLogData = sheetLog.getDataRange().getValues();
-  const todaysLogEntries = allLogData.filter((row, index) => {
-    if (index === 0) return false; // Lewati baris header
-    return new Date(row[0]) >= todayStart;
-  });
+    const todayStr = now.toLocaleDateString('id-ID', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
 
-  const todayStr = now.toLocaleDateString('id-ID', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
-
-  if (todaysLogEntries.length === 0) {
-    kirimPesanTelegram(`✅ Tidak ada perubahan yang tercatat pada hari ini, ${todayStr}.`, config);
-    return;
-  }
-  
-  let message = `<b>📜 Log Perubahan Hari Ini</b>\n<i>${todayStr}</i>\nTotal Entri: ${todaysLogEntries.length}\n`;
-  message += `------------------------------------\n\n`;
-  
-  let inlineKeyboard = null;
-  const logHeaders = allLogData[0];
-
-  if (todaysLogEntries.length > 15) {
-    message += "Ditemukan lebih dari 15 entri perubahan hari ini. Untuk detail lengkap, silakan unduh file terlampir.";
-    const fileUrl = exportResultsToSheet(logHeaders, todaysLogEntries, `Log Harian`, config, userData);
-    if (fileUrl) {
-      inlineKeyboard = { inline_keyboard: [[{ text: `📄 Lihat Semua ${todaysLogEntries.length} Log di Sheet`, url: fileUrl }]] };
+    if (todaysLogEntries.length === 0) {
+      kirimPesanTelegram(`✅ Tidak ada perubahan yang tercatat pada hari ini, ${todayStr}.`, config);
+      return;
     }
-  } else {
-    // [REFACTOR] Menggunakan konstanta untuk mencari indeks header
-    const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
-    const actionIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.ACTION);
-    const vmNameIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-    const oldValueIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.OLD_VAL);
-    const newValueIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.NEW_VAL);
-    const detailIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.DETAIL);
+    
+    let message = `<b>📜 Log Perubahan Hari Ini (Termasuk Arsip)</b>\n<i>${todayStr}</i>\nTotal Entri: ${todaysLogEntries.length}\n`;
+    message += `------------------------------------\n\n`;
+    
+    // Jika hasil terlalu banyak, langsung ekspor.
+    if (todaysLogEntries.length > 15) {
+      message += `Ditemukan lebih dari 15 entri perubahan. Untuk detail lengkap, laporan telah diekspor ke Google Sheet.`;
+      kirimPesanTelegram(message, config, 'HTML');
+      exportResultsToSheet(logHeaders, todaysLogEntries, `Log Harian`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
+    } else {
+      // Jika cukup sedikit, tampilkan langsung di pesan.
+      todaysLogEntries.forEach(entry => {
+        message += formatHistoryEntry(entry, logHeaders);
+      });
+      kirimPesanTelegram(message, config, 'HTML');
+    }
 
-    todaysLogEntries.forEach(entry => {
-      const timestamp = new Date(entry[timestampIndex]).toLocaleTimeString('id-ID', {timeZone: "Asia/Jakarta"});
-      const action = entry[actionIndex];
-      const vmName = entry[vmNameIndex];
-      const oldValue = entry[oldValueIndex];
-      const newValue = entry[newValueIndex];
-      const detail = entry[detailIndex];
-      
-      let icon = '⚙️';
-      if (action.includes('PENAMBAHAN') || action.includes('BARU')) icon = '✅';
-      else if (action.includes('PENGHAPUSAN') || action.includes('DIHAPUS')) icon = '❌';
-      else if (action.includes('MODIFIKASI') || action.includes('DIUBAH')) icon = '✏️';
-
-      message += `<b>${icon} [${timestamp}]</b> - <b>${escapeHtml(vmName)}</b>\n`;
-      message += `   <i>Aksi: ${escapeHtml(action)}</i>\n`;
-
-      if (action.includes('MODIFIKASI') || action.includes('DIUBAH')) {
-          message += `   <b>Detail:</b> ${escapeHtml(detail)}\n`;
-          message += `   - Lama: <code>${escapeHtml(oldValue || 'N/A')}</code>\n`;
-          message += `   - Baru: <code>${escapeHtml(newValue || 'N/A')}</code>\n\n`;
-      } else {
-          message += `   <i>Detail: ${escapeHtml(detail)}</i>\n\n`;
-      }
-    });
+  } catch (e) {
+    console.error(`Gagal saat getTodaysHistory: ${e.message}\nStack: ${e.stack}`);
+    kirimPesanTelegram(`❌ Terjadi kesalahan teknis saat mengambil riwayat hari ini.\nError: ${e.message}`, config);
   }
-  kirimPesanTelegram(message, config, 'HTML', inlineKeyboard);
 }
 
 /**

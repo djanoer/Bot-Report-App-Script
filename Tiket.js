@@ -1,199 +1,13 @@
 // ===== FILE: Tiket.gs =====
 
-/**
- * [VERSI FINAL LENGKAP]
- * Membuat laporan komprehensif dengan filter "not Done" pada analisis usia follow-up.
- * @param {object} config - Objek konfigurasi yang sudah dibaca.
- * @returns {string} - String berisi teks laporan final.
- */
-function generateFinalTicketReportText(config) {
-  console.log("Membuat laporan tiket final dengan filter 'not Done'...");
-  const { ticketData, headers } = getLocalTicketData(config);
-
-  if (!ticketData || ticketData.length === 0) {
-    return "ℹ️ Tidak ada data tiket yang ditemukan untuk dibuat laporan.";
-  }
-
-  const statusIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.STATUS);
-  const fuDateIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.TGL_FU);
-  if (statusIndex === -1 || fuDateIndex === -1) {
-    return "❌ Gagal: Kolom 'Status Tiket' atau 'Tanggal FU ke User' tidak ditemukan.";
-  }
-
-  // Siapkan semua variabel yang akan kita hitung
-  const statusCounts = {};
-  let grandTotalStatus = 0;
-  let notFollowedUpCount = 0;
-  let followedUp7to14Days = 0;
-  let followedUp14to28Days = 0;
-  let followedUpOver1Month = 0;
-  const now = new Date();
-
-  // Iterasi melalui semua data tiket untuk melakukan perhitungan
-  ticketData.forEach(row => {
-    // 1. Hitung Status Tiket (ini dilakukan untuk semua tiket)
-    const status = String(row[statusIndex] || 'Tanpa Status').trim();
-    statusCounts[status] = (statusCounts[status] || 0) + 1;
-    
-    // === LOGIKA FILTER BARU DI SINI ===
-    // 2. Hanya lakukan analisis usia follow-up jika status tiket BUKAN "Done"
-    if (status.toLowerCase() !== 'done') {
-      const fuDateValue = row[fuDateIndex];
-      if (!fuDateValue) {
-        // Jika tanggal kosong, hitung sebagai 'Belum di Follow up'
-        notFollowedUpCount++;
-      } else {
-        const fuDate = new Date(fuDateValue);
-        if (!isNaN(fuDate.getTime())) {
-          const daysSinceFu = Math.floor((now - fuDate) / (1000 * 60 * 60 * 24));
-          
-          if (daysSinceFu > 7 && daysSinceFu <= 14) {
-            followedUp7to14Days++;
-          } else if (daysSinceFu > 14 && daysSinceFu <= 28) {
-            followedUp14to28Days++;
-          } else if (daysSinceFu > 30) {
-            followedUpOver1Month++;
-          }
-        }
-      }
-    }
-  });
-
-  // Hitung Grand Total dari status
-  for (const status in statusCounts) {
-    grandTotalStatus += statusCounts[status];
-  }
-  console.log("Semua perhitungan dengan filter 'not Done' selesai.");
-
-  // Bangun teks laporan final
-  let text = `<b>📊 Laporan Monitoring Tiket Utilisasi</b>\n`;
-  text += `<i>Data per: ${new Date().toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>\n`;
-  text += `--------------------------------------------------\n\n`;
-  text += `<b>Ringkasan Status Tiket:</b>\n`;
-  for (const status in statusCounts) {
-    text += `• ${escapeHtml(status)}: <b>${statusCounts[status]} tiket</b>\n`;
-  }
-  text += `• <b>Grand Total: ${grandTotalStatus} tiket</b>\n`;
-  text += `\n--------------------------------------------------\n\n`;
-  text += `<b>Analisis Usia Follow-up (Status Bukan "Done"):</b>\n`; // Judul diperjelas
-  text += `• Belum di Follow up: <b>${notFollowedUpCount} tiket</b>\n`;
-  text += `• Di-follow Up 7-14 Hari Lalu: <b>${followedUp7to14Days} tiket</b>\n`;
-  text += `• Di-follow Up 14-28 Hari Lalu: <b>${followedUp14to28Days} tiket</b>\n`;
-  text += `• Di-follow Up > 1 Bulan Lalu: <b>${followedUpOver1Month} tiket</b>\n`;
-
-  console.log("Teks laporan final berhasil dibuat.");
-  return text;
-}
-
-/**
- * Membuat laporan yang hanya berisi ringkasan status tiket.
- * @param {object} config - Objek konfigurasi yang sudah dibaca.
- * @returns {string} - String berisi teks laporan status.
- */
-function generateTicketStatusOnlyReport(config) {
-  console.log("Membuat laporan 'hanya status'...");
-  const { ticketData, headers } = getLocalTicketData(config);
-
-  // Validasi data
-  if (!ticketData || ticketData.length === 0) {
-    console.log("Validasi gagal: Tidak ada data tiket ditemukan.");
-    return "ℹ️ Tidak ada data tiket yang ditemukan untuk dibuat laporan.";
-  }
-  console.log(`Ditemukan ${ticketData.length} baris data tiket untuk dihitung statusnya.`);
-
-  // Dapatkan indeks kolom status
-  const statusIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.STATUS);
-  if (statusIndex === -1) {
-    console.error("Kolom status tidak ditemukan di header.");
-    return "❌ Gagal membuat laporan: Kolom status tidak ditemukan di header sheet tiket.";
-  }
-
-  // Objek untuk menyimpan hitungan setiap status
-  const statusCounts = {};
-
-  // Mulai hitung jumlah tiket untuk setiap status
-  ticketData.forEach(row => {
-    const status = String(row[statusIndex] || 'Tanpa Status').trim();
-    statusCounts[status] = (statusCounts[status] || 0) + 1;
-  });
-  console.log("Penghitungan status selesai.");
-
-  // Bangun teks laporan
-  let text = `<b>📊 Laporan Monitoring Tiket Utilisasi</b>\n`;
-  text += `<i>Data per: ${new Date().toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>\n\n`;
-  text += `--------------------------------------------------\n`;
-  text += `<i>Total Tiket Saat Ini: <b>${ticketData.length} tiket</b></i>\n`; // Menambahkan total tiket
-  text += `--------------------------------------------------\n\n`;
-  text += `<b>Ringkasan Status Tiket:</b>\n`;
-
-  // Tambahkan hasil hitungan ke teks laporan
-  for (const status in statusCounts) {
-    text += `• ${status}: <b>${statusCounts[status]} tiket</b>\n`;
-  }
-  
-  console.log("Teks laporan 'hanya status' berhasil dibuat.");
-  return text;
-}
-
-function generateFullTicketReportText(config) {
-  try {
-    const { ticketData, headers } = getLocalTicketData(config);
-
-    if (!ticketData || ticketData.length === 0) {
-      return "ℹ️ Tidak ada data tiket yang ditemukan untuk dibuat laporan.";
-    }
-
-    const statusIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.STATUS);
-    const fuDateIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.TGL_FU);
-
-    const statusCounts = {};
-    const activeTickets = [];
-    const statusAktif = config[KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF] || [];
-
-    ticketData.forEach(row => {
-      const status = String(row[statusIndex] || 'Tanpa Status').trim();
-      statusCounts[status] = (statusCounts[status] || 0) + 1;
-      if (statusAktif.includes(status.toLowerCase())) {
-        activeTickets.push(row);
-      }
-    });
-
-    const ageCategories = categorizeTicketAge(activeTickets, fuDateIndex);
-
-    let text = `<b>📊 Laporan Monitoring Tiket Utilisasi</b>\n`;
-    text += `<i>Data per: ${new Date().toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>\n`;
-    text += `<i>Total Tiket Saat Ini: ${ticketData.length} tiket</i>\n`;
-    text += `--------------------------------------------------\n\n`;
-    text += `<b>Ringkasan Status Tiket:</b>\n`;
-    for (const status in statusCounts) {
-      // === PERUBAHAN PENTING DI SINI ===
-      // Kita menggunakan escapeHtml() untuk mengamankan nama status
-      text += `• ${escapeHtml(status)}: <b>${statusCounts[status]} tiket</b>\n`;
-    }
-    text += `\n--------------------------------------------------\n\n`;
-    text += `<b>Analisis Usia Follow-up (untuk ${activeTickets.length} tiket aktif):</b>\n`;
-    text += `• > 1 Bulan:         <b>${ageCategories.gt1Month.length} tiket</b>\n`;
-    text += `• > 2 - 4 Minggu:  <b>${ageCategories.gt2lt4Weeks.length} tiket</b>\n`;
-    text += `• > 1 - 2 Minggu:  <b>${ageCategories.gt1lt2Weeks.length} tiket</b>\n`;
-    text += `• < 1 Minggu:      <b>${ageCategories.lt1Week.length} tiket</b>\n\n`;
-    text += `<i>Untuk detail lebih lanjut, silakan akses spreadsheet sumber.</i>`;
-    
-    return text;
-
-  } catch (e) {
-    console.error(`ERROR DI DALAM generateFullTicketReportText: ${e.message}\nStack: ${e.stack}`);
-    return `❌ Terjadi error internal saat memproses data laporan.\n\n<b>Detail:</b>\n<code>${escapeHtml(e.message)}</code>`;
-  }
-}
-
 // =================================================================
-// FUNGSI UTAMA: PENGENDALI INTERAKSI TIKET
+// FUNGSI UTAMA: PENGENDALI INTERAKSI TIKET (ROUTER)
 // =================================================================
 
 /**
- * Fungsi utama yang mengendalikan semua interaksi untuk fitur tiket.
- * Dipanggil saat pengguna menjalankan /cektiket atau menekan tombol tiket.
- * @param {object} update - Objek update lengkap dari Telegram (dari doPost).
+ * Fungsi utama yang mengendalikan semua interaksi untuk fitur tiket "elegan".
+ * @param {object} update - Objek update lengkap dari Telegram.
+ * @param {object} config - Objek konfigurasi yang sudah dibaca.
  */
 function handleTicketInteraction(update, config) {
   const isCallback = !!update.callback_query;
@@ -208,44 +22,34 @@ function handleTicketInteraction(update, config) {
     chatId = update.message.chat.id;
   }
   
-  // -- Alur 1: Pengguna baru memulai dengan /cektiket --
   if (!isCallback) {
     const { text, keyboard } = generateSummaryView(config);
     kirimPesanTelegram(text, config, 'HTML', keyboard, chatId);
     return;
   }
 
-  // -- Alur 2: Pengguna menekan tombol (Callback) --
-  const P = KONSTANTA.CALLBACK_TIKET; // Alias untuk konstanta
+  const P = KONSTANTA.CALLBACK_TIKET;
 
-  // Navigasi Kembali ke Ringkasan Utama
   if (callbackData === P.BACK_TO_SUMMARY) {
     const { text, keyboard } = generateSummaryView(config);
     editMessageText(text, keyboard, chatId, messageId, config);
   }
-  
-  // Melihat Daftar Tiket berdasarkan Kategori Usia
   else if (callbackData.startsWith(P.VIEW_CATEGORY)) {
     const category = callbackData.replace(P.VIEW_CATEGORY, '');
     const { text, keyboard } = generateTicketListView(category, config);
     editMessageText(text, keyboard, chatId, messageId, config);
   }
-
-  // Melihat Detail Keterangan Tiket
   else if (callbackData.startsWith(P.VIEW_DETAIL)) {
     const ticketId = callbackData.replace(P.VIEW_DETAIL, '');
     const { text, keyboard } = generateDetailView(ticketId, config);
     editMessageText(text, keyboard, chatId, messageId, config);
   }
-
-  // Navigasi Kembali ke Daftar Tiket dari Detail
   else if (callbackData.startsWith(P.BACK_TO_LIST)) {
     const category = callbackData.replace(P.BACK_TO_LIST, '');
     const { text, keyboard } = generateTicketListView(category, config);
     editMessageText(text, keyboard, chatId, messageId, config);
   }
 }
-
 
 // =================================================================
 // FUNGSI PEMBUAT TAMPILAN (VIEW GENERATORS)
@@ -255,172 +59,136 @@ function handleTicketInteraction(update, config) {
  * Membuat tampilan ringkasan utama (Laporan 1).
  */
 /**
- * [DIPERBARUI]
- * Membuat tampilan ringkasan utama (Laporan 1).
- * Menambahkan validasi untuk memeriksa apakah ada data tiket sebelum membuat laporan.
- */
-// ===== FILE: Tiket.js =====
-
-/**
- * [VERSI DEBUGGING]
- * Membuat tampilan ringkasan utama dengan 'console.log' di setiap langkah
- * untuk melacak di mana prosesnya gagal.
+ * Membuat tampilan ringkasan utama dengan narasi profesional DAN jumlah pada tombol.
+ * @param {object} config - Objek konfigurasi yang sudah dibaca.
  */
 function generateSummaryView(config) {
-  try {
-    console.log("Memulai generateSummaryView...");
-    const { ticketData, headers } = getLocalTicketData(config);
-
-    if (!ticketData || ticketData.length === 0) {
-      console.log("Validasi gagal: Tidak ada data tiket ditemukan.");
-      const text = "<b>📊 Laporan Monitoring Tiket Utilisasi</b>\n\n❌ Tidak ada data tiket yang ditemukan.";
-      const keyboard = { inline_keyboard: [[{ text: 'Tutup', callback_data: 'ignore' }]] };
-      return { text, keyboard };
-    }
-    console.log(`Validasi berhasil: Ditemukan ${ticketData.length} baris data tiket.`);
-
-    const statusIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.STATUS);
-    const fuDateIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.TGL_FU);
-    console.log(`Indeks kolom ditemukan: STATUS di ${statusIndex}, TGL_FU di ${fuDateIndex}.`);
-
-    const statusCounts = {};
-    const activeTickets = [];
-    const statusAktif = config[KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF] || [];
-    console.log(`Memulai analisis data dengan status aktif: [${statusAktif.join(", ")}]`);
-
-    ticketData.forEach(row => {
-      const status = String(row[statusIndex] || 'Tanpa Status').trim();
-      statusCounts[status] = (statusCounts[status] || 0) + 1;
-      if (statusAktif.includes(status.toLowerCase())) {
-        activeTickets.push(row);
-      }
-    });
-    console.log(`Analisis status selesai. Total tiket aktif ditemukan: ${activeTickets.length}`);
-
-    const ageCategories = categorizeTicketAge(activeTickets, fuDateIndex);
-    console.log("Pengelompokan usia tiket selesai.");
-    console.log(JSON.stringify(ageCategories, (key, value) => (key === '' ? value.length : value), 2)); // Log jumlah di setiap kategori
-
-    console.log("Mulai merangkai teks laporan...");
-    let text = `<b>📊 Laporan Monitoring Tiket Utilisasi</b>\n`;
-    text += `<i>Data per: ${new Date().toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>\n`;
-    text += `--------------------------------------------------\n\n`;
-    text += `<b>Ringkasan Status Tiket:</b>\n`;
-    for (const status in statusCounts) {
-      text += `• ${status}: <b>${statusCounts[status]} tiket</b>\n`;
-    }
-    text += `\n--------------------------------------------------\n\n`;
-    text += `<b>Analisis Usia Follow-up (untuk ${activeTickets.length} tiket aktif):</b>\n`;
-    text += `• > 1 Bulan:         <b>${ageCategories.gt1Month.length} tiket</b>\n`;
-    text += `• > 2 - 4 Minggu:  <b>${ageCategories.gt2lt4Weeks.length} tiket</b>\n`;
-    text += `• > 1 - 2 Minggu:  <b>${ageCategories.gt1lt2Weeks.length} tiket</b>\n`;
-    text += `• < 1 Minggu:      <b>${ageCategories.lt1Week.length} tiket</b>\n\n`;
-    text += `Pilih kategori untuk melihat detail tiket:`;
-    console.log("Teks laporan berhasil dirangkai.");
-
-    console.log("Mulai merangkai keyboard...");
-    const P = KONSTANTA.CALLBACK_TIKET;
-    const keyboard = {
-      inline_keyboard: [
-        [
-          { text: `> 1 Bln (${ageCategories.gt1Month.length})`, callback_data: P.VIEW_CATEGORY + 'gt1Month' },
-          { text: `> 2-4 Mg (${ageCategories.gt2lt4Weeks.length})`, callback_data: P.VIEW_CATEGORY + 'gt2lt4Weeks' }
-        ],
-        [
-          { text: `> 1-2 Mg (${ageCategories.gt1lt2Weeks.length})`, callback_data: P.VIEW_CATEGORY + 'gt1lt2Weeks' },
-          { text: `< 1 Mg (${ageCategories.lt1Week.length})`, callback_data: P.VIEW_CATEGORY + 'lt1Week' }
-        ]
-      ]
-    };
-    console.log("Keyboard berhasil dirangkai.");
-    
-    return { text, keyboard };
-  } catch (e) {
-    // Tangkap error spesifik dari dalam fungsi ini
-    console.error(`ERROR DI DALAM generateSummaryView: ${e.message}\nStack: ${e.stack}`);
-    // Kembalikan pesan error yang jelas untuk dikirim ke pengguna
-    return { 
-      text: `❌ Terjadi error saat memproses data laporan tiket.\n\n<b>Detail:</b>\n<code>${e.message}</code>`,
-      keyboard: { inline_keyboard: [[{ text: 'Tutup', callback_data: 'ignore' }]] }
-    };
+  const { ticketData, headers } = getLocalTicketData(config);
+  if (!ticketData || ticketData.length === 0) {
+    return { text: "ℹ️ Tidak ada data tiket yang ditemukan.", keyboard: { inline_keyboard: [] }};
   }
+
+  const statusIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.STATUS);
+  const fuDateIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.TGL_FU);
+
+  // Analisis data
+  const statusCounts = {};
+  // Filter tiket aktif (bukan "Done") untuk analisis usia
+  const activeTickets = ticketData.filter(row => String(row[statusIndex] || '').toLowerCase() !== 'done');
+  
+  // Hitung semua status untuk ditampilkan di ikhtisar
+  ticketData.forEach(row => {
+    const status = String(row[statusIndex] || 'Tanpa Status').trim();
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+  });
+
+  // Gunakan logika pengkategorian yang sudah andal pada tiket aktif
+  const ageCategories = categorizeTicketAgeWithNewRules(activeTickets, statusIndex, fuDateIndex);
+
+  // Format tanggal yang lebih kaya
+  const timestamp = new Date().toLocaleString('id-ID', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZoneName: 'short', timeZone: "Asia/Jakarta"
+  });
+
+  // Membangun Teks Laporan
+  let text = `<b>📊 Monitoring & Analisis Tiket Utilisasi</b>\n`;
+  text += `<i>Diperbarui pada: ${timestamp}</i>\n`;
+  text += `--------------------------------------------------\n\n`;
+  text += `<b>Ikhtisar Status Tiket</b>\n`;
+  for (const status in statusCounts) {
+    text += `• ${escapeHtml(status)}: <b>${statusCounts[status]}</b>\n`;
+  }
+  text += `• <b>Total Keseluruhan: ${ticketData.length} tiket</b>\n\n`;
+  text += `--------------------------------------------------\n\n`;
+  text += `<b>Analisis Usia Tindak Lanjut (Tiket Aktif)</b>\n`;
+  text += `Silakan pilih kategori di bawah untuk inspeksi lebih lanjut:`;
+
+  // --- PERBAIKAN UTAMA ADA DI SINI ---
+  // Membangun keyboard dengan jumlah di setiap tombol
+  const P = KONSTANTA.CALLBACK_TIKET;
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: `Belum Ditindaklanjuti (Status "Open") (${ageCategories.notFollowedUp.length})`, callback_data: P.VIEW_CATEGORY + 'notFollowedUp' }],
+      [{ text: `Tindak Lanjut 7-14 Hari (${ageCategories.followedUp7to14Days.length})`, callback_data: P.VIEW_CATEGORY + 'followedUp7to14Days' }],
+      [{ text: `Tindak Lanjut 14-28 Hari (${ageCategories.followedUp14to28Days.length})`, callback_data: P.VIEW_CATEGORY + 'followedUp14to28Days' }],
+      [{ text: `Tindak Lanjut > 1 Bulan (${ageCategories.followedUpOver1Month.length})`, callback_data: P.VIEW_CATEGORY + 'followedUpOver1Month' }]
+    ]
+  };
+  return { text, keyboard };
 }
 
 /**
- * [DIPERBARUI]
- * Membuat tampilan daftar tiket per kategori (Laporan 2).
- * Daftar status aktif sekarang juga diambil dari Konfigurasi agar konsisten.
+ * Membuat tampilan daftar tiket (Laporan 2).
  */
 function generateTicketListView(category, config) {
   const { ticketData, headers } = getLocalTicketData(config);
-  const fuDateIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.TGL_FU);
   const statusIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.STATUS);
+  const fuDateIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.TGL_FU);
   const devOpsIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.DEV_OPS);
   const categoryIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.KATEGORI);
   const linkIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.LINK_TIKET);
   
-  // === PERUBAHAN DI SINI ===
-  // Menggunakan daftar status aktif dari Konfigurasi, sama seperti di generateSummaryView.
-  const statusAktif = config[KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF] || [];
-  const activeTickets = ticketData.filter(row => {
-    const status = String(row[statusIndex] || '').toLowerCase();
-    return statusAktif.includes(status);
-  });
+  const ageCategories = categorizeTicketAgeWithNewRules(ticketData, statusIndex, fuDateIndex);
   
-  const ageCategories = categorizeTicketAge(activeTickets, fuDateIndex);
   const ticketsToShow = ageCategories[category];
 
   const categoryTitles = {
-    gt1Month: '> 1 Bulan',
-    gt2lt4Weeks: '> 2 - 4 Minggu',
-    gt1lt2Weeks: '> 1 - 2 Minggu',
-    lt1Week: '< 1 Minggu'
+    notFollowedUp: 'Belum di Follow up (Status "Open")',
+    followedUp7to14Days: '7-14 Hari Lalu',
+    followedUp14to28Days: '14-28 Hari Lalu',
+    followedUpOver1Month: '> 1 Bulan Lalu'
   };
 
-  let text = `<b>📜 Daftar Tiket (Belum Follow-up ${categoryTitles[category]})</b>\n\n`;
+  let text = `<b>📜 Daftar Tiket (${categoryTitles[category]})</b>\n\n`;
   const keyboardRows = [];
   
-  if (ticketsToShow.length === 0) {
+  if (!ticketsToShow || ticketsToShow.length === 0) {
     text += "<i>Tidak ada tiket dalam kategori ini.</i>";
   } else {
     ticketsToShow.forEach((row, i) => {
-      const ticketId = parseTicketId(row[linkIndex] || '');
+      const ticketUrl = row[linkIndex] || '#'; // Ambil URL lengkap tiket
+      const ticketId = parseTicketId(ticketUrl); // Dapatkan ID tiket untuk teks link
       const ticketCategory = row[categoryIndex] || 'N/A';
       const ticketDevOps = row[devOpsIndex] || 'N/A';
       const ticketStatus = row[statusIndex] || 'N/A';
       
-      text += `${i + 1}. <b>${ticketId}</b>, ${ticketCategory}, ${ticketDevOps}, ${ticketStatus}\n`;
+      // === PERUBAHAN PENTING DI SINI ===
+      // ID tiket sekarang menjadi hyperlink menggunakan tag <a> HTML
+      text += `${i + 1}. <a href="${ticketUrl}"><b>${ticketId}</b></a>, ${escapeHtml(ticketCategory)}, ${escapeHtml(ticketDevOps)}, ${escapeHtml(ticketStatus)}\n`;
+      
       keyboardRows.push([{ text: `Lihat Keterangan untuk ${ticketId}`, callback_data: KONSTANTA.CALLBACK_TIKET.VIEW_DETAIL + ticketId }]);
     });
   }
 
-  // Tombol kembali
   keyboardRows.push([{ text: '⬅️ Kembali ke Ringkasan', callback_data: KONSTANTA.CALLBACK_TIKET.BACK_TO_SUMMARY }]);
-  
   return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
 
 /**
- * Membuat tampilan detail keterangan tiket (Laporan 3).
+ * [DIPERBARUI] Membuat tampilan detail tiket dengan mengambil dari kolom Keterangan.
  */
 function generateDetailView(ticketId, config) {
   const { ticketData, headers } = getLocalTicketData(config);
   const linkIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.LINK_TIKET);
-  const actionIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.ACTION);
+  // === PERUBAHAN DI SINI: Menggunakan kolom KETERANGAN ===
+  const keteranganIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.KETERANGAN);
   
   const ticketRow = ticketData.find(row => parseTicketId(row[linkIndex] || '') === ticketId);
   
   let text = `<b>💬 Keterangan untuk Tiket: ${ticketId}</b>\n\n`;
   
   if (ticketRow) {
-    text += ticketRow[actionIndex] || "<i>Tidak ada keterangan yang tersedia.</i>";
+    // === PERUBAHAN DI SINI: Mengambil data dari keteranganIndex ===
+    const keterangan = keteranganIndex !== -1 ? ticketRow[keteranganIndex] : "Kolom Keterangan tidak ditemukan.";
+    text += keterangan || "<i>Tidak ada keterangan yang tersedia.</i>";
   } else {
     text += "<i>Detail untuk tiket ini tidak dapat ditemukan.</i>";
   }
 
-  // Cari kategori asal untuk tombol kembali yang cerdas
+  const statusIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.STATUS);
   const fuDateIndex = headers.indexOf(KONSTANTA.HEADER_TIKET.TGL_FU);
-  const originalCategory = findTicketCategory(ticketRow, fuDateIndex);
+  const originalCategory = findTicketCategoryWithNewRules(ticketRow, statusIndex, fuDateIndex);
 
   const keyboard = {
     inline_keyboard: [
@@ -431,13 +199,79 @@ function generateDetailView(ticketId, config) {
   return { text, keyboard };
 }
 
-
 // =================================================================
 // FUNGSI PEMBANTU (HELPER FUNCTIONS)
 // =================================================================
 
 /**
- * Membaca data tiket dari sheet lokal di spreadsheet bot.
+ * [DIPERBARUI] Mengelompokkan tiket dengan aturan baru untuk "Belum di Follow up".
+ */
+function categorizeTicketAgeWithNewRules(allTickets, statusIndex, fuDateIndex) {
+  const categories = {
+    notFollowedUp: [],
+    followedUp7to14Days: [],
+    followedUp14to28Days: [],
+    followedUpOver1Month: []
+  };
+  const now = new Date();
+
+  allTickets.forEach(row => {
+    const status = String(row[statusIndex] || '').toLowerCase();
+
+    // === PERUBAHAN LOGIKA DI SINI ===
+    // 1. Jika status adalah "open tiket", langsung masukkan ke kategori notFollowedUp.
+    if (status === 'open tiket') {
+      categories.notFollowedUp.push(row);
+      return; // Lanjutkan ke tiket berikutnya
+    }
+
+    // 2. Jika status BUKAN "done", baru proses tanggalnya.
+    if (status !== 'done') {
+      const fuDateValue = row[fuDateIndex];
+      if (fuDateValue) {
+        const fuDate = new Date(fuDateValue);
+        if (!isNaN(fuDate.getTime())) {
+          const daysSinceFu = Math.floor((now - fuDate) / (1000 * 60 * 60 * 24));
+          if (daysSinceFu > 30) {
+            categories.followedUpOver1Month.push(row);
+          } else if (daysSinceFu > 14 && daysSinceFu <= 28) {
+            categories.followedUp14to28Days.push(row);
+          } else if (daysSinceFu > 7 && daysSinceFu <= 14) {
+            categories.followedUp7to14Days.push(row);
+          }
+        }
+      }
+    }
+  });
+  return categories;
+}
+
+/**
+ * [DIPERBARUI] Mencari kategori asal tiket dengan aturan baru.
+ */
+function findTicketCategoryWithNewRules(ticketRow, statusIndex, fuDateIndex) {
+  if (!ticketRow) return 'notFollowedUp'; // Fallback
+  
+  const status = String(ticketRow[statusIndex] || '').toLowerCase();
+  if (status === 'open tiket') return 'notFollowedUp';
+  if (status === 'done') return 'notFollowedUp'; // Fallback jika tiket "done" каким-то образом попадает сюда
+
+  const fuDateValue = ticketRow[fuDateIndex];
+  if (!fuDateValue) return 'notFollowedUp'; // Default jika tidak ada tanggal
+
+  const fuDate = new Date(fuDateValue);
+  if (isNaN(fuDate.getTime())) return 'notFollowedUp';
+
+  const daysSinceFu = Math.floor((new Date() - fuDate) / (1000 * 60 * 60 * 24));
+  if (daysSinceFu > 30) return 'followedUpOver1Month';
+  if (daysSinceFu > 14 && daysSinceFu <= 28) return 'followedUp14to28Days';
+  if (daysSinceFu > 7 && daysSinceFu <= 14) return 'followedUp7to14Days';
+  
+  return 'notFollowedUp';
+}
+
+/**
+ * Membaca data tiket dari sheet lokal. (Tidak Berubah)
  */
 function getLocalTicketData(config) {
   const namaSheetTiket = config[KONSTANTA.KUNCI_KONFIG.NAMA_SHEET_TIKET];
@@ -452,44 +286,8 @@ function getLocalTicketData(config) {
   return { ticketData, headers };
 }
 
-// ===== FILE: Tiket.js =====
-
-function categorizeTicketAge(tickets, fuDateIndex) {
-  const categories = { gt1Month: [], gt2lt4Weeks: [], gt1lt2Weeks: [], lt1Week: [] };
-  const now = new Date();
-  
-  tickets.forEach(row => {
-    const fuDateValue = row[fuDateIndex];
-    if (!fuDateValue) return;
-    const fuDate = new Date(fuDateValue);
-    if (isNaN(fuDate.getTime())) return;
-
-    const daysSinceFu = Math.floor((now - fuDate) / (1000 * 60 * 60 * 24));
-    if (daysSinceFu > 30) categories.gt1Month.push(row);
-    else if (daysSinceFu > 14) categories.gt2lt4Weeks.push(row);
-    else if (daysSinceFu > 7) categories.gt1lt2Weeks.push(row);
-    else if (daysSinceFu >= 0) categories.lt1Week.push(row);
-  });
-  return categories;
-}
-
 /**
- * Mencari kategori usia asal dari sebuah tiket untuk tombol kembali yang cerdas.
- */
-function findTicketCategory(ticketRow, fuDateIndex) {
-  const now = new Date();
-  if (!ticketRow) return 'gt1Month'; // Fallback jika tiket tidak ditemukan
-  const fuDate = ticketRow[fuDateIndex] ? new Date(ticketRow[fuDateIndex]) : null;
-  const daysSinceFu = fuDate ? Math.floor((now - fuDate) / (1000 * 60 * 60 * 24)) : Infinity;
-
-  if (daysSinceFu > 30) return 'gt1Month';
-  if (daysSinceFu > 14) return 'gt2lt4Weeks';
-  if (daysSinceFu > 7) return 'gt1lt2Weeks';
-  return 'lt1Week';
-}
-
-/**
- * Mengekstrak ID tiket dari URL JIRA.
+ * Mengekstrak ID tiket dari URL. (Tidak Berubah)
  */
 function parseTicketId(url) {
   if (typeof url !== 'string' || !url) return 'N/A';
