@@ -149,7 +149,6 @@ function findVmAndGetInfo(searchTerm, config, userData) {
   const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
   const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
 
-  // Periksa kolom esensial
   if (pkIndex === -1 || nameIndex === -1 || ipIndex === -1) {
     let missingCols = [];
     if(pkIndex === -1) missingCols.push(`'${KONSTANTA.HEADER_VM.PK}'`);
@@ -161,15 +160,16 @@ function findVmAndGetInfo(searchTerm, config, userData) {
 
   const allData = sheet.getDataRange().getValues();
   const searchLower = searchTerm.toLowerCase();
+  const normalizedSearchTerm = normalizePrimaryKey(searchLower);
   let results = [];
 
   for (let i = 1; i < allData.length; i++) {
     const row = allData[i];
-    const vmPk = String(row[pkIndex] || '').toLowerCase();
+    const vmPk = normalizePrimaryKey(String(row[pkIndex] || '')).toLowerCase();
     const vmName = String(row[nameIndex] || '').toLowerCase();
     const vmIp = String(row[ipIndex] || '').toLowerCase();
 
-    if (vmPk.includes(searchLower) || vmName.includes(searchLower) || vmIp.includes(searchLower)) {
+    if (vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower)) {
       results.push(row);
     }
   }
@@ -179,31 +179,33 @@ function findVmAndGetInfo(searchTerm, config, userData) {
     const vmData = {};
     headers.forEach((header, index) => vmData[header] = rowData[index]);
 
-    const pk = vmData[KONSTANTA.HEADER_VM.PK];
+    const pk_raw = vmData[KONSTANTA.HEADER_VM.PK]; // Ambil PK asli untuk callback
     let info = `✅ Data ditemukan untuk "<b>${escapeHtml(searchTerm)}</b>"\n`;
     info += `------------------------------------\n`;
     
-    // [PERUBAHAN] Menambahkan GUEST_OS ke dalam urutan tampilan
     const orderedLabels = [
         KONSTANTA.HEADER_VM.VM_NAME, KONSTANTA.HEADER_VM.PK, KONSTANTA.HEADER_VM.IP, 
-        KONSTANTA.HEADER_VM.GUEST_OS,
-        KONSTANTA.HEADER_VM.STATE, KONSTANTA.HEADER_VM.UPTIME, KONSTANTA.HEADER_VM.VCENTER, 
-        KONSTANTA.HEADER_VM.CLUSTER, KONSTANTA.HEADER_VM.CPU, KONSTANTA.HEADER_VM.MEMORY, 
-        KONSTANTA.HEADER_VM.PROV_GB, KONSTANTA.HEADER_VM.PROV_TB,
+        KONSTANTA.HEADER_VM.GUEST_OS, KONSTANTA.HEADER_VM.STATE, KONSTANTA.HEADER_VM.UPTIME, 
+        KONSTANTA.HEADER_VM.VCENTER, KONSTANTA.HEADER_VM.CLUSTER, KONSTANTA.HEADER_VM.CPU, 
+        KONSTANTA.HEADER_VM.MEMORY, KONSTANTA.HEADER_VM.PROV_GB, KONSTANTA.HEADER_VM.PROV_TB,
         KONSTANTA.HEADER_VM.KRITIKALITAS, KONSTANTA.HEADER_VM.KELOMPOK_APP, KONSTANTA.HEADER_VM.DEV_OPS
     ];
 
     orderedLabels.forEach(label => {
-      // Pastikan untuk memeriksa apakah kolom Guest OS ada di header sebelum mencoba menampilkannya
       if (vmData.hasOwnProperty(label)) {
         let value = vmData[label] || 'N/A';
         
-        // Logika format tambahan
+        // ===== [PERUBAHAN TAMPILAN 1] =====
+        // Jika label adalah Primary Key, normalkan nilainya sebelum ditampilkan.
+        if (label === KONSTANTA.HEADER_VM.PK) {
+          value = normalizePrimaryKey(value);
+        }
+        // ===================================
+        
         if (label === KONSTANTA.HEADER_VM.UPTIME && value && !isNaN(value)) value = `${value} hari`;
         if (label === KONSTANTA.HEADER_VM.CPU && value && !isNaN(value)) value = `${value} vCPU`;
         if (label === KONSTANTA.HEADER_VM.MEMORY && value && !isNaN(value)) value = `${value} GB`;
 
-        // Logika format pesan
         if (label === KONSTANTA.HEADER_VM.PK || label === KONSTANTA.HEADER_VM.IP) {
           info += `<b>${label}:</b> <code>${escapeHtml(value)}</code>\n`;
         } else {
@@ -211,7 +213,8 @@ function findVmAndGetInfo(searchTerm, config, userData) {
         }
       }
     });
-    const inlineKeyboard = { inline_keyboard: [[{ text: "📜 Lihat Histori Perubahan", callback_data: `history_${pk}` }]] };
+    // Tombol tetap menggunakan PK asli (raw) agar fungsi history berjalan benar
+    const inlineKeyboard = { inline_keyboard: [[{ text: "📜 Lihat Histori Perubahan", callback_data: `history_${pk_raw}` }]] };
     kirimPesanTelegram(info, config, 'HTML', inlineKeyboard);
 
   } else if (results.length > 1) {
@@ -221,7 +224,10 @@ function findVmAndGetInfo(searchTerm, config, userData) {
     results.slice(0, 15).forEach((row, i) => { 
       const vmName = escapeHtml(row[nameIndex]);
       const vmIp = escapeHtml(row[ipIndex]);
-      const vmPk = escapeHtml(row[pkIndex]);
+      // ===== [PERUBAHAN TAMPILAN 2] =====
+      // Normalkan PK sebelum menampilkannya di daftar.
+      const vmPk = escapeHtml(normalizePrimaryKey(row[pkIndex]));
+      // ===================================
       info += `${i + 1}. <b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)\n`;
     });
     
@@ -330,9 +336,12 @@ function getVmHistory(pk, config, userData) {
   }
 
   try {
-    kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pk)}</code>...\n<i>Ini mungkin memerlukan beberapa saat...</i>`, config, 'HTML');
+    // ===== [PERBAIKAN PESAN] =====
+    // Terapkan normalisasi pada PK yang ditampilkan di pesan "sedang mencari".
+    const pkToDisplay = normalizePrimaryKey(pk);
+    kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pkToDisplay)}</code>...\n<i>Ini mungkin memerlukan beberapa saat...</i>`, config, 'HTML');
+    // =============================
 
-    // Gunakan tanggal yang sangat lampau untuk mengambil SEMUA log
     const allTimeStartDate = new Date('2020-01-01'); 
     const { headers: logHeaders, data: allLogs } = getCombinedLogs(allTimeStartDate, config);
 
@@ -347,18 +356,16 @@ function getVmHistory(pk, config, userData) {
       return;
     }
 
-    // Filter semua log yang terkumpul berdasarkan PK yang dicari
-    const pkTrimmed = pk.trim().toLowerCase();
+    const pkTrimmed = normalizePrimaryKey(pk.trim()).toLowerCase();
     const historyEntries = allLogs.filter(row => 
-      row[pkIndex] && String(row[pkIndex]).trim().toLowerCase() === pkTrimmed
+      row[pkIndex] && normalizePrimaryKey(String(row[pkIndex])).toLowerCase() === pkTrimmed
     );
 
     if (historyEntries.length === 0) {
-      kirimPesanTelegram(`ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(pk)}</code>.`, config, 'HTML');
+      kirimPesanTelegram(`ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(normalizePrimaryKey(pk))}</code>.`, config, 'HTML');
       return;
     }
 
-    // Urutkan kembali berdasarkan tanggal dari yang terbaru (getCombinedLogs sudah mengurutkan, tapi ini untuk keamanan)
     const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
     historyEntries.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
 
@@ -368,11 +375,13 @@ function getVmHistory(pk, config, userData) {
     
     let message = `<b>📜 Riwayat Lengkap untuk VM</b>\n`;
     message += `<b>${KONSTANTA.HEADER_VM.VM_NAME}:</b> ${escapeHtml(currentVmName)}\n`;
-    message += `<b>${KONSTANTA.HEADER_VM.PK}:</b> <code>${escapeHtml(pk)}</code>\n`;
+    // ===== [PERUBAHAN TAMPILAN] =====
+    // Tampilkan PK yang sudah dinormalisasi di judul laporan.
+    message += `<b>${KONSTANTA.HEADER_VM.PK}:</b> <code>${escapeHtml(normalizePrimaryKey(pk))}</code>\n`;
+    // =================================
     message += `<i>Total ditemukan ${totalEntries} entri riwayat.</i>\n`;
     message += `------------------------------------\n\n`;
 
-    // Jika hasil terlalu banyak, tampilkan ringkasan dan ekspor sisanya
     if (totalEntries > 8) {
       message += `Menampilkan 5 dari ${totalEntries} perubahan terakhir:\n\n`;
       const entriesToShow = historyEntries.slice(0, 5);
@@ -385,11 +394,9 @@ function getVmHistory(pk, config, userData) {
       message += `<i>Riwayat terlalu panjang. Laporan lengkap sedang dibuat dalam file Google Sheet...</i>`;
       kirimPesanTelegram(message, config, 'HTML');
 
-      // Panggil fungsi ekspor untuk membuat laporan lengkap
       exportResultsToSheet(logHeaders, historyEntries, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
 
     } else {
-      // Jika hasil cukup sedikit, tampilkan semua
       historyEntries.forEach(entry => {
         message += formatHistoryEntry(entry, logHeaders);
       });
@@ -1048,14 +1055,15 @@ function cekDanArsipkanLogJikaPenuh(config = null) { // [DIUBAH] Tambahkan param
 }
 
 /**
- * [FUNGSI OPTIMALISASI BARU]
+ * [FUNGSI OPTIMALISASI BARU - VERSI FINAL DIPERBARUI]
  * Fungsi generik untuk mendeteksi perubahan antara data lama (arsip) dan data baru (sheet),
  * kemudian mencatat perbedaan ke dalam Log Perubahan.
+ * Fungsi ini sekarang menggunakan Primary Key yang sudah dinormalisasi untuk perbandingan.
  *
  * @param {object} config - Objek konfigurasi utama.
  * @param {string} sheetName - Nama sheet sumber data baru.
  * @param {string} archiveFileName - Nama file arsip .json di Google Drive.
- * @param {string} primaryKeyHeader - Nama kolom yang menjadi kunci unik (e.g., 'Primary Key' atau 'Name').
+ * @param {string} primaryKeyHeader - Nama kolom yang menjadi kunci unik (e.g., 'Primary Key').
  * @param {Array<object>} columnsToTrack - Array objek kolom yg dipantau, format: [{nama: 'HeaderName', index: 0}].
  * @param {string} entityName - Nama entitas untuk pesan log (e.g., 'VM' atau 'Datastore').
  * @returns {Array<Array<any>>} Array berisi entri log yang baru ditambahkan.
@@ -1078,7 +1086,8 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
     throw new Error(`Kolom Primary Key "${primaryKeyHeader}" tidak ditemukan di sheet "${sheetName}".`);
   }
 
-  // 1. Baca Arsip Lama
+  // ===== [LANGKAH 1: PERUBAHAN] =====
+  // Baca Arsip Lama dan langsung normalisasi kuncinya untuk perbandingan.
   const folderArsip = DriveApp.getFolderById(config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP]);
   const files = folderArsip.getFilesByName(archiveFileName);
   let mapDataKemarin = new Map();
@@ -1086,17 +1095,20 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
   if (files.hasNext()) {
     fileArsip = files.next();
     try {
-      mapDataKemarin = new Map(JSON.parse(fileArsip.getBlob().getDataAsString()));
+      const archivedData = JSON.parse(fileArsip.getBlob().getDataAsString());
+      // Normalisasi kunci dari data arsip lama untuk kompatibilitas mundur.
+      const normalizedArchivedData = archivedData.map(([pk, data]) => [normalizePrimaryKey(pk), data]);
+      mapDataKemarin = new Map(normalizedArchivedData);
     } catch (e) {
       console.warn(`Gagal parse arsip "${archiveFileName}": ${e.message}`);
     }
   }
 
-  // 2. Baca Data Baru dan buat Map
+  // ===== [LANGKAH 2: PERUBAHAN] =====
+  // Baca Data Baru dan buat Map dengan kunci yang sudah dinormalisasi.
   const dataHariIni = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
   const mapDataHariIni = new Map();
   
-  // Update indeks kolom yang dipantau berdasarkan header terbaru
   columnsToTrack.forEach(kolom => {
     kolom.index = headers.indexOf(kolom.nama);
   });
@@ -1112,64 +1124,72 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
   dataHariIni.forEach(row => {
     const pk = row[pkIndex];
     if (pk) {
+      // Gunakan PK yang sudah dinormalisasi sebagai kunci Map.
+      const pkNormalized = normalizePrimaryKey(pk);
       const rowData = buatObjekData(row);
-      // Menggunakan fungsi hash yang sudah ada
-      mapDataHariIni.set(pk, { data: rowData, hash: computeVmHash(rowData) });
+      // Penting: Simpan juga PK asli di dalam data untuk keperluan logging.
+      rowData[primaryKeyHeader] = pk; 
+      mapDataHariIni.set(pkNormalized, { data: rowData, hash: computeVmHash(rowData) });
     }
   });
 
-  // 3. Bandingkan Data dan Siapkan Log
+  // ===== [LANGKAH 3: PERUBAHAN] =====
+  // Bandingkan Data dan Siapkan Log menggunakan kunci yang sudah bersih.
   let logEntriesToAdd = [];
   const timestamp = new Date();
   const nameHeaderForLog = entityName === 'VM' ? KONSTANTA.HEADER_VM.VM_NAME : primaryKeyHeader;
 
-  for (const [id, dataBaru] of mapDataHariIni.entries()) {
-    const dataLama = mapDataKemarin.get(id);
+  for (const [id, dataBaru] of mapDataHariIni.entries()) { // `id` di sini sudah dinormalisasi
+    const dataLama = mapDataKemarin.get(id); // Cari di data lama menggunakan `id` yang sudah dinormalisasi
     const entityDisplayName = dataBaru.data[nameHeaderForLog] || id;
+    const pkRawForLog = dataBaru.data[primaryKeyHeader]; // Ambil PK asli dari objek data untuk ditulis ke log
 
     if (!dataLama) {
       // PENAMBAHAN
       const detail = `${entityName} baru dibuat/ditemukan.`;
-      const logEntry = [timestamp, 'PENAMBAHAN', id, entityDisplayName, sheetName, '', '', detail];
+      // Gunakan PK asli (pkRawForLog) saat mencatat ke log.
+      const logEntry = [timestamp, 'PENAMBAHAN', pkRawForLog, entityDisplayName, sheetName, '', '', detail];
       logEntriesToAdd.push(logEntry);
     } else if (dataBaru.hash !== dataLama.hash) {
       // MODIFIKASI
-        // ===== [PERBAIKAN ERROR] =====
-        // Menambahkan pengecekan untuk memastikan dataLama.data ada sebelum membandingkan propertinya.
-        // Ini mencegah error "Cannot read properties of undefined" jika struktur arsip tidak lengkap.
-        if (dataLama && dataLama.data) {
-          for (const key in dataBaru.data) {
-            // Bandingkan nilai lama dan baru. Gunakan '' sebagai default jika nilai tidak ada.
-            const oldValue = dataLama.data[key] || '';
-            const newValue = dataBaru.data[key] || '';
-  
-            if (String(newValue) !== String(oldValue)) {
-              const detail = `Kolom '${key}' diubah`;
-              const logEntry = [timestamp, 'MODIFIKASI', id, entityDisplayName, sheetName, oldValue, newValue, detail];
-              logEntriesToAdd.push(logEntry);
-            }
+      if (dataLama && dataLama.data) {
+        for (const key in dataBaru.data) {
+          // Jangan catat perubahan pada kolom PK itu sendiri sebagai modifikasi.
+          if(key === primaryKeyHeader) continue; 
+          
+          const oldValue = dataLama.data[key] || '';
+          const newValue = dataBaru.data[key] || '';
+
+          if (String(newValue) !== String(oldValue)) {
+            const detail = `Kolom '${key}' diubah`;
+            // Gunakan PK asli (pkRawForLog) saat mencatat ke log.
+            const logEntry = [timestamp, 'MODIFIKASI', pkRawForLog, entityDisplayName, sheetName, oldValue, newValue, detail];
+            logEntriesToAdd.push(logEntry);
           }
         }
-        // ===== [AKHIR PERBAIKAN] =====
       }
-      mapDataKemarin.delete(id); // Hapus dari map lama agar sisanya adalah data yang dihapus
+    }
+    mapDataKemarin.delete(id); // Hapus dari map lama agar sisanya adalah data yang dihapus.
   }
 
-  for (const [id, dataLama] of mapDataKemarin.entries()) {
+  for (const [id, dataLama] of mapDataKemarin.entries()) { // `id` di sini sudah dinormalisasi
     // PENGHAPUSAN
     const entityDisplayName = (dataLama.data && dataLama.data[nameHeaderForLog]) || id;
+    // Ambil PK asli dari data lama untuk dicatat di log.
+    const pkRawForLog = (dataLama.data && dataLama.data[primaryKeyHeader]) || id;
     const detail = `${entityName} telah dihapus.`;
-    const logEntry = [timestamp, 'PENGHAPUSAN', id, entityDisplayName, sheetName, '', '', detail];
+    const logEntry = [timestamp, 'PENGHAPUSAN', pkRawForLog, entityDisplayName, sheetName, '', '', detail];
     logEntriesToAdd.push(logEntry);
   }
 
-  // 4. Catat Perubahan ke Log
+  // 4. Catat Perubahan ke Log (Tidak ada perubahan di sini)
   if (logEntriesToAdd.length > 0) {
     sheetLog.getRange(sheetLog.getLastRow() + 1, 1, logEntriesToAdd.length, 8).setValues(logEntriesToAdd);
     console.log(`${logEntriesToAdd.length} log perubahan untuk ${entityName} telah ditambahkan.`);
   }
 
-  // 5. Simpan Arsip Baru
+  // ===== [LANGKAH 5: PERUBAHAN] =====
+  // Simpan Arsip Baru dengan kunci yang sudah dinormalisasi.
   const dataUntukArsip = JSON.stringify(Array.from(mapDataHariIni.entries()));
   if (fileArsip) {
     fileArsip.setContent(dataUntukArsip);

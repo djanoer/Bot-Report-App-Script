@@ -89,3 +89,17 @@ function getEnvironmentFromDsName(dsName, environmentMap) {
   
   return null; // Bukan environment khusus
 }
+
+/**
+ * [FUNGSI HELPER BARU]
+ * Menormalkan Primary Key dengan menghapus sufiks lokasi (misal: -VC01, -VC02).
+ * Fungsi ini memastikan perbandingan PK konsisten di seluruh aplikasi.
+ * @param {string} pk - Primary Key lengkap yang mungkin mengandung sufiks.
+ * @returns {string} Primary Key yang sudah bersih tanpa sufiks lokasi.
+ */
+function normalizePrimaryKey(pk) {
+  if (typeof pk !== 'string' || !pk) return '';
+  // Menghapus '-VC' diikuti oleh angka di akhir string.
+  // Pola ini fleksibel untuk menangani -VC01, -VC02, -VC10, dst.
+  return pk.replace(/-VC\d+$/i, '').trim();
+}
