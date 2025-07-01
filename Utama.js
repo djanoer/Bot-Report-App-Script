@@ -1,6 +1,9 @@
 // ===== FILE: Utama.gs =====
 
 function doPost(e) {
+  // Log mentah untuk investigasi jika terjadi masalah
+  // console.log("Menerima permintaan doPost. Konten: " + e.postData.contents);
+  
   if (!e || !e.postData || !e.postData.contents) {
     return HtmlService.createHtmlOutput("Bad Request");
   }
@@ -37,9 +40,7 @@ function doPost(e) {
         return HtmlService.createHtmlOutput("OK");
     }
 
-    // --- PERBAIKAN KRITIS PADA PEMROSESAN PERINTAH ---
     const commandParts = text.split(' ');
-    // Ambil bagian pertama (perintah), ubah ke huruf kecil, dan hapus nama bot jika ada.
     let command = commandParts[0].toLowerCase().split('@')[0];
 
     // --- ALUR PENDAFTARAN ---
@@ -78,10 +79,15 @@ function doPost(e) {
       if (text.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
         handleTicketInteraction(update, config);
       }
-      else if (text.startsWith("history_") || text.startsWith("cekvm_")) {
-        const pk = text.split("_")[1];
-        if (text.startsWith("history_")) getVmHistory(pk, config, userData);
-        else findVmAndGetInfo(pk, config, userData);
+      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX + "get_")) { 
+        const pk = text.split("_")[2];
+        getVmHistory(pk, config, userData);
+      }
+      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.NAVIGATE)) {
+        handleHistoryInteraction(update, config);
+      }
+      else if (text.startsWith(KONSTANTA.CALLBACK_CEKVM.PREFIX)) {
+        handleVmSearchInteraction(update, config);
       } 
       else if (text.startsWith("run_export_log_") || text.startsWith("export_")) {
         handleExportRequest(text, config, userData);
@@ -93,7 +99,6 @@ function doPost(e) {
       // Menggunakan konstanta untuk semua case
       switch (command) {
         case KONSTANTA.PERINTAH_BOT.LAPORAN:
-          // --- VALIDASI BARU ---
           if (commandParts.length > 1) {
             kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.LAPORAN}</code> tanpa argumen tambahan.`, config, 'HTML');
           } else {
@@ -107,7 +112,6 @@ function doPost(e) {
           generateProvisioningReport(config);
           break;
         case KONSTANTA.PERINTAH_BOT.CEK_TIKET:
-          // --- VALIDASI BARU ---
           if (commandParts.length > 1) {
             kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_TIKET}</code> tanpa argumen tambahan.`, config, 'HTML');
           } else {
@@ -125,7 +129,6 @@ function doPost(e) {
           jalankanRekomendasiMigrasi();
           break;
         case KONSTANTA.PERINTAH_BOT.EXPORT:
-          // --- VALIDASI BARU ---
           if (commandParts.length > 1) {
             kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.EXPORT}</code> tanpa argumen tambahan.`, config, 'HTML');
           } else {
@@ -133,29 +136,24 @@ function doPost(e) {
           }
           break;
         case KONSTANTA.PERINTAH_BOT.CEK_VM:
-          // --- VALIDASI YANG DISEMPURNAKAN ---
           if (commandParts.length > 1) {
-            findVmAndGetInfo(commandParts.slice(1).join(' '), config, userData);
+            handleVmSearchInteraction(update, config);
           } else {
-            // Memberikan pesan kesalahan jika argumen hilang
             kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP / Nama / PK]</code>`, config, 'HTML');
           }
           break;
         case KONSTANTA.PERINTAH_BOT.HISTORY:
-          // --- VALIDASI YANG DISEMPURNAKAN ---
           if (commandParts.length > 1) {
             getVmHistory(commandParts[1].trim(), config, userData);
           } else {
-            // Memberikan pesan kesalahan jika argumen hilang
             kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
           }
           break;
         case KONSTANTA.PERINTAH_BOT.CEK_HISTORY:
-          // --- VALIDASI BARU ---
           if (commandParts.length > 1) {
             kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_HISTORY}</code> tanpa argumen tambahan.`, config, 'HTML');
           } else {
-            getTodaysHistory(config, userData);
+            handleHistoryInteraction(update, config);
           }
           break;
         case KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG:
@@ -166,13 +164,9 @@ function doPost(e) {
           const isCleared = clearUserAccessCache();
           kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
           break;
-        // ===== [PERBAIKAN ADA DI SINI] =====
-        // Pastikan case untuk INFO ada dan bisa dijangkau.
         case KONSTANTA.PERINTAH_BOT.INFO:
-          // Panggil fungsi terpisah untuk mengirim pesan info
           kirimPesanInfo(config);
           break;
-        // ===================================
         default:
           kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
           break;
@@ -180,8 +174,10 @@ function doPost(e) {
     }
   } catch (err) {
     console.error(`Error di doPost: ${err.message}\nStack: ${err.stack}`);
-    const errorConfig = config || bacaKonfigurasi();
-    kirimPesanTelegram(`<b>⚠️ Terjadi Error pada Bot</b>\n\n<code>${escapeHtml(err.message)}</code>`, errorConfig, 'HTML');
+    // Jangan kirim error ke telegram jika terjadi saat parsing awal
+    if(config) {
+        kirimPesanTelegram(`<b>⚠️ Terjadi Error pada Bot</b>\n\n<code>${escapeHtml(err.message)}</code>`, config, 'HTML');
+    }
   }
   return HtmlService.createHtmlOutput("OK");
 }

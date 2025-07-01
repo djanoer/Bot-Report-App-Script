@@ -121,9 +121,9 @@ function generateVcenterSummary(config) {
 }
 
 /**
- * [PERBAIKAN SESUAI PERMINTAAN]
- * Laporan harian sekarang memiliki format yang lebih ringkas dan konsisten
- * dengan laporan periodik.
+ * [PERBAIKAN]
+ * Laporan harian sekarang kembali menggunakan daftar pantau spesifik dari
+ * sheet Konfigurasi untuk menjaga relevansi log perubahan.
  */
 function buatLaporanHarianVM() {
   const startTime = new Date();
@@ -133,9 +133,19 @@ function buatLaporanHarianVM() {
   
   try {
     const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+    if (!sheetName) throw new Error("Nama sheet data utama tidak diatur di Konfigurasi.");
+
+    // ===== [PERUBAHAN LOGIKA] =====
+    // Pastikan KUNCI_KONFIG.KOLOM_PANTAU ada di config dan merupakan array.
+    if (!config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU] || !Array.isArray(config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU])) {
+      throw new Error("KOLOM_YANG_DIPANTAU tidak diatur dengan benar di Konfigurasi. Harap gunakan format array string, contoh: [\"State\", \"vCenter\"]");
+    }
+    // Buat daftar kolom pantau dari konfigurasi yang sudah disederhanakan.
+    const columnsToTrack = config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU].map(headerName => ({ nama: headerName }));
+    // =============================
+
     const archiveFileName = KONSTANTA.NAMA_FILE.ARSIP_VM;
     const primaryKeyHeader = KONSTANTA.HEADER_VM.PK;
-    const columnsToTrack = config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU].map(nama => ({nama: nama}));
 
     const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, 'VM');
     

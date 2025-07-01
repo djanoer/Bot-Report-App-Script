@@ -25,7 +25,8 @@ function syncDanBuatLaporanHarian(showUiAlert = true) {
     // Pesan "Permintaan diterima..." HANYA akan dikirim jika proses ini berhasil mendapatkan kunci.
     try {
       const startTime = new Date();
-      const timestamp = startTime.toLocaleString('id-ID', { timeZone: "Asia/Jakarta", hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      // [PERBAIKAN] Hapus timeZone eksplisit untuk menggunakan waktu sistem
+      const timestamp = startTime.toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       
       let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n`;
       pesanAwal += `⚙️ Memulai sinkronisasi penuh & pembuatan laporan...\n`;
@@ -144,32 +145,112 @@ function salinDataSheet(namaSheet, sumberId) {
 }
 
 /**
- * Mencari informasi VM berdasarkan kata kunci dan mengirimkan hasilnya.
- * [DIREFACTOR] Mencari informasi VM, kini sepenuhnya menggunakan konstanta.
- * [PERBAIKAN] Memperbaiki logika pengiriman pesan ganda dan error ekspor.
- * [DIPERBARUI] Menambahkan informasi Guest OS ke dalam detail VM.
-*/
-function findVmAndGetInfo(searchTerm, config, userData) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-  if (!sheet || sheet.getLastRow() <= 1) {
-    kirimPesanTelegram('❌ Data VM tidak ditemukan atau sheet kosong.', config);
-    return;
+ * [FUNGSI BARU - PENGGANTI findVmAndGetInfo]
+ * Mengendalikan seluruh alur pencarian VM, baik interaktif maupun tidak.
+ */
+function handleVmSearchInteraction(update, config) {
+  const isCallback = !!update.callback_query;
+  // [PERBAIKAN MENTION] Ambil detail pengguna dari objek 'update'
+  const userEvent = isCallback ? update.callback_query : update.message;
+  const userId = userEvent.from.id;
+  const firstName = userEvent.from.first_name;
+
+  // [PERBAIKAN MENTION] Ambil data dasar dan lengkapi objek userData
+  const userData = getUserData(userId);
+  if (userData) {
+    userData.userId = userId;
+    userData.firstName = firstName;
   }
   
+  let page = 1;
+  let searchTerm;
+  let chatId, messageId;
+
+  if (isCallback) {
+    chatId = update.callback_query.message.chat.id;
+    messageId = update.callback_query.message.message_id;
+    const callbackData = update.callback_query.data;
+    
+    if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.NAVIGATE)) {
+        const parts = callbackData.split('_');
+        page = parseInt(parts[2], 10);
+        searchTerm = parts.slice(3).join('_');
+        const { text, keyboard } = generateVmSearchView(searchTerm, page, config, userData);
+        if (update.callback_query.message.text !== text) {
+            editMessageText(text, keyboard, chatId, messageId, config);
+        }
+    } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.EXPORT)) {
+        searchTerm = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.EXPORT, '');
+        const { headers, results } = searchVmOnSheet(searchTerm, config);
+        exportResultsToSheet(headers, results, `Pencarian VM '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+    }
+
+  } else {
+    chatId = update.message.chat.id;
+    searchTerm = update.message.text.split(' ').slice(1).join(' ');
+    
+    const { headers, results } = searchVmOnSheet(searchTerm, config);
+
+    if (results.length === 0) {
+        kirimPesanTelegram(`❌ VM dengan nama/IP/Primary Key yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
+    } else if (results.length === 1) {
+        const rowData = results[0];
+        const vmData = {};
+        headers.forEach((header, i) => vmData[header] = rowData[i] || 'N/A');
+
+        let info = `🖥️  <b>Detail Virtual Machine</b>\n\n`;
+
+        // Fungsi helper untuk menambahkan baris info
+        const addInfo = (label, value, isCode = false) => {
+            if (value && value !== 'N/A') {
+                if (isCode) {
+                    info += `•  <b>${label}:</b> <code>${escapeHtml(value)}</code>\n`;
+                } else {
+                    info += `•  <b>${label}:</b> ${escapeHtml(value)}\n`;
+                }
+            }
+        };
+
+        info += `<b><u>Informasi Umum</u></b>\n`;
+        addInfo('Nama VM', vmData[KONSTANTA.HEADER_VM.VM_NAME]);
+        addInfo('Primary Key', normalizePrimaryKey(vmData[KONSTANTA.HEADER_VM.PK]), true);
+        addInfo('IP Address', vmData[KONSTANTA.HEADER_VM.IP], true);
+        const status = vmData[KONSTANTA.HEADER_VM.STATE].toLowerCase().includes('on') ? '🟢 Powered On' : '🔴 Powered Off';
+        addInfo('Status', status);
+        addInfo('Uptime', `${vmData[KONSTANTA.HEADER_VM.UPTIME]} hari`);
+
+        info += `\n<b><u>Sumber Daya & Kapasitas</u></b>\n`;
+        addInfo('CPU', `${vmData[KONSTANTA.HEADER_VM.CPU]} vCPU`);
+        addInfo('Memory', `${vmData[KONSTANTA.HEADER_VM.MEMORY]} GB`);
+        addInfo('Provisioned', `${vmData[KONSTANTA.HEADER_VM.PROV_GB]} GB`);
+        addInfo('Cluster', vmData[KONSTANTA.HEADER_VM.CLUSTER]);
+        addInfo('Datastore', vmData['DS']);
+
+        info += `\n<b><u>Konfigurasi & Manajemen</u></b>\n`;
+        addInfo('Environment', vmData['Environment']);
+        addInfo('Kritikalitas BIA', vmData[KONSTANTA.HEADER_VM.KRITIKALITAS]);
+        addInfo('Aplikasi BIA', vmData[KONSTANTA.HEADER_VM.KELOMPOK_APP]);
+        addInfo('DEV/OPS', vmData[KONSTANTA.HEADER_VM.DEV_OPS]);
+        addInfo('Guest OS', vmData[KONSTANTA.HEADER_VM.GUEST_OS]);
+        addInfo('vCenter', vmData[KONSTANTA.HEADER_VM.VCENTER]);
+
+        const pk_raw = vmData[KONSTANTA.HEADER_VM.PK];
+        const inlineKeyboard = { inline_keyboard: [[{ text: "📜 Lihat Histori Perubahan", callback_data: `history_get_${pk_raw}` }]] };
+        kirimPesanTelegram(info, config, 'HTML', inlineKeyboard);
+    }
+  }
+}
+
+/**
+ * [FUNGSI HELPER BARU] Melakukan pencarian mentah di sheet dan mengembalikan hasilnya.
+ */
+function searchVmOnSheet(searchTerm, config) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
   const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
   const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-
-  if (pkIndex === -1 || nameIndex === -1 || ipIndex === -1) {
-    let missingCols = [];
-    if(pkIndex === -1) missingCols.push(`'${KONSTANTA.HEADER_VM.PK}'`);
-    if(nameIndex === -1) missingCols.push(`'${KONSTANTA.HEADER_VM.VM_NAME}'`);
-    if(ipIndex === -1) missingCols.push(`'${KONSTANTA.HEADER_VM.IP}'`);
-    kirimPesanTelegram(`❌ Konfigurasi error: Kolom ${missingCols.join(', ')} tidak ditemukan di header.`, config);
-    return;
-  }
 
   const allData = sheet.getDataRange().getValues();
   const searchLower = searchTerm.toLowerCase();
@@ -181,79 +262,167 @@ function findVmAndGetInfo(searchTerm, config, userData) {
     const vmPk = normalizePrimaryKey(String(row[pkIndex] || '')).toLowerCase();
     const vmName = String(row[nameIndex] || '').toLowerCase();
     const vmIp = String(row[ipIndex] || '').toLowerCase();
-
     if (vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower)) {
       results.push(row);
     }
   }
+  return { headers, results };
+}
+
+
+/**
+ * [FUNGSI BARU] Membuat tampilan per halaman untuk hasil pencarian VM.
+ */
+function generateVmSearchView(searchTerm, page, config, userData) {
+  const ENTRIES_PER_PAGE = 15; // Sesuai permintaan
   
-  if (results.length === 1) {
-    const rowData = results[0];
-    const vmData = {};
-    headers.forEach((header, index) => vmData[header] = rowData[index]);
+  // Kita tidak memakai cache di sini agar data selalu baru setiap kali pencarian
+  const { headers, results } = searchVmOnSheet(searchTerm, config);
+  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+  const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+  const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
 
-    const pk_raw = vmData[KONSTANTA.HEADER_VM.PK]; // Ambil PK asli untuk callback
-    let info = `✅ Data ditemukan untuk "<b>${escapeHtml(searchTerm)}</b>"\n`;
-    info += `------------------------------------\n`;
-    
-    const orderedLabels = [
-        KONSTANTA.HEADER_VM.VM_NAME, KONSTANTA.HEADER_VM.PK, KONSTANTA.HEADER_VM.IP, 
-        KONSTANTA.HEADER_VM.GUEST_OS, KONSTANTA.HEADER_VM.STATE, KONSTANTA.HEADER_VM.UPTIME, 
-        KONSTANTA.HEADER_VM.VCENTER, KONSTANTA.HEADER_VM.CLUSTER, KONSTANTA.HEADER_VM.CPU, 
-        KONSTANTA.HEADER_VM.MEMORY, KONSTANTA.HEADER_VM.PROV_GB, KONSTANTA.HEADER_VM.PROV_TB,
-        KONSTANTA.HEADER_VM.KRITIKALITAS, KONSTANTA.HEADER_VM.KELOMPOK_APP, KONSTANTA.HEADER_VM.DEV_OPS
-    ];
+  const totalEntries = results.length;
+  const totalPages = Math.ceil(totalEntries / ENTRIES_PER_PAGE);
+  page = Math.max(1, Math.min(page, totalPages));
+  
+  const startIndex = (page - 1) * ENTRIES_PER_PAGE;
+  const endIndex = startIndex + ENTRIES_PER_PAGE;
+  const pageEntries = results.slice(startIndex, endIndex);
 
-    orderedLabels.forEach(label => {
-      if (vmData.hasOwnProperty(label)) {
-        let value = vmData[label] || 'N/A';
-        
-        // ===== [PERUBAHAN TAMPILAN 1] =====
-        // Jika label adalah Primary Key, normalkan nilainya sebelum ditampilkan.
-        if (label === KONSTANTA.HEADER_VM.PK) {
-          value = normalizePrimaryKey(value);
-        }
-        // ===================================
-        
-        if (label === KONSTANTA.HEADER_VM.UPTIME && value && !isNaN(value)) value = `${value} hari`;
-        if (label === KONSTANTA.HEADER_VM.CPU && value && !isNaN(value)) value = `${value} vCPU`;
-        if (label === KONSTANTA.HEADER_VM.MEMORY && value && !isNaN(value)) value = `${value} GB`;
+  let text = `✅ Ditemukan <b>${totalEntries}</b> hasil untuk "<b>${escapeHtml(searchTerm)}</b>"\n`;
+  text += `<i>Menampilkan halaman ${page} dari ${totalPages}</i>\n------------------------------------\n\n`;
+  
+  pageEntries.forEach((row, i) => {
+    const vmName = escapeHtml(row[nameIndex]);
+    const vmIp = escapeHtml(row[ipIndex]);
+    const vmPk = escapeHtml(normalizePrimaryKey(row[pkIndex]));
+    text += `${startIndex + i + 1}. <b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)\n`;
+  });
 
-        if (label === KONSTANTA.HEADER_VM.PK || label === KONSTANTA.HEADER_VM.IP) {
-          info += `<b>${label}:</b> <code>${escapeHtml(value)}</code>\n`;
-        } else {
-          info += `<b>${label}:</b> ${escapeHtml(value)}\n`;
-        }
-      }
-    });
-    // Tombol tetap menggunakan PK asli (raw) agar fungsi history berjalan benar
-    const inlineKeyboard = { inline_keyboard: [[{ text: "📜 Lihat Histori Perubahan", callback_data: `history_${pk_raw}` }]] };
-    kirimPesanTelegram(info, config, 'HTML', inlineKeyboard);
+  const keyboardRows = [];
+  const navigationButtons = [];
+  const searchTermSafe = searchTerm.replace(/ /g, '_'); // Ganti spasi untuk callback
 
-  } else if (results.length > 1) {
-    let info = `✅ Ditemukan <b>${results.length}</b> hasil untuk "<b>${escapeHtml(searchTerm)}</b>".\n`;
-    info += `------------------------------------\n`;
-    
-    results.slice(0, 15).forEach((row, i) => { 
-      const vmName = escapeHtml(row[nameIndex]);
-      const vmIp = escapeHtml(row[ipIndex]);
-      // ===== [PERUBAHAN TAMPILAN 2] =====
-      // Normalkan PK sebelum menampilkannya di daftar.
-      const vmPk = escapeHtml(normalizePrimaryKey(row[pkIndex]));
-      // ===================================
-      info += `${i + 1}. <b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)\n`;
-    });
-    
-    kirimPesanTelegram(info, config, 'HTML');
-
-    if (results.length > 15) {
-      kirimPesanTelegram(`<i>Membuat file ekspor untuk ${results.length - 15} hasil lainnya...</i>`, config, 'HTML');
-      exportResultsToSheet(headers, results, `Pencarian '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-    }
-    
-  } else {
-    kirimPesanTelegram(`❌ VM dengan nama/IP/Primary Key yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
+  if (page > 1) {
+    navigationButtons.push({ text: '⬅️ Halaman Sblm', callback_data: `${KONSTANTA.CALLBACK_CEKVM.NAVIGATE}${page - 1}_${searchTermSafe}` });
   }
+  if (totalPages > 1) {
+      navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: 'ignore' });
+  }
+  if (page < totalPages) {
+    navigationButtons.push({ text: 'Halaman Brkt ➡️', callback_data: `${KONSTANTA.CALLBACK_CEKVM.NAVIGATE}${page + 1}_${searchTermSafe}` });
+  }
+  
+  if(navigationButtons.length > 0) keyboardRows.push(navigationButtons);
+  
+  // Tombol Ekspor
+  keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.EXPORT}${searchTermSafe}` }]);
+  
+  return { text, keyboard: { inline_keyboard: keyboardRows } };
+}
+
+/**
+ * [FUNGSI BARU - PENGGANTI getTodaysHistory]
+ * Mengendalikan interaksi untuk /cekhistory yang sekarang interaktif.
+ */
+function handleHistoryInteraction(update, config) {
+  const isCallback = !!update.callback_query;
+  // [PERBAIKAN MENTION] Ambil detail pengguna dari objek 'update'
+  const userEvent = isCallback ? update.callback_query : update.message;
+  const userId = userEvent.from.id;
+  const firstName = userEvent.from.first_name;
+
+  // [PERBAIKAN MENTION] Ambil data dasar dan lengkapi objek userData
+  const userData = getUserData(userId);
+  if (userData) {
+    userData.userId = userId;
+    userData.firstName = firstName;
+  }
+  
+  let page = 1;
+  let chatId, messageId;
+
+  if (isCallback) {
+    chatId = update.callback_query.message.chat.id;
+    messageId = update.callback_query.message.message_id;
+    page = parseInt(update.callback_query.data.split('_').pop(), 10);
+  } else {
+    chatId = update.message.chat.id;
+  }
+  
+  const { text, keyboard } = generateHistoryView(page, config, userData);
+  
+  if (isCallback) {
+    if (update.callback_query.message.text !== text) {
+      editMessageText(text, keyboard, chatId, messageId, config);
+    }
+  } else {
+    kirimPesanTelegram(text, config, 'HTML', keyboard, chatId);
+  }
+}
+
+/**
+ * [FUNGSI BARU] Membuat tampilan per halaman untuk riwayat log.
+ */
+function generateHistoryView(page, config, userData) {
+  const ENTRIES_PER_PAGE = 15; // Limit 15 entri sesuai permintaan
+  const cache = CacheService.getScriptCache();
+  // Gunakan cache yang spesifik per pengguna untuk menghindari data tercampur
+  const cacheKey = `history_log_${userData.userId}`;
+  
+  let cachedLogs = cache.get(cacheKey);
+  let allLogs = [];
+  
+  if (cachedLogs) {
+    allLogs = JSON.parse(cachedLogs);
+  } else {
+    kirimPesanTelegram("🔍 Mengambil dan mengurutkan data log untuk pertama kali... Mohon tunggu sebentar.", config);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const logResult = getCombinedLogs(todayStart, config);
+    allLogs = logResult.data;
+    cache.put(cacheKey, JSON.stringify(allLogs), 600); 
+  }
+  
+  const totalEntries = allLogs.length;
+  if (totalEntries === 0) {
+    return { text: "✅ Tidak ada perubahan yang tercatat pada hari ini.", keyboard: null };
+  }
+
+  const totalPages = Math.ceil(totalEntries / ENTRIES_PER_PAGE);
+  page = Math.max(1, Math.min(page, totalPages)); 
+  
+  const startIndex = (page - 1) * ENTRIES_PER_PAGE;
+  const endIndex = startIndex + ENTRIES_PER_PAGE;
+  const pageEntries = allLogs.slice(startIndex, endIndex);
+
+  const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
+  const logHeaders = logSheet ? logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0] : ['Timestamp', 'Action/Tipe perubahan', 'Primary Key', 'Nama Entitas', 'Sheet Sumber', 'Old Value', 'New Value', 'Detail Perubahan'];
+  
+  let text = `<b>📜 Log Perubahan Hari Ini (Halaman ${page}/${totalPages})</b>\n`;
+  text += `<i>Total Entri: ${totalEntries}</i>\n------------------------------------\n\n`;
+  
+  pageEntries.forEach(entry => {
+    text += formatHistoryEntry(entry, logHeaders);
+  });
+
+  const keyboardRows = [];
+  const navigationButtons = [];
+  
+  if (page > 1) {
+    navigationButtons.push({ text: '⬅️ Halaman Sblm', callback_data: KONSTANTA.CALLBACK_HISTORY.NAVIGATE + (page - 1) });
+  }
+  if (totalPages > 1) {
+    navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: 'ignore' });
+  }
+  if (page < totalPages) {
+    navigationButtons.push({ text: 'Halaman Brkt ➡️', callback_data: KONSTANTA.CALLBACK_HISTORY.NAVIGATE + (page + 1) });
+  }
+  
+  if(navigationButtons.length > 0) keyboardRows.push(navigationButtons);
+  
+  return { text: text, keyboard: { inline_keyboard: keyboardRows } };
 }
 
 /**
@@ -451,62 +620,6 @@ function formatHistoryEntry(entry, headers) {
 }
 
 /**
- * [PERBAIKAN & ANTI-SPAM]
- * Mengambil semua log perubahan hari ini dengan mekanisme penguncian (LockService)
- * untuk mencegah eksekusi ganda dan spam.
- */
-function getTodaysHistory(config, userData) {
-  // 1. Minta "kunci" untuk menjalankan fungsi ini.
-  const lock = LockService.getScriptLock();
-  
-  // 2. Coba dapatkan kunci. Jika gagal (karena fungsi lain sedang berjalan), hentikan.
-  // Diberi nama kunci spesifik agar tidak bentrok dengan lock dari fungsi lain.
-  const lockAcquired = lock.tryLock(10000); 
-
-  if (!lockAcquired) {
-    console.log("Proses /cekhistory sudah berjalan. Eksekusi duplikat dibatalkan.");
-    return; // <-- HENTIKAN FUNGSI jika ada duplikat.
-  }
-
-  // 3. Jika berhasil dapat kunci, lanjutkan proses.
-  try {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0); 
-    
-    const { headers: logHeaders, data: todaysLogEntries } = getCombinedLogs(todayStart, config);
-    const todayStr = now.toLocaleDateString('id-ID', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
-
-    if (todaysLogEntries.length === 0) {
-      kirimPesanTelegram(`✅ Tidak ada perubahan yang tercatat pada hari ini, ${todayStr}.`, config);
-      // 'return' di sini penting agar 'finally' tetap dieksekusi untuk melepas kunci.
-      return; 
-    }
-    
-    let message = `<b>📜 Log Perubahan Hari Ini (Termasuk Arsip)</b>\n<i>${todayStr}</i>\nTotal Entri: ${todaysLogEntries.length}\n`;
-    message += `------------------------------------\n\n`;
-    
-    if (todaysLogEntries.length > 15) {
-      message += `Ditemukan lebih dari 15 entri perubahan. Untuk detail lengkap, laporan telah diekspor ke Google Sheet.`;
-      kirimPesanTelegram(message, config, 'HTML');
-      exportResultsToSheet(logHeaders, todaysLogEntries, `Log Harian`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
-    } else {
-      todaysLogEntries.forEach(entry => {
-        message += formatHistoryEntry(entry, logHeaders);
-      });
-      kirimPesanTelegram(message, config, 'HTML');
-    }
-
-  } catch (e) {
-    console.error(`Gagal saat getTodaysHistory: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`❌ Terjadi kesalahan teknis saat mengambil riwayat hari ini.\nError: ${e.message}`, config);
-  } finally {
-    // 4. WAJIB: Lepaskan kunci setelah semua proses selesai.
-    lock.releaseLock();
-    console.log("Kunci (Lock) untuk /cekhistory telah dilepaskan.");
-  }
-}
-
-/**
  * [HELPER] Mengurutkan kandidat VM migrasi.
  */
 function sortVmForMigration(a, b) {
@@ -669,7 +782,8 @@ function jalankanRekomendasiMigrasi() {
       });
       
       let finalMessage = `🚨 <b>Laporan Rekomendasi Migrasi Datastore</b>\n`;
-      finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>`;
+      // [PERBAIKAN] Hapus timeZone eksplisit untuk menggunakan waktu sistem
+      finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>`;
   
       overProvisionedDs.forEach(ds => {
         finalMessage += `\n\n------------------------------------\n`;
@@ -825,7 +939,7 @@ function getCombinedLogs(startDate, config) {
   }
 
   // --- 2. Ambil Log dari Arsip JSON ---
-  const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP];
+  const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP_LOG];
   if (FOLDER_ARSIP_ID && logHeaders.length > 0) {
     try {
       const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
@@ -987,9 +1101,9 @@ function jalankanPengarsipanLogKeJson(config) { // [DIUBAH] Tambahkan parameter
     return;
   }
 
-  const FOLDER_ARSIP_ID = activeConfig[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP];
+  const FOLDER_ARSIP_ID = activeConfig[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP_LOG];
   if (!FOLDER_ARSIP_ID) {
-    throw new Error("Folder ID untuk arsip belum diatur di Konfigurasi.");
+    throw new Error("Folder ID untuk arsip log (FOLDER_ID_ARSIP_LOG) belum diatur di Konfigurasi.");
   }
   const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
 

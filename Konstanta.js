@@ -35,6 +35,16 @@ const KONSTANTA = {
     BACK_TO_SUMMARY: 'ticket_back_summary',
     BACK_TO_LIST: 'ticket_back_list_' // akan diikuti nama kategori, misal: ticket_back_list_gt1Month
   },
+  CALLBACK_HISTORY: {
+    PREFIX: 'history_',
+    NAVIGATE: 'history_page_'
+  },
+  // TAMBAHKAN OBJEK BARU INI
+  CALLBACK_CEKVM: {
+    PREFIX: 'cekvm_',
+    NAVIGATE: 'cekvm_page_',   // Format: cekvm_page_1_searchterm
+    EXPORT: 'cekvm_export_'   // Format: cekvm_export_searchterm
+  },
   // Nama-nama untuk urutan kritikalitas
   TINGKAT_KRITIKALITAS: {
     'BRONZE': 1,
@@ -98,6 +108,7 @@ const KONSTANTA = {
     NAMA_SHEET_TIKET: 'NAMA_SHEET_TIKET',
     FOLDER_ARSIP: 'FOLDER_ID_ARSIP',
     FOLDER_EKSPOR: 'FOLDER_ID_HASIL_EKSPOR',
+    FOLDER_ARSIP_LOG: 'FOLDER_ID_ARSIP_LOG',
     KOLOM_PANTAU: 'KOLOM_YANG_DIPANTAU',
     MAP_ENV: 'PEMETAAN_ENVIRONMENT',
     DS_KECUALI: 'KATA_KUNCI_DS_DIKECUALIKAN',
