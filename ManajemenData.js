@@ -208,10 +208,75 @@ function searchVmOnSheet(searchTerm, config) {
 }
 
 /**
- * [FINAL - PAGINATION LENGKAP] Mengendalikan alur pencarian VM menggunakan fungsi generik 'createPaginatedView'.
- * Fungsi ini menangani navigasi dan ekspor menggunakan konstanta terpusat.
- * @param {object} update - Objek update dari Telegram.
- * @param {object} config - Objek konfigurasi bot.
+ * [FIX] Memformat satu baris data VM. Sekarang menerima 'config' sebagai parameter.
+ * @param {Array} row - Array yang berisi data untuk satu baris VM.
+ * @param {Array<string>} headers - Array header dari sheet VM.
+ * @param {object} config - Objek konfigurasi bot yang aktif.
+ * @returns {string} String format HTML yang berisi detail lengkap VM.
+ */
+function formatVmDetail(row, headers, config) {
+  const indices = {
+    vmName: headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME),
+    pk: headers.indexOf(KONSTANTA.HEADER_VM.PK),
+    ip: headers.indexOf(KONSTANTA.HEADER_VM.IP),
+    state: headers.indexOf(KONSTANTA.HEADER_VM.STATE),
+    uptime: headers.indexOf(KONSTANTA.HEADER_VM.UPTIME),
+    cpu: headers.indexOf(KONSTANTA.HEADER_VM.CPU),
+    memory: headers.indexOf(KONSTANTA.HEADER_VM.MEMORY),
+    provGb: headers.indexOf(KONSTANTA.HEADER_VM.PROV_GB),
+    cluster: headers.indexOf(KONSTANTA.HEADER_VM.CLUSTER),
+    datastore: headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER]),
+    kritikalitas: headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS),
+    kelompokApp: headers.indexOf(KONSTANTA.HEADER_VM.KELOMPOK_APP),
+    devOps: headers.indexOf(KONSTANTA.HEADER_VM.DEV_OPS),
+    guestOs: headers.indexOf(KONSTANTA.HEADER_VM.GUEST_OS),
+    vcenter: headers.indexOf(KONSTANTA.HEADER_VM.VCENTER)
+  };
+
+  // Fungsi pembantu untuk menambahkan baris detail
+  // [PERBAIKAN] Tambahkan parameter 'isCode' untuk format copy-paste
+  const addDetail = (value, icon, label, isCode = false) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      const formattedValue = isCode ? `<code>${escapeHtml(value)}</code>` : escapeHtml(value);
+      return `•  ${icon} <b>${label}:</b> ${formattedValue}\n`;
+    }
+    return '';
+  };
+  
+  let pesan = "🖥️  <b>Detail Virtual Machine</b>\n\n";
+
+  pesan += "<b>Informasi Umum</b>\n";
+  pesan += addDetail(row[indices.vmName], '🏷️', 'Nama VM', true);
+  pesan += addDetail(row[indices.pk], '🔑', 'Primary Key', true);
+  pesan += addDetail(row[indices.ip], '🌐', 'IP Address', true);
+  const stateValue = row[indices.state] || '';
+  const stateIcon = stateValue.toLowerCase().includes('on') ? '🟢' : '🔴';
+  pesan += addDetail(stateValue, stateIcon, 'Status');
+  pesan += addDetail(`${row[indices.uptime]} hari`, '⏳', 'Uptime');
+
+  pesan += "\n<b>Sumber Daya & Kapasitas</b>\n";
+  pesan += addDetail(`${row[indices.cpu]} vCPU`, '⚙️', 'CPU');
+  pesan += addDetail(`${row[indices.memory]} GB`, '🧠', 'Memory');
+  pesan += addDetail(`${row[indices.provGb]} GB`, '💽', 'Provisioned');
+  pesan += addDetail(row[indices.cluster], '☁️', 'Cluster');
+  pesan += addDetail(row[indices.datastore], '🗄️', 'Datastore');
+
+  const environment = getEnvironmentFromDsName(row[indices.datastore] || '', config[KONSTANTA.KUNCI_KONFIG.MAP_ENV]) || 'N/A';
+  
+  pesan += "\n<b>Konfigurasi & Manajemen</b>\n";
+  pesan += addDetail(environment, '🌍', 'Environment');
+  pesan += addDetail(row[indices.kritikalitas], '🔥', 'Kritikalitas BIA');
+  pesan += addDetail(row[indices.kelompokApp], '📦', 'Aplikasi BIA');
+  pesan += addDetail(row[indices.devOps], '👥', 'DEV/OPS');
+  pesan += addDetail(row[indices.guestOs], '🐧', 'Guest OS');
+  pesan += addDetail(row[indices.vcenter], '🏢', 'vCenter');
+
+  return pesan;
+}
+
+
+/**
+ * [FIX] Mengendalikan alur pencarian VM, sekarang memberikan 'config' saat memanggil formatVmDetail.
  */
 function handleVmSearchInteraction(update, config) {
   try {
@@ -224,16 +289,15 @@ function handleVmSearchInteraction(update, config) {
     }
 
     let searchTerm, page = 1, chatId, messageId;
-    const P_ACTIONS = KONSTANTA.PAGINATION_ACTIONS; // Alias untuk konstanta aksi pagination
+    const P_ACTIONS = KONSTANTA.PAGINATION_ACTIONS;
 
     if (isCallback) {
       chatId = userEvent.message.chat.id;
       messageId = userEvent.message.message_id;
       const callbackData = userEvent.data;
-      const parts = callbackData.split('_'); // Format: [prefix, action, searchTerm, page?]
+      const parts = callbackData.split('_');
       const action = parts[1];
       
-      // Mengambil searchTerm. decodeURIComponent penting untuk menangani karakter spesial atau spasi.
       searchTerm = decodeURIComponent(parts.slice(2, parts.length - (action === P_ACTIONS.NAVIGATE ? 1 : 0)).join('_'));
 
       if (action === P_ACTIONS.NAVIGATE) {
@@ -255,7 +319,15 @@ function handleVmSearchInteraction(update, config) {
 
     const { headers, results } = searchVmOnSheet(searchTerm, config);
 
-    // Fungsi kecil untuk memformat satu entri VM menjadi teks
+    if (results.length === 1 && !isCallback) {
+      // [PERBAIKAN UTAMA DI SINI] Memberikan objek 'config' sebagai parameter.
+      const detailMessage = formatVmDetail(results[0], headers, config);
+      let fullMessage = `✅ Ditemukan 1 hasil untuk "<b>${escapeHtml(searchTerm)}</b>":\n\n`;
+      fullMessage += detailMessage;
+      kirimPesanTelegram(fullMessage, config, 'HTML');
+      return;
+    }
+    
     const formatVmEntry = (row) => {
       const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
       const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
@@ -266,10 +338,8 @@ function handleVmSearchInteraction(update, config) {
       return `<b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)`;
     };
     
-    // Encode searchTerm sekali untuk keamanan dan konsistensi di callback
     const safeSearchTerm = encodeURIComponent(searchTerm);
 
-    // Panggil fungsi pagination generik dengan semua parameter yang diperlukan
     const { text, keyboard } = createPaginatedView({
       allItems: results,
       page: page,
@@ -279,8 +349,9 @@ function handleVmSearchInteraction(update, config) {
       exportCallbackData: `cekvm_${P_ACTIONS.EXPORT}_${safeSearchTerm}`
     });
     
-    // Kirim atau edit pesan di Telegram
-    if (isCallback) {
+    if (results.length === 0 && !isCallback) {
+        kirimPesanTelegram(`❌ VM dengan nama/IP/PK yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
+    } else if (isCallback) {
       if(userEvent.message.text !== text) {
         editMessageText(text, keyboard, chatId, messageId, config);
       }
