@@ -150,7 +150,7 @@ function buatLaporanHarianVM(config) {
     const archiveFileName = KONSTANTA.NAMA_FILE.ARSIP_VM;
     const primaryKeyHeader = KONSTANTA.HEADER_VM.PK;
 
-    const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, 'VM');
+    const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, KONSTANTA.NAMA_ENTITAS.VM);
     
     if (logEntriesToAdd.length > 0) {
       pesanLaporan += `Ringkasan Perubahan Hari Ini:\n`;
@@ -197,9 +197,9 @@ function buatLaporanHarianVM(config) {
 }
 
 /**
- * [FUNGSI LAPORAN PERIODIK - DIROMBAK TOTAL SESUAI PERMINTAAN]
- * Fungsi ini menghasilkan laporan mingguan/bulanan dengan format baru yang diminta.
- * Tidak lagi menyertakan file log secara langsung.
+ * [REVISI KECERDASAN] Menghasilkan laporan mingguan/bulanan dengan tambahan
+ * analisis tren dan deteksi anomali.
+ * @param {string} periode - 'mingguan' atau 'bulanan'.
  */
 function buatLaporanPeriodik(periode) {
   const config = bacaKonfigurasi();
@@ -219,65 +219,41 @@ function buatLaporanPeriodik(periode) {
     return;
   }
 
-  // --- Langkah 1: Kumpulkan semua data yang diperlukan ---
+  // --- Langkah 1: Lakukan Analisis Tren dan Kumpulkan semua data ---
+  const analisis = analisisTrenPerubahan(startDate, config);
   const { vCenterMessage, uptimeMessage } = generateVcenterSummary(config);
   const provisioningSummary = getProvisioningStatusSummary(config);
   
-  // Mengambil log gabungan dari sheet aktif dan arsip
-  const combinedLogResult = getCombinedLogs(startDate, config);
-  const logData = combinedLogResult.data;
-  const logHeaders = combinedLogResult.headers;
-  
-  const changes = { baru: 0, dihapus: 0, dimodifikasi: 0 };
-  const actionIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.ACTION);
-
-  if (actionIndex !== -1) {
-    logData.forEach(row => {
-        const action = String(row[actionIndex] || '');
-        if (action.includes('PENAMBAHAN')) changes.baru++;
-        else if (action.includes('PENGHAPUSAN')) changes.dihapus++;
-        else if (action.includes('MODIFIKASI')) changes.dimodifikasi++;
-    });
-  }
-  const totalChanges = changes.baru + changes.dihapus + changes.dimodifikasi;
-
   // --- Langkah 2: Bangun pesan laporan dengan struktur baru ---
   let pesanLaporan = `<b>${title}</b>\n`;
   pesanLaporan += `--------------------------------------------------\n\n`;
 
-  // Bagian 1: Ringkasan Tren Perubahan
-  pesanLaporan += `<b>Ringkasan Perubahan Periode Ini:</b>\n`;
-  if (totalChanges > 0) {
-    if (changes.baru > (changes.dihapus + 5)) { // Toleransi 5 agar tidak terlalu sensitif
-      pesanLaporan += `📈 Tren periode ini menunjukkan adanya pertumbuhan infrastruktur.\n`;
-    } else if (changes.dihapus > (changes.baru + 5)) {
-      pesanLaporan += `📉 Tren periode ini menunjukkan adanya perampingan infrastruktur.\n`;
-    } else {
-      pesanLaporan += `⚙️ Aktivitas infrastruktur pada periode ini cenderung stabil atau hanya bersifat modifikasi.\n`;
-    }
-  } else {
-    pesanLaporan += `✅ Tidak ada perubahan infrastruktur yang tercatat pada periode ini.\n`;
+  // Bagian 1: [BARU] Tampilkan hasil analisis tren
+  pesanLaporan += `<b>Ringkasan Tren Periode Ini:</b>\n`;
+  pesanLaporan += `${analisis.trendMessage}\n`;
+  // Tampilkan pesan anomali hanya jika ada
+  if (analisis.anomalyMessage) {
+    pesanLaporan += `\n${analisis.anomalyMessage}\n`;
   }
   pesanLaporan += `\n--------------------------------------------------\n\n`;
 
-  // Bagian 2: Ringkasan vCenter dan Uptime
+  // Bagian 2: Ringkasan vCenter dan Uptime (tidak berubah)
   pesanLaporan += vCenterMessage;
   pesanLaporan += uptimeMessage;
   pesanLaporan += `\n\n--------------------------------------------------\n`;
   
-  // Bagian 3: Status Provisioning
+  // Bagian 3: Status Provisioning (tidak berubah)
   pesanLaporan += `${provisioningSummary}\n`;
   pesanLaporan += `--------------------------------------------------\n\n`;
 
-  // Bagian 4: Detail Angka Perubahan
-  pesanLaporan += `✅ Baru: ${changes.baru} entri\n`;
-  pesanLaporan += `✏️ Dimodifikasi: ${changes.dimodifikasi} entri\n`;
-  pesanLaporan += `❌ Dihapus: ${changes.dihapus} entri\n\n`;
+  // Bagian 4: Detail Angka Perubahan (sekarang menggunakan data dari analisis)
+  pesanLaporan += `✅ Baru: ${analisis.counts.baru} entri\n`;
+  pesanLaporan += `✏️ Dimodifikasi: ${analisis.counts.dimodifikasi} entri\n`;
+  pesanLaporan += `❌ Dihapus: ${analisis.counts.dihapus} entri\n\n`;
   
   pesanLaporan += `Gunakan perintah /export untuk melihat detail perubahan.`;
 
   // --- Langkah 3: Kirim Pesan ---
-  // Tidak ada lagi lampiran file log otomatis sesuai permintaan
   kirimPesanTelegram(pesanLaporan, config, 'HTML');
 }
 
@@ -418,4 +394,50 @@ function updateTop5(topArray, newItem) {
     topArray.push(newItem);
   }
   topArray.sort((a, b) => b.value - a.value);
+}
+
+/**
+ * [FUNGSI KECERDASAN BARU] Menganalisis log perubahan dalam rentang waktu tertentu
+ * untuk mendeteksi tren (pertumbuhan/perampingan) dan anomali (aktivitas tinggi).
+ *
+ * @param {Date} startDate - Tanggal mulai untuk analisis log.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {object} Objek berisi { trendMessage: string, anomalyMessage: string, counts: object }.
+ */
+function analisisTrenPerubahan(startDate, config) {
+  const combinedLogResult = getCombinedLogs(startDate, config);
+  const logData = combinedLogResult.data;
+  const logHeaders = combinedLogResult.headers;
+
+  const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
+  const actionIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.ACTION);
+
+  if (actionIndex !== -1) {
+    logData.forEach(row => {
+        const action = String(row[actionIndex] || '');
+        if (action.includes('PENAMBAHAN')) counts.baru++;
+        else if (action.includes('MODIFIKASI')) counts.dimodifikasi++;
+        else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
+    });
+  }
+
+  let trendMessage = "⚙️ Aktivitas infrastruktur pada periode ini cenderung stabil.";
+  // Toleransi 5 agar tidak terlalu sensitif terhadap perubahan kecil
+  if (counts.baru > (counts.dihapus + 5)) {
+    trendMessage = "📈 Tren periode ini menunjukkan adanya pertumbuhan infrastruktur.";
+  } else if (counts.dihapus > (counts.baru + 5)) {
+    trendMessage = "📉 Tren periode ini menunjukkan adanya perampingan infrastruktur.";
+  }
+
+  let anomalyMessage = "";
+  const totalChanges = counts.baru + counts.dimodifikasi + counts.dihapus;
+  if (totalChanges > KONSTANTA.LIMIT.HIGH_ACTIVITY_THRESHOLD) {
+    anomalyMessage = `⚠️ Terdeteksi aktivitas sangat tinggi (${totalChanges} perubahan) pada periode ini. Disarankan untuk melakukan review pada log.`;
+  }
+
+  return {
+    trendMessage: trendMessage,
+    anomalyMessage: anomalyMessage,
+    counts: counts
+  };
 }

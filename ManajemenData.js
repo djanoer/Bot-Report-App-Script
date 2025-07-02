@@ -1,16 +1,17 @@
 // ===== FILE: ManajemenData.gs =====
 
 /**
- * [VERSI FINAL & STABIL] Menjalankan sinkronisasi dengan alur yang paling andal.
- * Bot akan mengirim pesan status, mengirim laporan lengkap sebagai pesan baru,
- * lalu mengedit pesan status awal untuk konfirmasi penyelesaian.
+ * [REVISI KONSISTENSI] Menjalankan sinkronisasi dengan alur pengiriman pesan terpusat.
+ * Bot akan mengirim status awal, memproses semua data, menggabungkan semua hasil,
+ * mengirim satu laporan lengkap, lalu mengedit status awal.
  */
 function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI") {
   const lock = LockService.getScriptLock();
-  const lockAcquired = lock.tryLock(10000); 
+  // [PERBAIKAN] Menggunakan konstanta untuk timeout
+  const lockAcquired = lock.tryLock(KONSTANTA.LIMIT.LOCK_TIMEOUT_MS); 
 
   if (!lockAcquired) {
-    console.log("Proses sinkronisasi sudah berjalan.");
+    console.log("Proses sinkronisasi sudah berjalan, permintaan saat ini dibatalkan.");
     return;
   }
 
@@ -28,22 +29,29 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
     }
 
     // --- Proses Utama Berjalan ---
-    const sumberId = config['SUMBER_SPREADSHEET_ID'];
-    const sheetVmName = config['NAMA_SHEET_DATA_UTAMA'];
-    const sheetDsName = config['NAMA_SHEET_DATASTORE'];
+    // [PERBAIKAN] Menggunakan konstanta untuk mengakses kunci konfigurasi
+    const KUNCI = KONSTANTA.KUNCI_KONFIG;
+    const sumberId = config[KUNCI.ID_SUMBER];
+    const sheetVmName = config[KUNCI.SHEET_VM];
+    const sheetDsName = config[KUNCI.SHEET_DS];
 
+    // Proses sinkronisasi data
     salinDataSheet(sheetVmName, sumberId, config);
     if (sheetDsName) {
       salinDataSheet(sheetDsName, sumberId, config);
     }
 
-    const pesanLaporanFinal = buatLaporanHarianVM(config);
-    jalankanPemeriksaanDatastore(config);
+    // Alur baru untuk laporan yang digabung
+    let pesanLaporanFinal = buatLaporanHarianVM(config);
+    const pesanNotifikasiDs = jalankanPemeriksaanDatastore(config);
 
-    // [SOLUSI FINAL] Langkah 1: Kirim laporan lengkap sebagai PESAN BARU.
+    if (pesanNotifikasiDs) {
+      // [PERBAIKAN] Menggunakan konstanta untuk separator
+      pesanLaporanFinal += KONSTANTA.UI_STRINGS.SEPARATOR + pesanNotifikasiDs;
+    }
+
     kirimPesanTelegram(pesanLaporanFinal, config, 'HTML');
 
-    // [SOLUSI FINAL] Langkah 2: Edit pesan status awal menjadi konfirmasi singkat.
     const pesanKonfirmasi = `<b>✅ Proses Selesai</b>\n\nLaporan lengkap telah dikirimkan.`;
     if (statusMessageId) {
         editMessageText(pesanKonfirmasi, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
@@ -200,8 +208,10 @@ function searchVmOnSheet(searchTerm, config) {
 }
 
 /**
- * [PAGINASI ELEGAN FINAL] Mengendalikan alur pencarian VM dengan pola "edit di tempat" yang andal.
- * Logika ini dirancang untuk memaksa pembaruan pada setiap klik, mengatasi bug render di klien desktop.
+ * [FINAL - PAGINATION LENGKAP] Mengendalikan alur pencarian VM menggunakan fungsi generik 'createPaginatedView'.
+ * Fungsi ini menangani navigasi dan ekspor menggunakan konstanta terpusat.
+ * @param {object} update - Objek update dari Telegram.
+ * @param {object} config - Objek konfigurasi bot.
  */
 function handleVmSearchInteraction(update, config) {
   try {
@@ -212,62 +222,73 @@ function handleVmSearchInteraction(update, config) {
       userData.userId = userEvent.from.id;
       userData.firstName = userEvent.from.first_name;
     }
-    
-    let searchTerm;
+
+    let searchTerm, page = 1, chatId, messageId;
+    const P_ACTIONS = KONSTANTA.PAGINATION_ACTIONS; // Alias untuk konstanta aksi pagination
 
     if (isCallback) {
-      // --- Logika Elegan untuk Menangani Tombol ---
-      const chatId = update.callback_query.message.chat.id;
-      const messageId = update.callback_query.message.message_id;
-      const callbackData = update.callback_query.data;
+      chatId = userEvent.message.chat.id;
+      messageId = userEvent.message.message_id;
+      const callbackData = userEvent.data;
+      const parts = callbackData.split('_'); // Format: [prefix, action, searchTerm, page?]
+      const action = parts[1];
       
-      const C = KONSTANTA.CALLBACK_CEKVM;
+      // Mengambil searchTerm. decodeURIComponent penting untuk menangani karakter spesial atau spasi.
+      searchTerm = decodeURIComponent(parts.slice(2, parts.length - (action === P_ACTIONS.NAVIGATE ? 1 : 0)).join('_'));
 
-      if (callbackData.startsWith(C.NAVIGATE)) {
-        // 1. Urai callback data dengan andal untuk mendapatkan halaman & istilah pencarian
-        const dataWithoutPrefix = callbackData.replace(C.NAVIGATE, '');
-        const firstUnderscoreIndex = dataWithoutPrefix.indexOf('_');
-        
-        const page = parseInt(dataWithoutPrefix.substring(0, firstUnderscoreIndex), 10);
-        searchTerm = decodeURIComponent(dataWithoutPrefix.substring(firstUnderscoreIndex + 1));
-        
-        // 2. Buat konten (teks dan tombol) untuk halaman baru
-        const { text, keyboard } = generateVmSearchView(searchTerm, page, config, userData);
-        
-        // 3. Langsung panggil editMessageText tanpa kondisi.
-        // Ini memaksa Telegram untuk me-render ulang pesan, yang lebih andal di klien desktop.
-        editMessageText(text, keyboard, chatId, messageId, config);
-        
-      } else if (callbackData.startsWith(C.EXPORT)) {
-        // Logika untuk ekspor tidak berubah
-        searchTerm = decodeURIComponent(callbackData.replace(C.EXPORT, ''));
+      if (action === P_ACTIONS.NAVIGATE) {
+        page = parseInt(parts[parts.length - 1], 10);
+      } else if (action === P_ACTIONS.EXPORT) {
         const { headers, results } = searchVmOnSheet(searchTerm, config);
         exportResultsToSheet(headers, results, `Pencarian VM '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+        answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
+        return;
       }
-
     } else {
-      // --- Logika untuk Perintah /cekvm dari Teks (Tidak Berubah) ---
-      const chatId = update.message.chat.id;
-      searchTerm = update.message.text.split(' ').slice(1).join(' ');
-      
+      chatId = userEvent.chat.id;
+      searchTerm = userEvent.text.split(' ').slice(1).join(' ');
       if (!searchTerm) {
         kirimPesanTelegram(`Gunakan format: <code>/cekvm [IP / Nama / PK]</code>`, config, 'HTML');
         return;
       }
-
-      const { headers, results } = searchVmOnSheet(searchTerm, config);
-
-      if (results.length === 0) {
-          kirimPesanTelegram(`❌ VM dengan nama/IP/PK yang mengandung "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
-      } else if (results.length === 1) {
-          // Logika untuk menampilkan 1 hasil tidak berubah
-          // ...
-      } else if (results.length > 1) {
-          // Mengirim halaman pertama
-          const { text, keyboard } = generateVmSearchView(searchTerm, 1, config, userData);
-          kirimPesanTelegram(text, config, 'HTML', keyboard, chatId);
-      }
     }
+
+    const { headers, results } = searchVmOnSheet(searchTerm, config);
+
+    // Fungsi kecil untuk memformat satu entri VM menjadi teks
+    const formatVmEntry = (row) => {
+      const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+      const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
+      const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+      const vmName = escapeHtml(row[nameIndex]);
+      const vmIp = escapeHtml(row[ipIndex]);
+      const vmPk = escapeHtml(normalizePrimaryKey(row[pkIndex]));
+      return `<b>${vmName}</b>\n   (<code>${vmIp}</code> | <code>${vmPk}</code>)`;
+    };
+    
+    // Encode searchTerm sekali untuk keamanan dan konsistensi di callback
+    const safeSearchTerm = encodeURIComponent(searchTerm);
+
+    // Panggil fungsi pagination generik dengan semua parameter yang diperlukan
+    const { text, keyboard } = createPaginatedView({
+      allItems: results,
+      page: page,
+      title: `Hasil Pencarian untuk "${escapeHtml(searchTerm)}"`,
+      formatEntryCallback: formatVmEntry,
+      navCallbackPrefix: `cekvm_${P_ACTIONS.NAVIGATE}_${safeSearchTerm}`,
+      exportCallbackData: `cekvm_${P_ACTIONS.EXPORT}_${safeSearchTerm}`
+    });
+    
+    // Kirim atau edit pesan di Telegram
+    if (isCallback) {
+      if(userEvent.message.text !== text) {
+        editMessageText(text, keyboard, chatId, messageId, config);
+      }
+      answerCallbackQuery(userEvent.id, config);
+    } else {
+      kirimPesanTelegram(text, config, 'HTML', keyboard, chatId);
+    }
+
   } catch (err) {
     handleCentralizedError(err, "Perintah: /cekvm", config);
   }
@@ -328,40 +349,80 @@ function generateVmSearchView(searchTerm, page, config, userData) {
 }
 
 /**
- * [FUNGSI BARU - PENGGANTI getTodaysHistory]
- * Mengendalikan interaksi untuk /cekhistory yang sekarang interaktif.
+ * [FINAL - PAGINATION LENGKAP] Mengendalikan interaksi untuk /cekhistory menggunakan fungsi generik 'createPaginatedView'.
+ * Fungsi ini menangani navigasi dan ekspor menggunakan konstanta terpusat.
+ * @param {object} update - Objek update dari Telegram.
+ * @param {object} config - Objek konfigurasi bot.
  */
 function handleHistoryInteraction(update, config) {
   const isCallback = !!update.callback_query;
-  // [PERBAIKAN MENTION] Ambil detail pengguna dari objek 'update'
   const userEvent = isCallback ? update.callback_query : update.message;
-  const userId = userEvent.from.id;
-  const firstName = userEvent.from.first_name;
-
-  // [PERBAIKAN MENTION] Ambil data dasar dan lengkapi objek userData
-  const userData = getUserData(userId);
+  
+  const userData = getUserData(userEvent.from.id);
   if (userData) {
-    userData.userId = userId;
-    userData.firstName = firstName;
+      userData.userId = userEvent.from.id;
+      userData.firstName = userEvent.from.first_name;
   }
-  
-  let page = 1;
-  let chatId, messageId;
 
+  let page = 1, chatId, messageId;
+  const P_ACTIONS = KONSTANTA.PAGINATION_ACTIONS; // Alias untuk konstanta aksi pagination
+  
   if (isCallback) {
-    chatId = update.callback_query.message.chat.id;
-    messageId = update.callback_query.message.message_id;
-    page = parseInt(update.callback_query.data.split('_').pop(), 10);
+    chatId = userEvent.message.chat.id;
+    messageId = userEvent.message.message_id;
+    const callbackData = userEvent.data;
+    const parts = callbackData.split('_'); // Format: [prefix, action, page?]
+    const action = parts[1];
+
+    if (action === P_ACTIONS.NAVIGATE) {
+      page = parseInt(parts[parts.length - 1], 10);
+    } else if (action === P_ACTIONS.EXPORT) {
+      const startDate = new Date();
+      startDate.setDate(new Date().getDate() - 30);
+      const { headers, data } = getCombinedLogs(startDate, config);
+      exportResultsToSheet(headers, data, "Log Perubahan 30 Hari Terakhir", config, userData, KONSTANTA.HEADER_LOG.ACTION);
+      answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
+      return;
+    }
   } else {
-    chatId = update.message.chat.id;
+    chatId = userEvent.chat.id;
+  }
+
+  // Ambil log hari ini, jika kosong, ambil semua log dari arsip.
+  const todayStartDate = new Date();
+  todayStartDate.setHours(0, 0, 0, 0);
+  let { headers: logHeaders, data: logsToShow } = getCombinedLogs(todayStartDate, config);
+  let title = "Log Perubahan Hari Ini";
+
+  if (logsToShow.length === 0) {
+      const allTimeStartDate = new Date('2020-01-01');
+      const allLogsResult = getCombinedLogs(allTimeStartDate, config);
+      logsToShow = allLogsResult.data;
+      logHeaders = allLogsResult.headers;
+      title = "Semua Log Perubahan (Termasuk Arsip)";
   }
   
-  const { text, keyboard } = generateHistoryView(page, config, userData);
+  // Menggunakan kembali fungsi 'formatHistoryEntry' yang sudah ada sebagai formatter
+  const formatLogEntry = (row) => {
+      return formatHistoryEntry(row, logHeaders);
+  };
+
+  // Panggil fungsi pagination generik dengan semua parameter yang diperlukan
+  const { text, keyboard } = createPaginatedView({
+      allItems: logsToShow,
+      page: page,
+      title: title,
+      formatEntryCallback: formatLogEntry,
+      navCallbackPrefix: `history_${P_ACTIONS.NAVIGATE}`,
+      exportCallbackData: `history_${P_ACTIONS.EXPORT}`
+  });
   
+  // Kirim atau edit pesan di Telegram
   if (isCallback) {
-    if (update.callback_query.message.text !== text) {
+    if (userEvent.message.text !== text) {
       editMessageText(text, keyboard, chatId, messageId, config);
     }
+    answerCallbackQuery(userEvent.id, config);
   } else {
     kirimPesanTelegram(text, config, 'HTML', keyboard, chatId);
   }
@@ -457,7 +518,9 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
   }
 
   try {
-    const timestamp = Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd HH.mm.ss");
+    // [PERBAIKAN] Ganti "GMT+7" dengan zona waktu dari Spreadsheet
+    const timezone = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    const timestamp = Utilities.formatDate(new Date(), timezone, "yyyy-MM-dd HH.mm.ss");
     const fileName = `Laporan - ${title.replace(/<|>/g, '')} - ${timestamp}`;
     const newSs = SpreadsheetApp.create(fileName);
     const sheet = newSs.getSheets()[0];
@@ -518,93 +581,85 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
 }
 
 /**
- * [VERSI FINAL DIPERBAIKI]
- * Mencari riwayat lengkap sebuah VM dengan mencari di log aktif DAN semua file arsip.
- * Menggunakan helper getCombinedLogs untuk efisiensi dan konsistensi.
+ * [REVISI UX KONSISTEN] Mencari riwayat lengkap sebuah VM dan MENGEMBALIKAN hasilnya dalam bentuk objek.
+ * Fungsi ini tidak lagi mengirim pesan langsung ke Telegram, memungkinkan kontrol UX terpusat.
+ * @param {string} pk - Primary Key dari VM yang akan dicari.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {object} Objek yang berisi hasil pencarian dengan format: 
+ * { success: boolean, message: string, data: Array|null, headers: Array|null }
  */
-function getVmHistory(pk, config, userData) {
+function getVmHistory(pk, config) {
+  // Validasi input awal
   if (!pk) {
-    kirimPesanTelegram("❌ Terjadi kesalahan: ID untuk melihat riwayat tidak valid.", config);
-    return;
+    return { success: false, message: "❌ Terjadi kesalahan: Primary Key untuk melihat riwayat tidak valid." };
   }
 
   try {
-    // ===== [PERBAIKAN PESAN] =====
-    // Terapkan normalisasi pada PK yang ditampilkan di pesan "sedang mencari".
     const pkToDisplay = normalizePrimaryKey(pk);
-    kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pkToDisplay)}</code>...\n<i>Ini mungkin memerlukan beberapa saat...</i>`, config, 'HTML');
-    // =============================
-
-    const allTimeStartDate = new Date('2020-01-01'); 
+    const allTimeStartDate = new Date('2020-01-01'); // Tanggal lampau untuk memastikan semua arsip terbaca
     const { headers: logHeaders, data: allLogs } = getCombinedLogs(allTimeStartDate, config);
 
+    // Validasi data log
     if (logHeaders.length === 0) {
-      kirimPesanTelegram("❌ Gagal memproses: Tidak dapat menemukan header log. Pastikan sheet 'Log Perubahan' ada.", config);
-      return;
+      return { success: false, message: "❌ Gagal memproses: Tidak dapat menemukan header di sheet 'Log Perubahan'." };
     }
 
     const pkIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.PK);
     if (pkIndex === -1) {
-      kirimPesanTelegram(`❌ Gagal memproses: Kolom '${KONSTANTA.HEADER_VM.PK}' tidak ditemukan di log.`, config);
-      return;
+      return { success: false, message: `❌ Gagal memproses: Kolom krusial '${KONSTANTA.HEADER_VM.PK}' tidak ditemukan di dalam log.` };
     }
 
+    // Proses pencarian
     const pkTrimmed = normalizePrimaryKey(pk.trim()).toLowerCase();
     const historyEntries = allLogs.filter(row => 
       row[pkIndex] && normalizePrimaryKey(String(row[pkIndex])).toLowerCase() === pkTrimmed
     );
 
+    // Jika tidak ada hasil
     if (historyEntries.length === 0) {
-      kirimPesanTelegram(`ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(normalizePrimaryKey(pk))}</code>.`, config, 'HTML');
-      return;
+      return { success: true, message: `ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(pkToDisplay)}</code>.`, data: null, headers: null };
     }
 
+    // Urutkan hasil dan siapkan pesan
     const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
     historyEntries.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
-
-    const totalEntries = historyEntries.length;
     const vmNameIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
     const currentVmName = historyEntries[0][vmNameIndex] || pk;
     
     let message = `<b>📜 Riwayat Lengkap untuk VM</b>\n`;
     message += `<b>${KONSTANTA.HEADER_VM.VM_NAME}:</b> ${escapeHtml(currentVmName)}\n`;
-    // ===== [PERUBAHAN TAMPILAN] =====
-    // Tampilkan PK yang sudah dinormalisasi di judul laporan.
-    message += `<b>${KONSTANTA.HEADER_VM.PK}:</b> <code>${escapeHtml(normalizePrimaryKey(pk))}</code>\n`;
-    // =================================
-    message += `<i>Total ditemukan ${totalEntries} entri riwayat.</i>\n`;
+    message += `<b>${KONSTANTA.HEADER_VM.PK}:</b> <code>${escapeHtml(pkToDisplay)}</code>\n`;
+    message += `<i>Total ditemukan ${historyEntries.length} entri riwayat.</i>\n`;
     message += `------------------------------------\n\n`;
 
-    if (totalEntries > 8) {
-      message += `Menampilkan 5 dari ${totalEntries} perubahan terakhir:\n\n`;
-      const entriesToShow = historyEntries.slice(0, 5);
-      
-      entriesToShow.forEach(entry => {
+    // Logika untuk menampilkan ringkasan atau laporan lengkap
+    if (historyEntries.length > 8) {
+      // Jika hasil terlalu banyak, tampilkan ringkasan dan siapkan data untuk ekspor
+      message += `Menampilkan 5 dari ${historyEntries.length} perubahan terakhir:\n\n`;
+      historyEntries.slice(0, 5).forEach(entry => {
         message += formatHistoryEntry(entry, logHeaders);
       });
-
       message += `\n------------------------------------\n`;
       message += `<i>Riwayat terlalu panjang. Laporan lengkap sedang dibuat dalam file Google Sheet...</i>`;
-      kirimPesanTelegram(message, config, 'HTML');
-
-      exportResultsToSheet(logHeaders, historyEntries, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
-
+      return { success: true, message: message, data: historyEntries, headers: logHeaders };
     } else {
+      // Jika hasil cukup singkat, tampilkan semuanya
       historyEntries.forEach(entry => {
         message += formatHistoryEntry(entry, logHeaders);
       });
-      kirimPesanTelegram(message, config, 'HTML');
+      return { success: true, message: message, data: null, headers: null };
     }
 
   } catch (e) {
-    console.error(`Gagal total saat getVmHistory: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`❌ Terjadi kesalahan teknis saat mengambil riwayat.\nError: ${e.message}`, config);
+    console.error(`Gagal total saat menjalankan getVmHistory: ${e.message}\nStack: ${e.stack}`);
+    return { success: false, message: `❌ Terjadi kesalahan teknis saat mengambil riwayat.\n<b>Error:</b> ${e.message}`};
   }
 }
 
 /**
- * [FUNGSI HELPER BARU]
+ * [HELPER/PEMBANTU]
  * Memformat satu baris entri log menjadi teks yang rapi.
+ * Pastikan fungsi ini ada di ManajemenData.js atau Utilitas.js
  */
 function formatHistoryEntry(entry, headers) {
   let formattedText = "";
@@ -997,8 +1052,9 @@ function jalankanPengarsipanLogKeJson(config) { // [DIUBAH] Tambahkan parameter
   });
 
   try {
-    // Buat nama file arsip yang unik berdasarkan tanggal dan waktu
-    const timestamp = Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd_HH-mm-ss");
+    // [PERBAIKAN] Ganti "GMT+7" dengan zona waktu dari Spreadsheet
+    const timezone = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    const timestamp = Utilities.formatDate(new Date(), timezone, "yyyy-MM-dd_HH-mm-ss");
     const namaFileArsip = `Arsip Log - ${timestamp}.json`;
     
     // Stringify dengan spasi agar mudah dibaca manusia
@@ -1033,7 +1089,7 @@ function jalankanPengarsipanLogKeJson(config) { // [DIUBAH] Tambahkan parameter
  * [PERBAIKAN] Menambahkan parameter 'config' dan logika feedback ke Telegram.
  */
 function cekDanArsipkanLogJikaPenuh(config = null) { // [DIUBAH] Tambahkan parameter
-  const BATAS_BARIS = 5000;
+  const BATAS_BARIS = KONSTANTA.LIMIT.LOG_ARCHIVE_THRESHOLD;
 
   // Jika dipanggil dari trigger, config null. Jika dari perintah, config ada.
   const activeConfig = config || bacaKonfigurasi();

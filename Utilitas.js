@@ -122,3 +122,70 @@ function handleCentralizedError(errorObject, context, config) {
     kirimPesanTelegram(userFriendlyMessage, config, 'HTML');
   }
 }
+
+/**
+ * [FINAL DENGAN FIX DESKTOP]
+ * Membuat tampilan berhalaman (pesan teks dan keyboard) untuk data apa pun secara generik.
+ * Fungsi ini mengotomatiskan pembuatan tombol navigasi dan tombol aksi seperti "Ekspor".
+ *
+ * @param {object} options - Objek berisi parameter untuk pagination.
+ * @param {Array<Array<any>>} options.allItems - Array dari semua item/baris data yang akan ditampilkan.
+ * @param {number} options.page - Halaman saat ini yang diminta.
+ * @param {string} options.title - Judul utama yang akan ditampilkan di atas daftar (misal: "Hasil Pencarian untuk '10.10.1.1'").
+ * @param {function} options.formatEntryCallback - Fungsi yang menerima satu baris data dan mengembalikan string format HTML-nya.
+ * @param {string} options.navCallbackPrefix - Awalan callback untuk tombol navigasi (misal: 'cekvm_nav_10.10.1.1').
+ * @param {string|null} [options.exportCallbackData=null] - Callback data untuk tombol ekspor. Jika null, tombol tidak akan ditampilkan.
+ * @param {number} [options.entriesPerPage=15] - Jumlah item per halaman.
+ * @returns {{text: string, keyboard: object|null}} Objek berisi teks pesan dan keyboard.
+ */
+function createPaginatedView({ allItems, page, title, formatEntryCallback, navCallbackPrefix, exportCallbackData = null, entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES }) {
+  const totalEntries = allItems.length;
+  if (totalEntries === 0) {
+    return { text: `ℹ️ ${title}\n\nTidak ada data yang ditemukan.`, keyboard: null };
+  }
+
+  const totalPages = Math.ceil(totalEntries / entriesPerPage);
+  page = Math.max(1, Math.min(page, totalPages)); 
+
+  const startIndex = (page - 1) * entriesPerPage;
+  const endIndex = Math.min(startIndex + entriesPerPage, totalEntries);
+  const pageEntries = allItems.slice(startIndex, endIndex);
+
+  const listContent = pageEntries.map((item, index) => {
+    return `${startIndex + index + 1}. ${formatEntryCallback(item)}`;
+  }).join('\n');
+
+  // Merakit pesan lengkap
+  let text = `<b>${title}</b>\n`;
+  text += `<i>Menampilkan ${startIndex + 1}-${endIndex} dari total ${totalEntries} entri (Halaman ${page}/${totalPages})</i>\n`;
+  text += `------------------------------------\n\n`;
+  text += listContent;
+  
+  // [PERBAIKAN UTAMA DI SINI] Tambahkan karakter tak terlihat (Zero-Width Space)
+  // Ini memaksa Telegram Desktop untuk me-render ulang seluruh pesan, termasuk tombol.
+  text += '\u200B';
+
+  // Merakit Keyboard Navigasi dan Aksi
+  const keyboardRows = [];
+  const navigationButtons = [];
+
+  if (page > 1) {
+    navigationButtons.push({ text: '⬅️ Halaman Sblm', callback_data: `${navCallbackPrefix}_${page - 1}` });
+  }
+  if (totalPages > 1) {
+    navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: KONSTANTA.CALLBACK.IGNORE });
+  }
+  if (page < totalPages) {
+    navigationButtons.push({ text: 'Halaman Brkt ➡️', callback_data: `${navCallbackPrefix}_${page + 1}` });
+  }
+
+  if (navigationButtons.length > 0) {
+    keyboardRows.push(navigationButtons);
+  }
+
+  if (exportCallbackData) {
+    keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: exportCallbackData }]);
+  }
+
+  return { text: text, keyboard: { inline_keyboard: keyboardRows } };
+}

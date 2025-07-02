@@ -45,7 +45,7 @@
           const uptimeThreshold = config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME] || 'N/A';
           
           let ringkasanPesan = `🚨 <b>Laporan Peringatan Dini Sistem</b> 🚨\n`;
-          ringkasanPesan += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>\n\n`;
+          ringkasanPesan += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>\n\n`;
           ringkasanPesan += `Ditemukan total <b>${semuaPeringatan.length}</b> potensi masalah. Detail lengkap telah diekspor ke dalam file Google Sheet.\n\n`;
           ringkasanPesan += `<b>Ringkasan Peringatan:</b>\n\n`;
           

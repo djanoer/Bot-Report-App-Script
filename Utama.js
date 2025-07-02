@@ -2,32 +2,50 @@
 
 // [OPTIMALISASI] Definisikan objek handler untuk semua perintah bot.
 const commandHandlers = {
+  // [PERBAIKAN UX] Menerapkan pola status awal -> proses -> hasil -> status akhir
   [KONSTANTA.PERINTAH_BOT.LAPORAN]: (update, config) => {
     if (update.message.text.split(' ').length > 1) {
-      kirimPesanTelegram(`❌ Perintah tidak valid.`, config, 'HTML');
-    } else {
-      // [PERBAIKAN] Terima teks laporan, lalu kirim.
-      const pesan = buatLaporanHarianVM(config);
-      kirimPesanTelegram(pesan, config, 'HTML');
+        kirimPesanTelegram(`❌ Perintah tidak valid.`, config, 'HTML');
+        return;
+    }
+
+    let statusMessageId = null;
+    try {
+        // 1. Kirim Status Awal
+        const sentMessage = kirimPesanTelegram("⏳ Membuat laporan instan...", config, 'HTML');
+        if (sentMessage && sentMessage.ok) {
+            statusMessageId = sentMessage.result.message_id;
+        }
+
+        // 2. Proses di Latar Belakang
+        const pesanLaporan = buatLaporanHarianVM(config);
+
+        // 3. Kirim Hasil Lengkap
+        kirimPesanTelegram(pesanLaporan, config, 'HTML');
+
+        // 4. Edit Status Awal
+        if (statusMessageId) {
+            editMessageText("✅ Laporan harian selesai dibuat.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        }
+    } catch(e) {
+        handleCentralizedError(e, `Perintah: /laporan`, config);
+        if (statusMessageId) {
+            editMessageText("❌ Gagal membuat laporan.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        }
     }
   },
   [KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN]: () => syncDanBuatLaporanHarian(false, "PERINTAH MANUAL"),
   [KONSTANTA.PERINTAH_BOT.PROVISIONING]: (update, config) => {
     let statusMessageId = null;
     try {
-      // 1. Kirim pesan status awal
       const sentMessage = kirimPesanTelegram("📊 Menganalisis laporan provisioning... Ini mungkin memakan waktu.", config, 'HTML');
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
       
-      // 2. Jalankan fungsi dan dapatkan hasilnya
       const laporan = generateProvisioningReport(config);
-
-      // 3. Kirim hasil sebagai pesan baru
       kirimPesanTelegram(laporan, config, 'HTML');
 
-      // 4. Edit pesan status menjadi konfirmasi
       if (statusMessageId) {
         editMessageText("✅ Laporan provisioning selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       }
@@ -39,34 +57,50 @@ const commandHandlers = {
     }
   },
   [KONSTANTA.PERINTAH_BOT.CEK_TIKET]: (update, config) => {
-     if (update.message.text.split(' ').length > 1) {
+    if (update.message.text.split(' ').length > 1) {
         kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_TIKET}</code> tanpa argumen tambahan.`, config, 'HTML');
-     } else {
-        try {
-          kirimPesanTelegram("⏳ Menyiapkan laporan tiket...", config, 'HTML');
-          handleTicketInteraction(update, config);
-        } catch (e) {
-          console.error(`Gagal memproses /cektiket (interaktif): ${e.message}\nStack: ${e.stack}`);
-          kirimPesanTelegram(`❌ Gagal membuat laporan tiket interaktif.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+        return;
+    }
+
+    let statusMessageId = null;
+    try {
+        // Langkah 1: Kirim Status Awal dan SIMPAN message_id nya
+        const sentMessage = kirimPesanTelegram("⏳ Menyiapkan laporan tiket...", config, 'HTML');
+        if (sentMessage && sentMessage.ok) {
+            statusMessageId = sentMessage.result.message_id;
         }
-     }
+
+        // Langkah 2 & 3: Proses dan Kirim Hasil (ini tidak berubah, tetap dilakukan oleh handleTicketInteraction)
+        handleTicketInteraction(update, config);
+
+        // Langkah 4: Edit Status Awal menjadi Konfirmasi Akhir
+        if (statusMessageId) {
+            editMessageText("✅ Laporan tiket interaktif telah dikirim.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        }
+    } catch (e) {
+        console.error(`Gagal memproses /cektiket (interaktif): ${e.message}\nStack: ${e.stack}`);
+        const errorMessage = `❌ Gagal membuat laporan tiket interaktif.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`;
+        
+        // Jika gagal, kirim pesan error sebagai balasan baru
+        kirimPesanTelegram(errorMessage, config, 'HTML');
+        
+        // Dan ubah status awal menjadi pesan error
+        if (statusMessageId) {
+            editMessageText("❌ Terjadi kesalahan saat menyiapkan laporan tiket.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        }
+    }
   },
   [KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK]: (update, config) => {
     let statusMessageId = null;
     try {
-      // 1. Kirim pesan status awal
       const sentMessage = kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore...", config, 'HTML');
        if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
       
-      // 2. Jalankan fungsi dan dapatkan hasilnya
       const laporan = jalankanRekomendasiMigrasi(config);
-
-      // 3. Kirim hasil sebagai pesan baru
       kirimPesanTelegram(laporan, config, 'HTML');
 
-      // 4. Edit pesan status menjadi konfirmasi
       if (statusMessageId) {
         editMessageText("✅ Analisis migrasi selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       }
@@ -91,12 +125,53 @@ const commandHandlers = {
         kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP / Nama / PK]</code>`, config, 'HTML');
     }
   },
+  // [PERBAIKAN UX] Menerapkan pola status awal -> proses -> hasil -> status akhir
   [KONSTANTA.PERINTAH_BOT.HISTORY]: (update, config, userData) => {
     const parts = update.message.text.split(' ');
-    if (parts.length > 1) {
-        getVmHistory(parts[1].trim(), config, userData);
-    } else {
+    const pk = parts[1] ? parts[1].trim() : null;
+
+    if (!pk) {
         kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
+        return;
+    }
+
+    let statusMessageId = null;
+    try {
+        // 1. Kirim Status Awal
+        const pkToDisplay = normalizePrimaryKey(pk);
+        const sentMessage = kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pkToDisplay)}</code>...\n<i>Ini mungkin memerlukan beberapa saat...</i>`, config, 'HTML');
+        if (sentMessage && sentMessage.ok) {
+            statusMessageId = sentMessage.result.message_id;
+        }
+
+        // 2. Proses di Latar Belakang
+        const result = getVmHistory(pk, config);
+
+        // 3. Kirim Hasil Lengkap
+        if (result.success) {
+            kirimPesanTelegram(result.message, config, 'HTML');
+            
+            // Jika ada data untuk diekspor
+            if (result.data) {
+                exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
+            }
+            
+            // 4. Edit Status Awal menjadi Konfirmasi Akhir
+            if (statusMessageId) {
+                editMessageText("✅ Pencarian riwayat selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+            }
+        } else {
+            // Jika proses gagal, kirim pesan error dan edit status awal
+            kirimPesanTelegram(result.message, config, 'HTML');
+            if (statusMessageId) {
+                editMessageText("❌ Gagal mencari riwayat.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+            }
+        }
+    } catch (e) {
+        handleCentralizedError(e, `Perintah: /history`, config);
+        if (statusMessageId) {
+            editMessageText("❌ Terjadi kesalahan kritis.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        }
     }
   },
   [KONSTANTA.PERINTAH_BOT.CEK_HISTORY]: (update, config) => {
@@ -190,11 +265,7 @@ function doPost(e) {
       if (text.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
         handleTicketInteraction(update, config);
       }
-      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX + "get_")) { 
-        const pk = text.split("_")[2];
-        getVmHistory(pk, config, userData);
-      }
-      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.NAVIGATE)) {
+      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) { 
         handleHistoryInteraction(update, config);
       }
       else if (text.startsWith(KONSTANTA.CALLBACK_CEKVM.PREFIX)) {
