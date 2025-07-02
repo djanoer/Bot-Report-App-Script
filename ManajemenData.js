@@ -5,17 +5,21 @@
  * Bot akan mengirim status awal, memproses semua data, menggabungkan semua hasil,
  * mengirim satu laporan lengkap, lalu mengedit status awal.
  */
-function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI") {
+function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI", config = null) {
+  // [PERBAIKAN] Tentukan satu sumber config yang andal di awal.
+  // Jika config tidak diberikan (misal: dari menu), baca dari sheet.
+  // Jika diberikan (dari trigger), gunakan yang itu.
+  const activeConfig = config || bacaKonfigurasi();
+
   const lock = LockService.getScriptLock();
-  // [PERBAIKAN] Menggunakan konstanta untuk timeout
   const lockAcquired = lock.tryLock(KONSTANTA.LIMIT.LOCK_TIMEOUT_MS); 
 
   if (!lockAcquired) {
     console.log("Proses sinkronisasi sudah berjalan, permintaan saat ini dibatalkan.");
     return;
   }
-
-  const config = bacaKonfigurasi();
+  
+  // Variabel 'statusMessageId' dipindahkan ke sini agar bisa diakses di blok 'finally'
   let statusMessageId = null;
 
   try {
@@ -23,45 +27,41 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
     const timestamp = startTime.toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n⏳ Memulai sinkronisasi penuh & pembuatan laporan...\n<i>Ini mungkin memerlukan waktu beberapa menit.</i>`;
     
-    const sentMessage = kirimPesanTelegram(pesanAwal, config, 'HTML');
+    // Gunakan 'activeConfig' untuk mengirim pesan
+    const sentMessage = kirimPesanTelegram(pesanAwal, activeConfig, 'HTML');
     if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
     }
 
-    // --- Proses Utama Berjalan ---
-    // [PERBAIKAN] Menggunakan konstanta untuk mengakses kunci konfigurasi
     const KUNCI = KONSTANTA.KUNCI_KONFIG;
-    const sumberId = config[KUNCI.ID_SUMBER];
-    const sheetVmName = config[KUNCI.SHEET_VM];
-    const sheetDsName = config[KUNCI.SHEET_DS];
+    const sumberId = activeConfig[KUNCI.ID_SUMBER];
+    const sheetVmName = activeConfig[KUNCI.SHEET_VM];
+    const sheetDsName = activeConfig[KUNCI.SHEET_DS];
 
-    // Proses sinkronisasi data
-    salinDataSheet(sheetVmName, sumberId, config);
+    salinDataSheet(sheetVmName, sumberId, activeConfig);
     if (sheetDsName) {
-      salinDataSheet(sheetDsName, sumberId, config);
+      salinDataSheet(sheetDsName, sumberId, activeConfig);
     }
 
-    // Alur baru untuk laporan yang digabung
-    let pesanLaporanFinal = buatLaporanHarianVM(config);
-    const pesanNotifikasiDs = jalankanPemeriksaanDatastore(config);
+    let pesanLaporanFinal = buatLaporanHarianVM(activeConfig);
+    const pesanNotifikasiDs = jalankanPemeriksaanDatastore(activeConfig);
 
     if (pesanNotifikasiDs) {
-      // [PERBAIKAN] Menggunakan konstanta untuk separator
       pesanLaporanFinal += KONSTANTA.UI_STRINGS.SEPARATOR + pesanNotifikasiDs;
     }
 
-    kirimPesanTelegram(pesanLaporanFinal, config, 'HTML');
+    kirimPesanTelegram(pesanLaporanFinal, activeConfig, 'HTML');
 
     const pesanKonfirmasi = `<b>✅ Proses Selesai</b>\n\nLaporan lengkap telah dikirimkan.`;
     if (statusMessageId) {
-        editMessageText(pesanKonfirmasi, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        editMessageText(pesanKonfirmasi, null, activeConfig.TELEGRAM_CHAT_ID, statusMessageId, activeConfig);
     }
 
   } catch (e) {
-    handleCentralizedError(e, "syncDanBuatLaporanHarian", config);
+    handleCentralizedError(e, "syncDanBuatLaporanHarian", activeConfig);
     const pesanError = `<b>❌ Proses Gagal</b>\n\nTerjadi kesalahan kritis saat menjalankan sinkronisasi.`;
     if (statusMessageId) {
-        editMessageText(pesanError, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        editMessageText(pesanError, null, activeConfig.TELEGRAM_CHAT_ID, statusMessageId, activeConfig);
     }
   } finally {
     lock.releaseLock();
@@ -629,8 +629,9 @@ function getVmHistory(pk, config) {
     let message = `<b>📜 Riwayat Lengkap untuk VM</b>\n`;
     message += `<b>${KONSTANTA.HEADER_VM.VM_NAME}:</b> ${escapeHtml(currentVmName)}\n`;
     message += `<b>${KONSTANTA.HEADER_VM.PK}:</b> <code>${escapeHtml(pkToDisplay)}</code>\n`;
-    message += `<i>Total ditemukan ${historyEntries.length} entri riwayat.</i>\n`;
-    message += `------------------------------------\n\n`;
+    message += `<i>Total ditemukan ${historyEntries.length} entri riwayat.</i>`;
+    message += KONSTANTA.UI_STRINGS.SEPARATOR;
+    message += `\n`;
 
     // Logika untuk menampilkan ringkasan atau laporan lengkap
     if (historyEntries.length > 8) {
@@ -639,7 +640,7 @@ function getVmHistory(pk, config) {
       historyEntries.slice(0, 5).forEach(entry => {
         message += formatHistoryEntry(entry, logHeaders);
       });
-      message += `\n------------------------------------\n`;
+      message += KONSTANTA.UI_STRINGS.SEPARATOR;
       message += `<i>Riwayat terlalu panjang. Laporan lengkap sedang dibuat dalam file Google Sheet...</i>`;
       return { success: true, message: message, data: historyEntries, headers: logHeaders };
     } else {

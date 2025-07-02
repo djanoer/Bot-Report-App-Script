@@ -371,11 +371,18 @@ function kirimMenuEkspor(config) {
 // [OPTIMALISASI] KUMPULAN FUNGSI UNTUK PEMICU (TRIGGER)
 // =====================================================================
 
+
 function runDailyJobs() {
   console.log("Memulai pekerjaan harian via trigger...");
-  syncDanBuatLaporanHarian(false, "TRIGGER HARIAN");
-  jalankanPemeriksaanAmbangBatas();
-  jalankanPemeriksaanDatastore();
+  
+  // Baca konfigurasi sekali di awal
+  const config = bacaKonfigurasi();
+
+  // Berikan objek 'config' ke semua fungsi yang membutuhkannya
+  syncDanBuatLaporanHarian(false, "TRIGGER HARIAN", config); 
+  jalankanPemeriksaanAmbangBatas(config);
+  jalankanPemeriksaanDatastore(config);
+  
   console.log("Pekerjaan harian via trigger selesai.");
 }
 

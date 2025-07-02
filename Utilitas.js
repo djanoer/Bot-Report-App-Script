@@ -145,7 +145,7 @@ function createPaginatedView({ allItems, page, title, formatEntryCallback, navCa
   }
 
   const totalPages = Math.ceil(totalEntries / entriesPerPage);
-  page = Math.max(1, Math.min(page, totalPages)); 
+  page = Math.max(1, Math.min(page, totalPages));
 
   const startIndex = (page - 1) * entriesPerPage;
   const endIndex = Math.min(startIndex + entriesPerPage, totalEntries);
@@ -155,20 +155,16 @@ function createPaginatedView({ allItems, page, title, formatEntryCallback, navCa
     return `${startIndex + index + 1}. ${formatEntryCallback(item)}`;
   }).join('\n');
 
-  // Merakit pesan lengkap
-  let text = `<b>${title}</b>\n`;
-  text += `<i>Menampilkan ${startIndex + 1}-${endIndex} dari total ${totalEntries} entri (Halaman ${page}/${totalPages})</i>\n`;
+  let text = `📄 <b>${title}</b>\n`;
+  text += `<i>Menampilkan <b>${startIndex + 1}-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
   text += `------------------------------------\n\n`;
   text += listContent;
   
-  // [PERBAIKAN UTAMA DI SINI] Tambahkan karakter tak terlihat (Zero-Width Space)
-  // Ini memaksa Telegram Desktop untuk me-render ulang seluruh pesan, termasuk tombol.
   text += '\u200B';
 
-  // Merakit Keyboard Navigasi dan Aksi
   const keyboardRows = [];
   const navigationButtons = [];
-
+  
   if (page > 1) {
     navigationButtons.push({ text: '⬅️ Halaman Sblm', callback_data: `${navCallbackPrefix}_${page - 1}` });
   }
@@ -178,14 +174,12 @@ function createPaginatedView({ allItems, page, title, formatEntryCallback, navCa
   if (page < totalPages) {
     navigationButtons.push({ text: 'Halaman Brkt ➡️', callback_data: `${navCallbackPrefix}_${page + 1}` });
   }
-
-  if (navigationButtons.length > 0) {
-    keyboardRows.push(navigationButtons);
-  }
-
+  
+  if(navigationButtons.length > 0) keyboardRows.push(navigationButtons);
+  
   if (exportCallbackData) {
     keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: exportCallbackData }]);
   }
-
+  
   return { text: text, keyboard: { inline_keyboard: keyboardRows } };
 }

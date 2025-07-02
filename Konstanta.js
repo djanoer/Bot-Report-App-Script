@@ -174,6 +174,6 @@ const KONSTANTA = {
   },
   // String yang sering digunakan
   UI_STRINGS: {
-    SEPARATOR: "\n\n--------------------------------------------------\n"
+    SEPARATOR: "\n--------------------------------------------------\n"
   },
 };

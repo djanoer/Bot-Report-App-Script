@@ -3,22 +3,31 @@
   /**
    * Fungsi utama untuk menjalankan semua pemeriksaan ambang batas (thresholds).
    */
-  function jalankanPemeriksaanAmbangBatas() {
-    console.log("Memulai pemeriksaan ambang batas sistem...");
-    try {
-      const config = bacaKonfigurasi();
-      let semuaPeringatan = [];
+/**
+ * [FINAL & STABIL] Fungsi utama untuk menjalankan semua pemeriksaan dengan penanganan config yang benar
+ * agar dapat dijalankan oleh pemicu (trigger) maupun secara manual.
+ *
+ * @param {object} [config=null] - Objek konfigurasi. Jika null, fungsi akan membacanya sendiri.
+ */
+function jalankanPemeriksaanAmbangBatas(config = null) {
+  // [PERBAIKAN] Tentukan satu sumber config yang andal di awal.
+  // Jika config tidak diberikan (misal: dari menu), baca dari sheet.
+  // Jika diberikan (dari trigger), gunakan yang itu.
+  const activeConfig = config || bacaKonfigurasi();
+  
+  console.log("Memulai pemeriksaan ambang batas sistem...");
+  try {
+    let semuaPeringatan = [];
 
-      // Menggabungkan hasil dari semua fungsi pemeriksaan
-      semuaPeringatan.push(...cekKapasitasDatastore(config));
-      semuaPeringatan.push(...cekUptimeVmKritis(config));
-      semuaPeringatan.push(...cekVmKritisMati(config));
+    // Menggabungkan hasil dari semua fungsi pemeriksaan, masing-masing diberikan config yang aktif
+    semuaPeringatan.push(...cekKapasitasDatastore(activeConfig));
+    semuaPeringatan.push(...cekUptimeVmKritis(activeConfig));
+    semuaPeringatan.push(...cekVmKritisMati(activeConfig));
 
-      if (semuaPeringatan.length > 0) {
-        const BATAS_PESAN_DETAIL = 20;
+    if (semuaPeringatan.length > 0) {
+      const BATAS_PESAN_DETAIL = 20;
 
-        // Jika jumlah peringatan melebihi batas, kirim ringkasan dan file ekspor
-        if (semuaPeringatan.length > BATAS_PESAN_DETAIL) {
+      if (semuaPeringatan.length > BATAS_PESAN_DETAIL) {
           const counts = {
               datastore: 0,
               uptime: { total: 0, byCrit: {} },
@@ -28,8 +37,9 @@
           const headers = ["Tipe Peringatan", "Item yang Diperiksa", "Detail", "Kritikalitas"];
 
           semuaPeringatan.forEach(alert => {
-            if (alert.tipe.includes("Kapasitas Datastore")) counts.datastore++;
-            else if (alert.tipe.includes("Uptime VM")) {
+            if (alert.tipe.includes("Kapasitas Datastore")) {
+              counts.datastore++;
+            } else if (alert.tipe.includes("Uptime VM")) {
               counts.uptime.total++;
               const crit = alert.kritikalitas || 'Lainnya';
               counts.uptime.byCrit[crit] = (counts.uptime.byCrit[crit] || 0) + 1;
@@ -41,8 +51,8 @@
             dataUntukEkspor.push([alert.tipe, alert.item, alert.detailRaw, alert.kritikalitas || 'N/A']);
           });
           
-          const dsThreshold = config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_DS_USED] || 'N/A';
-          const uptimeThreshold = config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME] || 'N/A';
+          const dsThreshold = activeConfig[KONSTANTA.KUNCI_KONFIG.THRESHOLD_DS_USED] || 'N/A';
+          const uptimeThreshold = activeConfig[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME] || 'N/A';
           
           let ringkasanPesan = `🚨 <b>Laporan Peringatan Dini Sistem</b> 🚨\n`;
           ringkasanPesan += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>\n\n`;
@@ -65,40 +75,35 @@
               }
           }
 
-          // Mengirim pesan ringkasan terlebih dahulu
-          kirimPesanTelegram(ringkasanPesan, config, 'HTML');
+          // Gunakan 'activeConfig' untuk mengirim pesan dan mengekspor
+          kirimPesanTelegram(ringkasanPesan, activeConfig, 'HTML');
+          exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Peringatan Sistem", activeConfig, null, "Kritikalitas");
 
-          // Memanggil fungsi ekspor. Karena ini adalah proses sistem,
-          // kita sengaja mengirim 'null' untuk argumen userData.
-          // Fungsi ini akan menangani pembuatan file dan pengiriman notifikasi secara mandiri.
-          exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Peringatan Sistem", config, null, "Kritikalitas");
-
-        } else {
-          // Jika jumlah peringatan di bawah batas, kirim pesan detail langsung
-          let pesanDetail = `🚨 <b>Laporan Peringatan Dini Sistem</b> 🚨\n`;
-          pesanDetail += `<i>Ditemukan ${semuaPeringatan.length} potensi masalah yang memerlukan perhatian Anda:</i>\n`;
-          pesanDetail += `------------------------------------\n\n`;
-          
-          const formattedAlerts = semuaPeringatan.map(alert => {
-              let alertMessage = `${alert.icon} <b>${alert.tipe}</b>\n • Item: <code>${escapeHtml(alert.item)}</code>\n • Detail: ${alert.detailFormatted}`;
-              if (alert.kritikalitas) {
-                  alertMessage += `\n • Kritikalitas: <b>${escapeHtml(alert.kritikalitas)}</b>`;
-              }
-              return alertMessage;
-          });
-          pesanDetail += formattedAlerts.join('\n\n');
-          
-          kirimPesanTelegram(pesanDetail, config, 'HTML');
-        }
-        console.log(`Laporan peringatan dini telah dikirim dengan ${semuaPeringatan.length} item.`);
       } else {
-        console.log("Semua sistem terpantau dalam batas aman.");
+        let pesanDetail = `🚨 <b>Peringatan Dini Sistem</b> 🚨\n`;
+        pesanDetail += `<i>Ditemukan ${semuaPeringatan.length} potensi masalah yang perlu ditindaklanjuti:</i>\n`;
+        
+        const formattedAlerts = semuaPeringatan.map(alert => {
+            let alertMessage = `${alert.icon} <b>${alert.tipe}</b>\n • <b>Item:</b> <code>${escapeHtml(alert.item)}</code>\n • <b>Detail:</b> ${alert.detailFormatted}`;
+            if (alert.kritikalitas) {
+                alertMessage += `\n • <b>Kritikalitas:</b> <i>${escapeHtml(alert.kritikalitas)}</i>`;
+            }
+            return alertMessage;
+        });
+        pesanDetail += "\n" + formattedAlerts.join('\n\n');
+        
+        kirimPesanTelegram(pesanDetail, activeConfig, 'HTML');
       }
-    } catch (e) {
-      console.error(`Gagal menjalankan pemeriksaan ambang batas: ${e.message}\nStack: ${e.stack}`);
-      kirimPesanTelegram(`⚠️ Gagal menjalankan Sistem Peringatan Dini.\nError: ${e.message}`, bacaKonfigurasi());
+      console.log(`Laporan peringatan dini telah dikirim dengan ${semuaPeringatan.length} item.`);
+    } else {
+      console.log("Semua sistem terpantau dalam batas aman.");
     }
+  } catch (e) {
+    console.error(`Gagal menjalankan pemeriksaan ambang batas: ${e.message}\nStack: ${e.stack}`);
+    // Gunakan 'activeConfig' untuk mengirim pesan error
+    kirimPesanTelegram(`⚠️ Gagal menjalankan Sistem Peringatan Dini.\nError: ${e.message}`, activeConfig);
   }
+}
   
   /**
    * Memeriksa datastore yang kapasitasnya melebihi threshold.
