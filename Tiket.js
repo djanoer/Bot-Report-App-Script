@@ -88,7 +88,7 @@ function generateSummaryView(config) {
   // Format tanggal yang lebih kaya
   const timestamp = new Date().toLocaleString('id-ID', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', timeZoneName: 'short', timeZone: "Asia/Jakarta"
+    hour: '2-digit', minute: '2-digit'
   });
 
   // Membangun Teks Laporan

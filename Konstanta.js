@@ -83,7 +83,8 @@ const KONSTANTA = {
   // Nama-nama header kolom Datastore
   HEADER_DS: {
     CAPACITY_GB: 'Capacity (GB)',
-    CAPACITY_TB: 'Capacity (TB)'
+    CAPACITY_TB: 'Capacity (TB)',
+    USED_PERCENT: 'Used Space (%)'
   },
   // Nama-nama header kolom Tiket
   HEADER_TIKET: {
@@ -125,7 +126,7 @@ const KONSTANTA = {
   },
   // Nama-nama file arsip
   NAMA_FILE: {
-    ARSIP_VM: 'archive.json',
+    ARSIP_VM: 'archive_vm.json',
     ARSIP_DS: 'archive_datastore.json'
   },
   // [BARU] Menambahkan konstanta untuk nama perintah bot

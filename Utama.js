@@ -1,9 +1,123 @@
 // ===== FILE: Utama.gs =====
 
+// [OPTIMALISASI] Definisikan objek handler untuk semua perintah bot.
+const commandHandlers = {
+  [KONSTANTA.PERINTAH_BOT.LAPORAN]: (update, config) => {
+    if (update.message.text.split(' ').length > 1) {
+      kirimPesanTelegram(`❌ Perintah tidak valid.`, config, 'HTML');
+    } else {
+      // [PERBAIKAN] Terima teks laporan, lalu kirim.
+      const pesan = buatLaporanHarianVM(config);
+      kirimPesanTelegram(pesan, config, 'HTML');
+    }
+  },
+  [KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN]: () => syncDanBuatLaporanHarian(false, "PERINTAH MANUAL"),
+  [KONSTANTA.PERINTAH_BOT.PROVISIONING]: (update, config) => {
+    let statusMessageId = null;
+    try {
+      // 1. Kirim pesan status awal
+      const sentMessage = kirimPesanTelegram("📊 Menganalisis laporan provisioning... Ini mungkin memakan waktu.", config, 'HTML');
+      if (sentMessage && sentMessage.ok) {
+        statusMessageId = sentMessage.result.message_id;
+      }
+      
+      // 2. Jalankan fungsi dan dapatkan hasilnya
+      const laporan = generateProvisioningReport(config);
+
+      // 3. Kirim hasil sebagai pesan baru
+      kirimPesanTelegram(laporan, config, 'HTML');
+
+      // 4. Edit pesan status menjadi konfirmasi
+      if (statusMessageId) {
+        editMessageText("✅ Laporan provisioning selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    } catch (e) {
+      handleCentralizedError(e, "Perintah: /provisioning", config);
+      if (statusMessageId) {
+        editMessageText("❌ Gagal membuat laporan provisioning.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    }
+  },
+  [KONSTANTA.PERINTAH_BOT.CEK_TIKET]: (update, config) => {
+     if (update.message.text.split(' ').length > 1) {
+        kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_TIKET}</code> tanpa argumen tambahan.`, config, 'HTML');
+     } else {
+        try {
+          kirimPesanTelegram("⏳ Menyiapkan laporan tiket...", config, 'HTML');
+          handleTicketInteraction(update, config);
+        } catch (e) {
+          console.error(`Gagal memproses /cektiket (interaktif): ${e.message}\nStack: ${e.stack}`);
+          kirimPesanTelegram(`❌ Gagal membuat laporan tiket interaktif.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+        }
+     }
+  },
+  [KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK]: (update, config) => {
+    let statusMessageId = null;
+    try {
+      // 1. Kirim pesan status awal
+      const sentMessage = kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore...", config, 'HTML');
+       if (sentMessage && sentMessage.ok) {
+        statusMessageId = sentMessage.result.message_id;
+      }
+      
+      // 2. Jalankan fungsi dan dapatkan hasilnya
+      const laporan = jalankanRekomendasiMigrasi(config);
+
+      // 3. Kirim hasil sebagai pesan baru
+      kirimPesanTelegram(laporan, config, 'HTML');
+
+      // 4. Edit pesan status menjadi konfirmasi
+      if (statusMessageId) {
+        editMessageText("✅ Analisis migrasi selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    } catch(e) {
+       handleCentralizedError(e, "Perintah: /migrasicheck", config);
+       if (statusMessageId) {
+        editMessageText("❌ Gagal menjalankan analisis migrasi.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    }
+  },
+  [KONSTANTA.PERINTAH_BOT.EXPORT]: (update, config) => {
+     if (update.message.text.split(' ').length > 1) {
+        kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.EXPORT}</code> tanpa argumen tambahan.`, config, 'HTML');
+    } else {
+        kirimMenuEkspor(config);
+    }
+  },
+  [KONSTANTA.PERINTAH_BOT.CEK_VM]: (update, config) => {
+    if (update.message.text.split(' ').length > 1) {
+        handleVmSearchInteraction(update, config);
+    } else {
+        kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP / Nama / PK]</code>`, config, 'HTML');
+    }
+  },
+  [KONSTANTA.PERINTAH_BOT.HISTORY]: (update, config, userData) => {
+    const parts = update.message.text.split(' ');
+    if (parts.length > 1) {
+        getVmHistory(parts[1].trim(), config, userData);
+    } else {
+        kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
+    }
+  },
+  [KONSTANTA.PERINTAH_BOT.CEK_HISTORY]: (update, config) => {
+      if (update.message.text.split(' ').length > 1) {
+        kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_HISTORY}</code> tanpa argumen tambahan.`, config, 'HTML');
+    } else {
+        handleHistoryInteraction(update, config);
+    }
+  },
+  [KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG]: (update, config) => {
+    kirimPesanTelegram("⚙️ Menerima perintah arsip. Memeriksa jumlah log...", config);
+    cekDanArsipkanLogJikaPenuh(config);
+  },
+  [KONSTANTA.PERINTAH_BOT.CLEAR_CACHE]: (update, config) => {
+    const isCleared = clearUserAccessCache();
+    kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
+  },
+  [KONSTANTA.PERINTAH_BOT.INFO]: (update, config) => kirimPesanInfo(config),
+};
+
 function doPost(e) {
-  // Log mentah untuk investigasi jika terjadi masalah
-  // console.log("Menerima permintaan doPost. Konten: " + e.postData.contents);
-  
   if (!e || !e.postData || !e.postData.contents) {
     return HtmlService.createHtmlOutput("Bad Request");
   }
@@ -43,7 +157,6 @@ function doPost(e) {
     const commandParts = text.split(' ');
     let command = commandParts[0].toLowerCase().split('@')[0];
 
-    // --- ALUR PENDAFTARAN ---
     if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
       const existingUserData = getUserData(userId);
       if (existingUserData && existingUserData.email) {
@@ -61,7 +174,6 @@ function doPost(e) {
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // --- PEMBATASAN AKSES ---
     const userData = getUserData(userId);
     if (!userData || !userData.email) {
       const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
@@ -72,7 +184,6 @@ function doPost(e) {
     userData.firstName = firstName;
     userData.userId = userId;
 
-    // --- PENGENDALI INTERAKSI ---
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
       
@@ -96,88 +207,20 @@ function doPost(e) {
       answerCallbackQuery(callbackQueryId, config);
 
     } else { 
-      // Menggunakan konstanta untuk semua case
-      switch (command) {
-        case KONSTANTA.PERINTAH_BOT.LAPORAN:
-          if (commandParts.length > 1) {
-            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.LAPORAN}</code> tanpa argumen tambahan.`, config, 'HTML');
-          } else {
-            buatLaporanHarianVM();
-          }
-          break;
-        case KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN:
-          syncDanBuatLaporanHarian(false, "PERINTAH MANUAL"); 
-          break;
-        case KONSTANTA.PERINTAH_BOT.PROVISIONING:
-          generateProvisioningReport(config);
-          break;
-        case KONSTANTA.PERINTAH_BOT.CEK_TIKET:
-          if (commandParts.length > 1) {
-            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_TIKET}</code> tanpa argumen tambahan.`, config, 'HTML');
-          } else {
-              try {
-              kirimPesanTelegram("⏳ Menyiapkan laporan tiket...", config, 'HTML');
-              handleTicketInteraction(update, config);
-            } catch (e) {
-              console.error(`Gagal memproses /cektiket (interaktif): ${e.message}\nStack: ${e.stack}`);
-              kirimPesanTelegram(`❌ Gagal membuat laporan tiket interaktif.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
-            }
-          }
-          break;
-        case KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK:
-          kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore...", config, 'HTML');
-          jalankanRekomendasiMigrasi();
-          break;
-        case KONSTANTA.PERINTAH_BOT.EXPORT:
-          if (commandParts.length > 1) {
-            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.EXPORT}</code> tanpa argumen tambahan.`, config, 'HTML');
-          } else {
-            kirimMenuEkspor(config);
-          }
-          break;
-        case KONSTANTA.PERINTAH_BOT.CEK_VM:
-          if (commandParts.length > 1) {
-            handleVmSearchInteraction(update, config);
-          } else {
-            kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP / Nama / PK]</code>`, config, 'HTML');
-          }
-          break;
-        case KONSTANTA.PERINTAH_BOT.HISTORY:
-          if (commandParts.length > 1) {
-            getVmHistory(commandParts[1].trim(), config, userData);
-          } else {
-            kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
-          }
-          break;
-        case KONSTANTA.PERINTAH_BOT.CEK_HISTORY:
-          if (commandParts.length > 1) {
-            kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_HISTORY}</code> tanpa argumen tambahan.`, config, 'HTML');
-          } else {
-            handleHistoryInteraction(update, config);
-          }
-          break;
-        case KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG:
-          kirimPesanTelegram("⚙️ Menerima perintah arsip. Memeriksa jumlah log...", config);
-          cekDanArsipkanLogJikaPenuh(config);
-          break;
-        case KONSTANTA.PERINTAH_BOT.CLEAR_CACHE:
-          const isCleared = clearUserAccessCache();
-          kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
-          break;
-        case KONSTANTA.PERINTAH_BOT.INFO:
-          kirimPesanInfo(config);
-          break;
-        default:
-          kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
-          break;
+      const commandFunction = commandHandlers[command];
+      
+      if (commandFunction) {
+        try {
+          commandFunction(update, config, userData);
+        } catch (err) {
+          handleCentralizedError(err, `Perintah: ${command}`, config);
+        }
+      } else {
+        kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
       }
     }
   } catch (err) {
-    console.error(`Error di doPost: ${err.message}\nStack: ${err.stack}`);
-    // Jangan kirim error ke telegram jika terjadi saat parsing awal
-    if(config) {
-        kirimPesanTelegram(`<b>⚠️ Terjadi Error pada Bot</b>\n\n<code>${escapeHtml(err.message)}</code>`, config, 'HTML');
-    }
+    handleCentralizedError(err, "doPost (utama)", config);
   }
   return HtmlService.createHtmlOutput("OK");
 }
@@ -206,18 +249,19 @@ function kirimPesanInfo(config) {
   kirimPesanTelegram(infoPesan, config, 'HTML');
 }
 
+/**
+ * [OPTIMALISASI FINAL] Membuat menu kustom yang lebih sederhana dan relevan.
+ */
 function onOpen() {
   SpreadsheetApp.getUi()
-      .createMenu('⚙️ Menu Otomatis')
-      .addItem('1. SINKRONISASI & BUAT LAPORAN', 'syncDanBuatLaporanHarian')
-      .addItem('2. BUAT LAPORAN DARI DATA SAAT INI', 'buatLaporanHarianVM')
+      .createMenu('⚙️ Menu Bot')
+      .addItem('1. Jalankan Pekerjaan Harian Sekarang', 'runDailyJobs')
+      .addItem('2. Jalankan Laporan Migrasi Saja', 'jalankanRekomendasiMigrasi')
       .addSeparator()
-      .addItem('3. REKOMENDASI MIGRASI DATASTORE', 'runDailyMigrationCheck')
-      .addItem('4. PERIKSA AMBANG BATAS (WARNING)', 'runDailyWarningCheck')
+      .addItem('3. Hapus Cache Konfigurasi & Akses', 'clearUserAccessCache')
+      .addItem('4. Tes Koneksi ke Telegram', 'tesKoneksiTelegram')
       .addSeparator()
-      .addItem('5. Tes Koneksi Telegram', 'tesKoneksiTelegram')
-      .addSeparator()
-      .addItem('SETUP: Set Webhook (Jalankan 1x)', 'setWebhook')
+      .addItem('SETUP: Set Webhook (Jalankan 1x saat awal)', 'setWebhook')
       .addToUi();
 }
 
@@ -252,26 +296,42 @@ function kirimMenuEkspor(config) {
     kirimPesanTelegram(message, config, 'HTML', keyboard);
 }
 
-function runDailySyncReportForTrigger() {
-  console.log("runDailySyncReportForTrigger dipanggil oleh pemicu waktu.");
-  // Perbaikan: Tambahkan argumen kedua untuk menandai sumber eksekusi.
-  syncDanBuatLaporanHarian(false, "TRIGGER OTOMATIS"); 
+// =====================================================================
+// [OPTIMALISASI] KUMPULAN FUNGSI UNTUK PEMICU (TRIGGER)
+// =====================================================================
+
+function runDailyJobs() {
+  console.log("Memulai pekerjaan harian via trigger...");
+  syncDanBuatLaporanHarian(false, "TRIGGER HARIAN");
+  jalankanPemeriksaanAmbangBatas();
+  jalankanPemeriksaanDatastore();
+  console.log("Pekerjaan harian via trigger selesai.");
 }
 
-function runDailyMigrationCheck() {
-  console.log("runDailyMigrationCheck dipanggil oleh pemicu waktu.");
-  jalankanRekomendasiMigrasi();
-}
-
-function kirimLaporanMingguan() {
+function runWeeklyReport() {
+  console.log("Memulai laporan mingguan via trigger...");
   buatLaporanPeriodik('mingguan');
+  console.log("Laporan mingguan via trigger selesai.");
 }
 
-function kirimLaporanBulanan() {
+function runMonthlyReport() {
+  console.log("Memulai laporan bulanan via trigger...");
   buatLaporanPeriodik('bulanan');
+  console.log("Laporan bulanan via trigger selesai.");
 }
 
-function runDailyWarningCheck() {
-    console.log("runDailyWarningCheck dipanggil oleh pemicu waktu.");
-    jalankanPemeriksaanAmbangBatas();
+function runCleanupAndArchivingJobs() {
+  console.log("Memulai pekerjaan pembersihan dan arsip via trigger...");
+  bersihkanFileEksporTua();
+  cekDanArsipkanLogJikaPenuh();
+  console.log("Pekerjaan pembersihan dan arsip via trigger selesai.");
+}
+
+function runTicketSync() {
+    console.log("Memulai sinkronisasi data tiket via trigger...");
+    try {
+        syncTiketDataForTrigger();
+    } catch (e) {
+        console.error(`Sinkronisasi tiket via trigger gagal: ${e.message}`);
+    }
 }

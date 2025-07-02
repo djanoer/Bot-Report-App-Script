@@ -105,100 +105,98 @@
    * @returns {Array<string>} Array berisi pesan peringatan.
    */
   function cekKapasitasDatastore(config) {
-    const threshold = parseInt(config.THRESHOLD_DS_USED_PERCENT, 10);
-    if (isNaN(threshold)) return [];
+  const threshold = parseInt(config.THRESHOLD_DS_USED_PERCENT, 10);
+  if (isNaN(threshold)) return [];
+
+  const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
+  if (!dsSheet) return ["- Pengecekan datastore gagal: sheet tidak ditemukan."];
+
+  const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
+  const nameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
+  // [PERBAIKAN] Menggunakan konstanta terpusat
+  const usedPercentIndex = headers.indexOf(KONSTANTA.HEADER_DS.USED_PERCENT);
+
+  if (nameIndex === -1 || usedPercentIndex === -1) return ["- Pengecekan datastore gagal: header tidak ditemukan."];
   
-    const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
-    if (!dsSheet) return ["- Pengecekan datastore gagal: sheet tidak ditemukan."];
+  const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
+  const alerts = [];
+
+  dsData.forEach(row => {
+    const usedPercent = parseFloat(row[usedPercentIndex]);
+    if (!isNaN(usedPercent) && usedPercent > threshold) {
+      const dsName = row[nameIndex];
+      // Format pesan tidak berubah, hanya cara mendapatkan datanya yang lebih baik
+      alerts.push(`🔥 <b>Kapasitas Datastore Kritis</b>\n • Datastore: <code>${escapeHtml(dsName)}</code>\n • Kapasitas Terpakai: <b>${usedPercent.toFixed(1)}%</b> (Ambang Batas: ${threshold}%)`);
+    }
+  });
+  return alerts;
+}
   
-    const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-    const nameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-    const usedPercentIndex = headers.indexOf('Used Space (%)');
-  
-    if (nameIndex === -1 || usedPercentIndex === -1) return ["- Pengecekan datastore gagal: header tidak ditemukan."];
-    
-    const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
-    const alerts = [];
-  
-    dsData.forEach(row => {
-      const usedPercent = parseFloat(row[usedPercentIndex]);
-      if (!isNaN(usedPercent) && usedPercent > threshold) {
-        const dsName = row[nameIndex];
-        alerts.push(`🔥 <b>Kapasitas Datastore Kritis</b>\n • Datastore: <code>${escapeHtml(dsName)}</code>\n • Kapasitas Terpakai: <b>${usedPercent.toFixed(1)}%</b> (Ambang Batas: ${threshold}%)`);
-      }
-    });
-    return alerts;
-  }
-  
-  /**
-   * [DIROMBAK] Menambahkan data kritikalitas ke objek yang dikembalikan.
-   */
   function cekUptimeVmKritis(config) {
-    const threshold = parseInt(config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME], 10);
-    const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
-    if (isNaN(threshold) || monitoredCrit.length === 0) return [];
-  
-    const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-    if (!vmSheet) return [{ tipe: "Error Sistem", item: "Pengecekan Uptime VM", detailFormatted: "Sheet tidak ditemukan.", detailRaw: "Sheet tidak ditemukan.", icon: "⚠️" }];
-  
-    const headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
-    const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-    const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
-    const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
-    if (nameIndex === -1 || uptimeIndex === -1 || critIndex === -1) return [];
-  
-    const vmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
-    const alerts = [];
-    vmData.forEach(row => {
-      const uptimeDays = parseInt(row[uptimeIndex], 10);
-      const criticality = String(row[critIndex] || '');
-      
-      if (monitoredCrit.some(c => criticality.toUpperCase().includes(c)) && !isNaN(uptimeDays) && uptimeDays > threshold) {
-        alerts.push({
-          tipe: "Uptime VM Terlalu Lama",
-          item: row[nameIndex],
-          detailFormatted: `Uptime: <b>${uptimeDays} hari</b> (Batas: ${threshold} hari)`,
-          detailRaw: `Uptime: ${uptimeDays} hari, Batas: ${threshold} hari`,
-          icon: "💡",
-          kritikalitas: criticality // [BARU] Menyimpan info kritikalitas
-        });
-      }
-    });
-    return alerts;
-  }
-  
-  /**
-   * [DIROMBAK] Menambahkan data kritikalitas ke objek yang dikembalikan.
-   */
-  function cekVmKritisMati(config) {
-    const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
-    if (monitoredCrit.length === 0) return [];
-  
-    const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-    if (!vmSheet) return [{ tipe: "Error Sistem", item: "Pengecekan Status VM", detailFormatted: "Sheet tidak ditemukan.", detailRaw: "Sheet tidak ditemukan.", icon: "⚠️" }];
-  
-    const headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
-    const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-    const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
-    const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
-    if (nameIndex === -1 || stateIndex === -1 || critIndex === -1) return [];
-  
-    const vmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
-    const alerts = [];
-    vmData.forEach(row => {
-      const state = String(row[stateIndex] || '').toLowerCase();
-      const criticality = String(row[critIndex] || '');
-  
-      if (monitoredCrit.some(c => criticality.toUpperCase().includes(c)) && state.includes('off')) {
-         alerts.push({
-          tipe: "VM Kritis Mati",
-          item: row[nameIndex],
-          detailFormatted: `Status: <b>poweredOff</b>`,
-          detailRaw: `Status: poweredOff`,
-          icon: "❗️",
-          kritikalitas: criticality // [BARU] Menyimpan info kritikalitas
-        });
-      }
-    });
-    return alerts;
-  }
+  const threshold = parseInt(config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME], 10);
+  const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
+  if (isNaN(threshold) || monitoredCrit.length === 0) return [];
+
+  const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+  if (!vmSheet) return [{ tipe: "Error Sistem", item: "Pengecekan Uptime VM", detailFormatted: "Sheet tidak ditemukan.", detailRaw: "Sheet tidak ditemukan.", icon: "⚠️" }];
+
+  const headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
+  const vmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
+
+  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+  const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
+  const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
+  if (nameIndex === -1 || uptimeIndex === -1 || critIndex === -1) return [];
+
+  const alerts = [];
+  vmData.forEach(row => {
+    const uptimeDays = parseInt(row[uptimeIndex], 10);
+    const criticality = String(row[critIndex] || '');
+
+    if (monitoredCrit.some(c => criticality.toUpperCase().includes(c)) && !isNaN(uptimeDays) && uptimeDays > threshold) {
+      alerts.push({
+        tipe: "Uptime VM Terlalu Lama",
+        item: row[nameIndex],
+        detailFormatted: `Uptime: <b>${uptimeDays} hari</b> (Batas: ${threshold} hari)`,
+        detailRaw: `Uptime: ${uptimeDays} hari, Batas: ${threshold} hari`,
+        icon: "💡",
+        kritikalitas: criticality
+      });
+    }
+  });
+  return alerts;
+}
+
+function cekVmKritisMati(config) {
+  const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
+  if (monitoredCrit.length === 0) return [];
+
+  const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+  if (!vmSheet) return [{ tipe: "Error Sistem", item: "Pengecekan Status VM", detailFormatted: "Sheet tidak ditemukan.", detailRaw: "Sheet tidak ditemukan.", icon: "⚠️" }];
+
+  const headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
+  const vmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
+
+  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+  const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
+  const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
+  if (nameIndex === -1 || stateIndex === -1 || critIndex === -1) return [];
+
+  const alerts = [];
+  vmData.forEach(row => {
+    const state = String(row[stateIndex] || '').toLowerCase();
+    const criticality = String(row[critIndex] || '');
+
+    if (monitoredCrit.some(c => criticality.toUpperCase().includes(c)) && state.includes('off')) {
+       alerts.push({
+        tipe: "VM Kritis Mati",
+        item: row[nameIndex],
+        detailFormatted: `Status: <b>poweredOff</b>`,
+        detailRaw: `Status: poweredOff`,
+        icon: "❗️",
+        kritikalitas: criticality
+      });
+    }
+  });
+  return alerts;
+}

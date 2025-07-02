@@ -2,7 +2,7 @@
 
 function getProvisioningStatusSummary(config) {
   try {
-    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_DS];
+    const sheetName = config['NAMA_SHEET_DATASTORE'];
     if (!sheetName) {
       return "<i>Status provisioning tidak dapat diperiksa: NAMA_SHEET_DATASTORE belum diatur.</i>";
     }
@@ -14,9 +14,9 @@ function getProvisioningStatusSummary(config) {
     }
 
     const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-    const nameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-    const capGbIndex = headers.indexOf(KONSTANTA.HEADER_DS.CAPACITY_GB);
-    const provGbIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_PROV_GB_HEADER]);
+    const nameIndex = headers.indexOf(config['HEADER_DATASTORE_NAME']);
+    const capGbIndex = headers.indexOf('Capacity (GB)');
+    const provGbIndex = headers.indexOf(config['HEADER_DATASTORE_PROVISIONED_GB']);
 
     if ([nameIndex, capGbIndex, provGbIndex].includes(-1)) {
       return `<i>Status provisioning tidak dapat diperiksa: Kolom penting tidak ditemukan.</i>`;
@@ -31,12 +31,11 @@ function getProvisioningStatusSummary(config) {
       
       if (provisioned > capacity) {
         isOverProvisioned = true;
-        break; // Cukup temukan satu untuk mengubah status
+        break;
       }
     }
 
     if (isOverProvisioned) {
-      // Sesuai permintaan, pesan dibuat lebih ringkas untuk laporan utama
       return `❗️ Status Provisioning: Terdeteksi datastore over-provisioned. Gunakan /migrasicheck untuk detail.`;
     }
 
@@ -48,24 +47,30 @@ function getProvisioningStatusSummary(config) {
   }
 }
 
-
 function generateVcenterSummary(config) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-  if (!sheet || sheet.getLastRow() <= 1) {
-    return { message: "<i>Data VM tidak ditemukan untuk membuat ringkasan.</i>\n\n", grandTotal: { on: 0, off: 0, total: 0 }, uptimeCategories: null };
+  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { vCenterMessage: "<i>Data VM tidak ditemukan untuk membuat ringkasan.</i>\n\n", uptimeMessage: "" };
   }
+
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
   const vCenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
   const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
   const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
   if (vCenterIndex === -1 || stateIndex === -1) {
-    return { message: `<i>Gagal membuat ringkasan: Kolom '${KONSTANTA.HEADER_VM.VCENTER}' atau '${KONSTANTA.HEADER_VM.STATE}' tidak ditemukan.</i>\n\n`, grandTotal: { on: 0, off: 0, total: 0 }, uptimeCategories: null };
+    return { vCenterMessage: `<i>Gagal membuat ringkasan: Kolom '${KONSTANTA.HEADER_VM.VCENTER}' atau '${KONSTANTA.HEADER_VM.STATE}' tidak ditemukan.</i>\n\n`, uptimeMessage: "" };
   }
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
   const vCenterSummary = {};
   let totalGlobal = { on: 0, off: 0, total: 0 };
   const uptimeCategories = { '0_1': 0, '1_2': 0, '2_3': 0, 'over_3': 0, 'invalid': 0 };
-  
+
   data.forEach(row => {
     const vCenter = row[vCenterIndex] || 'Lainnya';
     if (!vCenterSummary[vCenter]) {
@@ -94,6 +99,7 @@ function generateVcenterSummary(config) {
       }
     }
   });
+
   let message = "";
   const vCenterOrder = Object.keys(vCenterSummary).sort();
   vCenterOrder.forEach(vc => {
@@ -108,8 +114,7 @@ function generateVcenterSummary(config) {
   message += `🟢 Power On: ${totalGlobal.on}\n`;
   message += `🔴 Power Off: ${totalGlobal.off}\n`;
   message += `Total VM: ${totalGlobal.total}\n\n`;
-  
-  // Uptime summary is built separately
+
   let uptimeMessage = `📊 Ringkasan Uptime (dari total ${totalGlobal.total} VM)\n`;
   uptimeMessage += `- Di bawah 1 Tahun: ${uptimeCategories['0_1']} VM\n`;
   uptimeMessage += `- 1 sampai 2 Tahun: ${uptimeCategories['1_2']} VM\n`;
@@ -121,35 +126,32 @@ function generateVcenterSummary(config) {
 }
 
 /**
- * [PERBAIKAN]
- * Laporan harian sekarang kembali menggunakan daftar pantau spesifik dari
- * sheet Konfigurasi untuk menjaga relevansi log perubahan.
+ * [VERSI FINAL & KONSISTEN] Membuat laporan harian VM.
+ * Fungsi ini sekarang sepenuhnya menerapkan konstanta terpusat.
+ * @param {object} config - Objek konfigurasi yang sudah dibaca.
+ * @returns {string} String laporan lengkap yang siap dikirim.
  */
-function buatLaporanHarianVM() {
-  const startTime = new Date();
-  const config = bacaKonfigurasi();
+function buatLaporanHarianVM(config) {
   let pesanLaporan = `🚨 <b>Laporan Harian VM & Datastore</b>\n`;
   pesanLaporan += `--------------------------------------------------\n\n`;
   
   try {
-    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
-    if (!sheetName) throw new Error("Nama sheet data utama tidak diatur di Konfigurasi.");
-
-    // ===== [PERUBAHAN LOGIKA] =====
-    // Pastikan KUNCI_KONFIG.KOLOM_PANTAU ada di config dan merupakan array.
-    if (!config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU] || !Array.isArray(config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU])) {
-      throw new Error("KOLOM_YANG_DIPANTAU tidak diatur dengan benar di Konfigurasi. Harap gunakan format array string, contoh: [\"State\", \"vCenter\"]");
+    const sheetName = config['NAMA_SHEET_DATA_UTAMA'];
+    if (!sheetName) throw new Error("Nama sheet data utama (NAMA_SHEET_DATA_UTAMA) tidak diatur di Konfigurasi.");
+    
+    const columnsToTrackConfig = config['KOLOM_YANG_DIPANTAU'];
+    if (!columnsToTrackConfig || !Array.isArray(columnsToTrackConfig)) {
+      throw new Error("KOLOM_YANG_DIPANTAU tidak diatur dengan benar di Konfigurasi.");
     }
-    // Buat daftar kolom pantau dari konfigurasi yang sudah disederhanakan.
-    const columnsToTrack = config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU].map(headerName => ({ nama: headerName }));
-    // =============================
-
+    
+    const columnsToTrack = columnsToTrackConfig.map(headerName => ({ nama: headerName }));
+    
+    // [PERBAIKAN] Menggunakan konstanta terpusat untuk nama file dan header.
     const archiveFileName = KONSTANTA.NAMA_FILE.ARSIP_VM;
     const primaryKeyHeader = KONSTANTA.HEADER_VM.PK;
 
     const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, 'VM');
     
-    // Ringkasan Perubahan
     if (logEntriesToAdd.length > 0) {
       pesanLaporan += `Ringkasan Perubahan Hari Ini:\n`;
       const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
@@ -160,13 +162,9 @@ function buatLaporanHarianVM() {
         else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
       });
 
-      if (counts.baru > counts.dihapus) {
-        pesanLaporan += `📈 Tren hari ini menunjukkan adanya pertumbuhan infrastruktur.\n`;
-      } else if (counts.dihapus > counts.baru) {
-        pesanLaporan += `📉 Tren hari ini menunjukkan adanya perampingan infrastruktur.\n`;
-      } else {
-        pesanLaporan += `⚙️ Aktivitas infrastruktur hari ini cenderung stabil.\n`;
-      }
+      if (counts.baru > counts.dihapus) { pesanLaporan += `📈 Pertumbuhan infrastruktur terdeteksi.\n`; } 
+      else if (counts.dihapus > counts.baru) { pesanLaporan += `📉 Perampingan infrastruktur terdeteksi.\n`; } 
+      else { pesanLaporan += `⚙️ Aktivitas infrastruktur cenderung stabil.\n`; }
     } else {
       pesanLaporan += "✅ Tidak ada perubahan data VM terdeteksi hari ini.";
     }
@@ -177,11 +175,8 @@ function buatLaporanHarianVM() {
     pesanLaporan += summary.uptimeMessage;
     
     const provisioningSummary = getProvisioningStatusSummary(config);
-    pesanLaporan += `\n\n--------------------------------------------------\n`;
-    pesanLaporan += `${provisioningSummary}\n`;
-    pesanLaporan += `--------------------------------------------------\n\n`;
+    pesanLaporan += `\n\n--------------------------------------------------\n${provisioningSummary}\n--------------------------------------------------\n\n`;
     
-    // Ringkasan Jumlah Perubahan
     if (logEntriesToAdd.length > 0) {
        const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
        logEntriesToAdd.forEach(log => {
@@ -190,17 +185,14 @@ function buatLaporanHarianVM() {
         else if (action.includes('MODIFIKASI')) counts.dimodifikasi++;
         else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
       });
-      pesanLaporan += `✅ Baru: ${counts.baru} entri\n`;
-      pesanLaporan += `✏️ Dimodifikasi: ${counts.dimodifikasi} entri\n`;
-      pesanLaporan += `❌ Dihapus: ${counts.dihapus} entri\n\n`;
+      pesanLaporan += `✅ Baru: ${counts.baru} | ✏️ Dimodifikasi: ${counts.dimodifikasi} | ❌ Dihapus: ${counts.dihapus}\n\n`;
     }
-    pesanLaporan += `Gunakan perintah /export untuk melihat detail perubahan.`;
+    pesanLaporan += `Gunakan /export untuk detail perubahan.`;
 
-    kirimPesanTelegram(pesanLaporan, config, 'HTML');
+    return pesanLaporan;
     
   } catch (e) {
-    console.error(`Error saat membuat laporan harian VM: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`<b>⚠️ Peringatan: Proses Laporan VM Harian Gagal!</b>\n\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+    throw new Error(`Gagal membuat Laporan Harian VM. Penyebab: ${e.message}`);
   }
 }
 
@@ -289,38 +281,54 @@ function buatLaporanPeriodik(periode) {
   kirimPesanTelegram(pesanLaporan, config, 'HTML');
 }
 
-
+/**
+ * [PERBAIKAN FINAL] Menyusun laporan provisioning secara mandiri.
+ * Fungsi ini tidak lagi bergantung pada objek KONSTANTA global untuk mencegah error.
+ * @param {object} config - Objek konfigurasi.
+ * @returns {string} String laporan lengkap yang siap dikirim.
+ */
 function generateProvisioningReport(config) {
-  kirimPesanTelegram("📊 Menganalisis laporan provisioning... Ini mungkin memakan waktu beberapa saat.", config);
-
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-    if (!sheet || sheet.getLastRow() <= 1) throw new Error('Data VM tidak ditemukan atau sheet kosong.');
+    const sheetName = config['NAMA_SHEET_DATA_UTAMA'];
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() <= 1) throw new Error(`Sheet "${sheetName}" tidak ditemukan atau kosong.`);
 
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const requiredCols = [KONSTANTA.HEADER_VM.PK, KONSTANTA.HEADER_VM.VM_NAME, KONSTANTA.HEADER_VM.VCENTER, KONSTANTA.HEADER_VM.STATE, KONSTANTA.HEADER_VM.CPU, KONSTANTA.HEADER_VM.MEMORY, KONSTANTA.HEADER_VM.PROV_TB];
+    
+    // [PERBAIKAN] Mendefinisikan nama header secara lokal di dalam fungsi
+    const requiredHeaderNames = {
+      PK: 'Primary Key',
+      VM_NAME: 'Virtual Machine',
+      VCENTER: 'vCenter',
+      STATE: 'State',
+      CPU: 'CPU',
+      MEMORY: 'Memory',
+      PROV_TB: 'Provisioned Space (TB)'
+    };
+
     const indices = {};
-    requiredCols.forEach(col => {
-      indices[col] = headers.indexOf(col);
-      if (indices[col] === -1) throw new Error(`Header '${col}' tidak ditemukan.`);
-    });
+    for (const key in requiredHeaderNames) {
+      const headerName = requiredHeaderNames[key];
+      indices[key] = headers.indexOf(headerName);
+      if (indices[key] === -1) throw new Error(`Header penting '${headerName}' tidak ditemukan di sheet "${sheetName}".`);
+    }
 
     const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
     
     const reportData = { Top5: { cpu: [], memory: [], disk: [] } };
-    const vCenters = new Set(allData.map(row => row[indices[KONSTANTA.HEADER_VM.VCENTER]] || 'Lainnya'));
+    const vCenters = new Set(allData.map(row => row[indices.VCENTER] || 'Lainnya'));
 
     ['Total', ...vCenters].forEach(vc => {
       reportData[vc] = { vmCount: 0, cpuOn: 0, cpuOff: 0, memOn: 0, memOff: 0, disk: 0 };
     });
 
     for (const row of allData) {
-      const vCenter = row[indices[KONSTANTA.HEADER_VM.VCENTER]] || 'Lainnya';
-      const isPoweredOn = String(row[indices[KONSTANTA.HEADER_VM.STATE]] || '').toLowerCase().includes('on');
+      const vCenter = row[indices.VCENTER] || 'Lainnya';
+      const isPoweredOn = String(row[indices.STATE] || '').toLowerCase().includes('on');
       
-      const cpu = parseInt(row[indices[KONSTANTA.HEADER_VM.CPU]], 10) || 0;
-      const memory = parseFloat(row[indices[KONSTANTA.HEADER_VM.MEMORY]]) || 0;
-      const disk = parseFloat(row[indices[KONSTANTA.HEADER_VM.PROV_TB]]) || 0;
+      const cpu = parseInt(row[indices.CPU], 10) || 0;
+      const memory = parseFloat(row[indices.MEMORY]) || 0;
+      const disk = parseFloat(row[indices.PROV_TB]) || 0;
 
       reportData[vCenter].vmCount++;
       reportData['Total'].vmCount++;
@@ -339,14 +347,14 @@ function generateProvisioningReport(config) {
         reportData['Total'].memOff += memory;
       }
 
-      const vmInfo = { name: row[indices[KONSTANTA.HEADER_VM.VM_NAME]], pk: row[indices[KONSTANTA.HEADER_VM.PK]] };
+      const vmInfo = { name: row[indices.VM_NAME], pk: row[indices.PK] };
       updateTop5(reportData.Top5.cpu, { ...vmInfo, value: cpu });
       updateTop5(reportData.Top5.memory, { ...vmInfo, value: memory });
       updateTop5(reportData.Top5.disk, { ...vmInfo, value: disk });
     }
 
     let message = `<b>📊 Laporan Provisioning Sumber Daya</b>\n`;
-    message += `<i>Berdasarkan data per ${new Date().toLocaleString('id-ID', {timeZone: "Asia/Jakarta"})}</i>`;
+    message += `<i>Berdasarkan data per ${new Date().toLocaleString('id-ID')}</i>`;
 
     Object.keys(reportData).filter(key => key !== 'Top5' && key !== 'Total').sort().forEach(vc => {
       message += `\n\n------------------------------------\n`;
@@ -357,12 +365,12 @@ function generateProvisioningReport(config) {
       message += ` • Total Provisioned: <b>${totalCpu} vCPU</b>\n`;
       message += ` • Teralokasi (On): ${reportData[vc].cpuOn} vCPU\n`;
       message += ` • Teralokasi (Off): ${reportData[vc].cpuOff} vCPU\n`;
-      message += ` • Rata-rata/VM: ${reportData[vc].vmCount > 0 ? (totalCpu / reportData[vc].vmCount).toFixed(1) : 0} vCPU\n\n`;
+      message += ` • Rata-rata/VM: ${(reportData[vc].vmCount > 0 ? (totalCpu / reportData[vc].vmCount) : 0).toFixed(1)} vCPU\n\n`;
       message += `<b>Memory:</b>\n`;
       message += ` • Total Provisioned: <b>${totalMem.toFixed(0)} GB</b> (${(totalMem / 1024).toFixed(2)} TB)\n`;
       message += ` • Teralokasi (On): ${reportData[vc].memOn.toFixed(0)} GB (${(reportData[vc].memOn / 1024).toFixed(2)} TB)\n`;
       message += ` • Teralokasi (Off): ${reportData[vc].memOff.toFixed(0)} GB (${(reportData[vc].memOff / 1024).toFixed(2)} TB)\n`;
-      message += ` • Rata-rata/VM: ${reportData[vc].vmCount > 0 ? (totalMem / reportData[vc].vmCount).toFixed(1) : 0} GB\n\n`;
+      message += ` • Rata-rata/VM: ${(reportData[vc].vmCount > 0 ? (totalMem / reportData[vc].vmCount) : 0).toFixed(1)} GB\n\n`;
       message += `<b>Disk:</b>\n`;
       message += ` • Total Provisioned: <b>${reportData[vc].disk.toFixed(2)} TB</b>\n`;
     });
@@ -375,12 +383,12 @@ function generateProvisioningReport(config) {
     message += ` • Total Provisioned: <b>${totalCpuGrand} vCPU</b>\n`;
     message += ` • Teralokasi (On): ${reportData['Total'].cpuOn} vCPU\n`;
     message += ` • Teralokasi (Off): ${reportData['Total'].cpuOff} vCPU\n`;
-    message += ` • Rata-rata/VM: ${reportData['Total'].vmCount > 0 ? (totalCpuGrand / reportData['Total'].vmCount).toFixed(1) : 0} vCPU\n\n`;
+    message += ` • Rata-rata/VM: ${(reportData['Total'].vmCount > 0 ? (totalCpuGrand / reportData['Total'].vmCount) : 0).toFixed(1)} vCPU\n\n`;
     message += `<b>Memory:</b>\n`;
     message += ` • Total Provisioned: <b>${totalMemGrand.toFixed(0)} GB</b> (${(totalMemGrand / 1024).toFixed(2)} TB)\n`;
     message += ` • Teralokasi (On): ${reportData['Total'].memOn.toFixed(0)} GB (${(reportData['Total'].memOn / 1024).toFixed(2)} TB)\n`;
     message += ` • Teralokasi (Off): ${reportData['Total'].memOff.toFixed(0)} GB (${(reportData['Total'].memOff / 1024).toFixed(2)} TB)\n`;
-    message += ` • Rata-rata/VM: ${reportData['Total'].vmCount > 0 ? (totalMemGrand / reportData['Total'].vmCount).toFixed(1) : 0} GB\n\n`;
+    message += ` • Rata-rata/VM: ${(reportData['Total'].vmCount > 0 ? (totalMemGrand / reportData['Total'].vmCount) : 0).toFixed(1)} GB\n\n`;
     message += `<b>Disk:</b>\n`;
     message += ` • Total Provisioned: <b>${reportData['Total'].disk.toFixed(2)} TB</b>\n`;
 
@@ -393,11 +401,10 @@ function generateProvisioningReport(config) {
     message += `\n<i>Memory Terbesar:</i>\n${topMemText}\n`;
     message += `\n<i>Disk Terbesar:</i>\n${topDiskText}\n`;
     
-    kirimPesanTelegram(message, config, 'HTML');
+    return message;
 
   } catch (e) {
-    console.error(`Gagal membuat laporan provisioning: ${e.message}\nStack: ${e.stack}`);
-    kirimPesanTelegram(`<b>⚠️ Gagal membuat laporan provisioning!</b>\n\n<code>${escapeHtml(e.message)}</code>`, config);
+    throw new Error(`Gagal membuat laporan provisioning: ${e.message}`);
   }
 }
 

@@ -1,7 +1,15 @@
 // ===== FILE: Konfigurasi.gs =====
 
+/**
+ * [PERBAIKAN FINAL] Membaca konfigurasi dari spreadsheet dengan validasi.
+ * Fungsi ini sekarang akan memeriksa apakah semua kunci konfigurasi yang wajib ada
+ * benar-benar ditemukan di sheet "Konfigurasi".
+ * @returns {object} Objek konfigurasi yang sudah divalidasi.
+ */
+/**
+ * [PERBAIKAN FINAL] Membaca konfigurasi dari spreadsheet dengan validasi.
+ */
 function bacaKonfigurasi() {
-  console.log("Membaca konfigurasi dari spreadsheet...");
   try {
     const config = {};
     const properties = PropertiesService.getScriptProperties();
@@ -9,36 +17,38 @@ function bacaKonfigurasi() {
     config.WEBHOOK_BOT_TOKEN = properties.getProperty('WEBHOOK_BOT_TOKEN');
 
     if (!config.TELEGRAM_BOT_TOKEN || !config.WEBHOOK_BOT_TOKEN) {
-      throw new Error("Token bot tidak ditemukan di PropertiesService. Harap jalankan fungsi 'setupSimpanToken' terlebih dahulu.");
+      throw new Error("Token bot tidak ditemukan di PropertiesService.");
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(KONSTANTA.NAMA_SHEET.KONFIGURASI);
-    if (!sheet) throw new Error(`Sheet "${KONSTANTA.NAMA_SHEET.KONFIGURASI}" tidak ditemukan.`);
+    const sheet = ss.getSheetByName('Konfigurasi');
+    if (!sheet) throw new Error(`Sheet "Konfigurasi" tidak ditemukan.`);
     
     const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
     data.forEach(row => {
       const key = row[0];
       const value = row[1];
       if (key) {
-        if (key === KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU || key === KONSTANTA.KUNCI_KONFIG.MAP_ENV) {
+        if (['KOLOM_YANG_DIPANTAU', 'PEMETAAN_ENVIRONMENT'].includes(key)) {
           try { config[key] = JSON.parse(value); } 
           catch (e) { throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}.`); }
-        
-        // logika parsing koma
-        } else if (key === KONSTANTA.KUNCI_KONFIG.DS_KECUALI || key === KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU || key === KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF) { 
-        config[key] = value ? value.toString().toLowerCase().split(',').map(k => k.trim()).filter(Boolean) : [];
-      
-      } else {
-          if (key !== 'TELEGRAM_BOT_TOKEN' && key !== 'WEBHOOK_BOT_TOKEN') {
-            config[key] = value;
-          }
+        } else if (['KATA_KUNCI_DS_DIKECUALIKAN', 'KRITIKALITAS_VM_DIPANTAU', 'STATUS_TIKET_AKTIF'].includes(key)) { 
+          config[key] = value ? value.toString().toLowerCase().split(',').map(k => k.trim()).filter(Boolean) : [];
+        } else {
+          config[key] = value;
         }
       }
     });
+
+    const requiredKeys = ['SUMBER_SPREADSHEET_ID', 'NAMA_SHEET_DATA_UTAMA', 'FOLDER_ID_ARSIP'];
+    for (const key of requiredKeys) {
+      if (!config[key]) {
+        throw new Error(`Kunci konfigurasi wajib "${key}" tidak ditemukan atau kosong di sheet "Konfigurasi".`);
+      }
+    }
+    
     return config;
   } catch (e) {
-    console.error(`Gagal membaca konfigurasi. Error: ${e.message}`);
     throw new Error(`Gagal membaca konfigurasi: ${e.message}`);
   }
 }
@@ -119,13 +129,30 @@ function tesKoneksiTelegram() {
 * Menghapus cache hak akses pengguna secara manual.
 */
 function clearUserAccessCache() {
-try {
-  const cache = CacheService.getScriptCache();
-  cache.remove('USER_ACCESS_MAP');
-  console.log("Cache hak akses pengguna berhasil dihapus.");
-  return true;
-} catch (e) {
-  console.error("Gagal menghapus cache: " + e.message);
-  return false;
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.remove('USER_ACCESS_MAP');
+    console.log("Cache hak akses pengguna berhasil dihapus.");
+    return true;
+  } catch (e) {
+    console.error("Gagal menghapus cache: " + e.message);
+    return false;
+  }
 }
+
+/**
+ * FUNGSI DIAGNOSTIK: Menjalankan bacaKonfigurasi dan mencatat hasilnya ke log.
+ * Ini membantu kita melihat persis apa yang dimuat oleh skrip dari sheet "Konfigurasi".
+ */
+function tesKonfigurasi() {
+  try {
+    console.log("Memulai tes pembacaan konfigurasi...");
+    const config = bacaKonfigurasi();
+    console.log("Konfigurasi berhasil dimuat. Isinya adalah:");
+    console.log(JSON.stringify(config, null, 2)); // Mencatat objek config dengan format yang rapi
+    SpreadsheetApp.getUi().alert("Tes Konfigurasi Berhasil!", "Silakan periksa Log Eksekusi untuk melihat isi dari objek konfigurasi.");
+  } catch (e) {
+    console.error(e);
+    SpreadsheetApp.getUi().alert("Tes Konfigurasi Gagal!", `Terjadi error: ${e.message}. Silakan periksa Log Eksekusi untuk detail.`);
+  }
 }

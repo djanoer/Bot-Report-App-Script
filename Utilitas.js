@@ -6,20 +6,19 @@ function escapeHtml(text) {
 }
 
 /**
- * [DIPERBARUI] Membuat "sidik jari" (hash) dari sebuah objek data VM.
- * Sekarang menganggap nilai #N/A sebagai string kosong agar tidak memicu log perubahan.
+ * [PERBAIKAN FINAL] Membuat "sidik jari" (hash) dari sebuah objek data VM.
+ * Fungsi ini sekarang tidak lagi memiliki aturan hardcoded untuk mengabaikan 'Uptime'.
+ * Perilakunya sekarang 100% dikontrol oleh daftar KOLOM_YANG_DIPANTAU.
  */
 function computeVmHash(vmObject) {
   if (!vmObject) return ''; 
   
+  // Tidak ada lagi penghapusan kunci 'Uptime' secara paksa.
+  // Objek sekarang digunakan apa adanya sesuai dengan yang dibuat oleh processDataChanges.
   const objectForHashing = { ...vmObject };
   
-  // Tetap mengabaikan Uptime dari perbandingan hash
-  delete objectForHashing['Uptime'];
-
   const sortedKeys = Object.keys(objectForHashing).sort();
   
-  // [PERUBAHAN] Periksa setiap nilai. Jika #N/A, anggap sebagai string kosong.
   const dataString = sortedKeys.map(key => {
       const value = objectForHashing[key];
       // Jika nilai adalah string literal "#N/A", perlakukan seperti sel kosong.
@@ -91,9 +90,8 @@ function getEnvironmentFromDsName(dsName, environmentMap) {
 }
 
 /**
- * [FUNGSI HELPER BARU]
- * Menormalkan Primary Key dengan menghapus sufiks lokasi (misal: -VC01, -VC02).
- * Fungsi ini memastikan perbandingan PK konsisten di seluruh aplikasi.
+ * Menghapus sufiks lokasi dari Primary Key untuk perbandingan yang konsisten.
+ * Contoh: "VM-001-VC01" menjadi "VM-001".
  * @param {string} pk - Primary Key lengkap yang mungkin mengandung sufiks.
  * @returns {string} Primary Key yang sudah bersih tanpa sufiks lokasi.
  */
@@ -102,4 +100,25 @@ function normalizePrimaryKey(pk) {
   // Menghapus '-VC' diikuti oleh angka di akhir string.
   // Pola ini fleksibel untuk menangani -VC01, -VC02, -VC10, dst.
   return pk.replace(/-VC\d+$/i, '').trim();
+}
+
+/**
+ * [MODIFIKASI DEBUGGING] Penanganan Error Terpusat.
+ * Versi ini dimodifikasi untuk menampilkan pesan error teknis asli di Telegram,
+ * membantu kita menemukan akar masalah yang sebenarnya.
+ */
+function handleCentralizedError(errorObject, context, config) {
+  // 1. Catat log teknis yang detail untuk developer (tidak berubah)
+  const errorMessageTechnical = `[ERROR di ${context}] ${errorObject.message}\nStack: ${errorObject.stack || 'Tidak tersedia'}`;
+  console.error(errorMessageTechnical);
+
+  // 2. Kirim pesan yang lebih detail ke pengguna untuk debugging
+  if (config) {
+    let userFriendlyMessage = `🔴 Maaf, terjadi kesalahan saat memproses permintaan Anda.\n\n`;
+    userFriendlyMessage += `<b>Konteks:</b> ${context}\n`;
+    // [MODIFIKASI PENTING] Tambahkan pesan error asli ke notifikasi
+    userFriendlyMessage += `<b>Detail Error Teknis:</b>\n<pre>${escapeHtml(errorObject.message)}</pre>`;
+    
+    kirimPesanTelegram(userFriendlyMessage, config, 'HTML');
+  }
 }
