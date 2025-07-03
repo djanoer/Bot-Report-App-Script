@@ -31,24 +31,32 @@ const KONSTANTA = {
     VIEW_CATEGORY: 'ticket_view_cat_',
     VIEW_DETAIL: 'ticket_view_detail_',
     BACK_TO_SUMMARY: 'ticket_back_summary',
-    BACK_TO_LIST: 'ticket_back_list_'
+    BACK_TO_LIST: 'ticket_back_list_',
   },
 
   // Callback data histori
   CALLBACK_HISTORY: {
     PREFIX: 'history_',
-    NAVIGATE: 'history_nav' // Hanya perlu prefix navigasi, karena aksi lain (export) punya prefix sendiri
+    NAVIGATE: 'history_nav', // Hanya perlu prefix navigasi, karena aksi lain (export) punya prefix sendiri
   },
   
   // Callback data cek VM
   CALLBACK_CEKVM: {
     PREFIX: 'cekvm_',
+    HISTORY_PREFIX: 'cekvm_history_',
+    CLUSTER_PREFIX: 'cekvm_cluster_',
+    DATASTORE_PREFIX: 'cekvm_datastore_',
+    CLUSTER_NAV_PREFIX: 'cekvm_cluster_nav_', // Untuk navigasi halaman VM di cluster
+    CLUSTER_EXPORT_PREFIX: 'cekvm_cluster_export_', // Untuk ekspor VM di cluster
+    DATASTORE_EXPORT_PREFIX: 'cekvm_ds_export_', // Untuk ekspor VM di datastore
+    DATASTORE_LIST_VMS_PREFIX: 'cekvm_ds_list_', // Untuk melihat daftar VM di datastore
+    DATASTORE_NAV_PREFIX: 'cekvm_ds_nav_',       // Untuk navigasi halaman VM di datastore
   },
   
   // Aksi spesifik untuk pagination
   PAGINATION_ACTIONS: {
     NAVIGATE: 'nav',
-    EXPORT: 'export'
+    EXPORT: 'export',
   },
 
   // Tingkat kritikalitas
@@ -92,8 +100,10 @@ const KONSTANTA = {
   // Header kolom Datastore
   HEADER_DS: {
     CAPACITY_GB: 'Capacity (GB)', 
-    CAPACITY_TB: 'Capacity (TB)', 
-    USED_PERCENT: 'Used Space (%)'
+    CAPACITY_TB: 'Capacity (TB)',
+    PROV_DS_GB: 'Provisioned (GB)',
+    PROV_DS_TB: 'Provisioned (TB)',
+    USED_PERCENT: 'Used Space (%)',
   },
   
   // Header kolom Tiket

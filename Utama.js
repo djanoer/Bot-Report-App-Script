@@ -211,96 +211,193 @@ function doPost(e) {
   try {
     config = bacaKonfigurasi();
 
-    // =====================================================================
-    // [IMPLEMENTASI KEAMANAN] Validasi token yang ada di URL webhook.
-    // Ini akan menolak semua permintaan yang tidak menyertakan token yang benar.
     if (!e.parameter.token || e.parameter.token !== config.WEBHOOK_BOT_TOKEN) {
       console.error("PERINGATAN KEAMANAN: Permintaan ke webhook ditolak karena token tidak valid.");
-      // Mengembalikan status 401 Unauthorized untuk menandakan masalah otentikasi
       return HtmlService.createHtmlOutput("Invalid Token").setStatusCode(401);
     }
-    // =====================================================================
 
     const update = JSON.parse(e.postData.contents);
+    const isCallback = !!update.callback_query;
 
-    let userId, fromChatId, text, firstName, isCallback = false, username;
-
-    if (update.callback_query) {
-      isCallback = true;
-      userId = update.callback_query.from.id;
-      fromChatId = update.callback_query.message.chat.id;
-      text = update.callback_query.data;
-      firstName = update.callback_query.from.first_name;
-      username = update.callback_query.from.username;
-    } else if (update.message && update.message.text) {
-      userId = update.message.from.id;
-      fromChatId = update.message.chat.id;
-      text = update.message.text;
-      firstName = update.message.from.first_name;
-      username = update.message.from.username;
-    } else {
-      return HtmlService.createHtmlOutput("OK");
-    }
-
-    if (String(fromChatId) !== String(config.TELEGRAM_CHAT_ID)) {
-      return HtmlService.createHtmlOutput("OK");
-    }
-
-    if (!isCallback && text && !text.startsWith('/')) {
-        return HtmlService.createHtmlOutput("OK");
-    }
-
-    const commandParts = text.split(' ');
-    let command = commandParts[0].toLowerCase().split('@')[0];
-
-    if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
-      const existingUserData = getUserData(userId);
-      if (existingUserData && existingUserData.email) {
-        kirimPesanTelegram(`Halo ${escapeHtml(firstName)}, Anda sudah terdaftar.`, config, 'HTML');
-        return HtmlService.createHtmlOutput("OK");
-      }
-      const email = commandParts[1];
-      if (!email || !email.includes('@') || !email.includes('.')) {
-        kirimPesanTelegram(`Format salah. Gunakan:\n<code>/daftar email.anda@domain.com</code>`, config, 'HTML');
-        return HtmlService.createHtmlOutput("OK");
-      }
-      let notifPesan = `<b>🔔 Permintaan Pendaftaran Baru</b>\n\n<b>Nama:</b> ${escapeHtml(firstName)}\n<b>Username:</b> ${username ? '@' + username : 'N/A'}\n<b>User ID:</b> <code>${userId}</code>\n<b>Email:</b> <code>${escapeHtml(email)}</code>`;
-      kirimPesanTelegram(notifPesan, config, 'HTML');
-      kirimPesanTelegram(`Terima kasih, ${escapeHtml(firstName)}. Permintaan Anda telah diteruskan.`, config, 'HTML', null, fromChatId);
-      return HtmlService.createHtmlOutput("OK");
-    }
-
-    const userData = getUserData(userId);
-    if (!userData || !userData.email) {
-      const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
-      kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
-      return HtmlService.createHtmlOutput("Unauthorized");
-    }
-
-    userData.firstName = firstName;
-    userData.userId = userId;
-
+    // =====================================================================
+    // BLOK 1: PENANGANAN UNTUK TOMBOL INTERAKTIF (CALLBACK)
+    // =====================================================================
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
+      const callbackData = update.callback_query.data;
+      const userEvent = update.callback_query;
+      const chatId = userEvent.message.chat.id;
+      const messageId = userEvent.message.message_id;
 
-      if (text.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
+      const userData = getUserData(userEvent.from.id);
+      if (!userData || !userData.email) {
+        const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
+        kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
+        answerCallbackQuery(callbackQueryId, config);
+        return HtmlService.createHtmlOutput("Unauthorized");
+      }
+      userData.firstName = userEvent.from.first_name;
+      userData.userId = userEvent.from.id;
+
+      if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.PREFIX)) {
+        if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX)) {
+          const pk = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX, '');
+          const result = getVmHistory(pk, config);
+          kirimPesanTelegram(result.message, config, 'HTML', null, chatId);
+          if (result.success && result.data) {
+            exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
+          }
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX)) {
+            const clusterName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX, '');
+            const { headers, results } = searchVmsByCluster(clusterName, config);
+            exportResultsToSheet(headers, results, `Daftar VM di Cluster ${clusterName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+            answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX)) {
+          const parts = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX, '').split('_');
+          const page = parseInt(parts.pop(), 10);
+          const clusterName = parts.join('_');
+          const { headers, results } = searchVmsByCluster(clusterName, config);
+          const formatVmEntry = (row) => {
+            const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+            const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
+            const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+            return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
+          };
+          const paginatedView = createPaginatedView({
+            allItems: results,
+            page: page,
+            title: `VM di Cluster "${escapeHtml(clusterName)}"`,
+            formatEntryCallback: formatVmEntry,
+            navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX}${clusterName}`,
+            exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX}${clusterName}`
+          });
+          editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX)) {
+          const clusterName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX, '');
+          const { headers, results } = searchVmsByCluster(clusterName, config);
+          const formatVmEntry = (row) => {
+            const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+            const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
+            const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+            return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
+          };
+          const paginatedView = createPaginatedView({
+            allItems: results,
+            page: 1,
+            title: `VM di Cluster "${escapeHtml(clusterName)}"`,
+            formatEntryCallback: formatVmEntry,
+            navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX}${clusterName}`,
+            exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX}${clusterName}`
+          });
+          kirimPesanTelegram(paginatedView.text, config, 'HTML', paginatedView.keyboard, chatId);
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX)) {
+            const parts = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX, '').split('_');
+            const page = parseInt(parts.pop(), 10);
+            const datastoreName = parts.join('_');
+            const { headers, results } = searchVmsByDatastore(datastoreName, config);
+            const formatVmEntry = (row) => {
+                const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+                const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
+                const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+                return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
+            };
+            const paginatedView = createPaginatedView({
+                allItems: results,
+                page: page,
+                title: `VM di Datastore "${escapeHtml(datastoreName)}"`,
+                formatEntryCallback: formatVmEntry,
+                navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX}${datastoreName}`,
+                exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX}${datastoreName}`
+            });
+            editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_LIST_VMS_PREFIX)) {
+            const datastoreName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_LIST_VMS_PREFIX, '');
+            const { headers, results } = searchVmsByDatastore(datastoreName, config);
+            const formatVmEntry = (row) => {
+                const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+                const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
+                const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+                return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
+            };
+            const paginatedView = createPaginatedView({
+                allItems: results,
+                page: 1,
+                title: `VM di Datastore "${escapeHtml(datastoreName)}"`,
+                formatEntryCallback: formatVmEntry,
+                navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX}${datastoreName}`,
+                exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX}${datastoreName}`
+            });
+            kirimPesanTelegram(paginatedView.text, config, 'HTML', paginatedView.keyboard, chatId);
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX)) {
+            const datastoreName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX, '');
+            const { headers, results } = searchVmsByDatastore(datastoreName, config);
+            exportResultsToSheet(headers, results, `Daftar VM di Datastore ${datastoreName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+            answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX)) {
+          const dsName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX, '');
+          try {
+            const details = getDatastoreDetails(dsName, config);
+            const { pesan, keyboard } = formatDatastoreDetail(details);
+            kirimPesanTelegram(pesan, config, 'HTML', keyboard, chatId);
+          } catch (err) {
+            handleCentralizedError(err, `Detail Datastore: ${dsName}`, config);
+          }
+        } else {
+          handleVmSearchInteraction(update, config);
+        }
+      } else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
         handleTicketInteraction(update, config);
-      }
-      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
+      } else if (callbackData.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
         handleHistoryInteraction(update, config);
-      }
-      else if (text.startsWith(KONSTANTA.CALLBACK_CEKVM.PREFIX)) {
-        handleVmSearchInteraction(update, config);
-      }
-      else if (text.startsWith("run_export_log_") || text.startsWith("export_")) {
-        handleExportRequest(text, config, userData);
+      } else if (callbackData.startsWith("run_export_log_") || callbackData.startsWith("export_")) {
+        handleExportRequest(callbackData, config, userData);
       }
 
       answerCallbackQuery(callbackQueryId, config);
+      return HtmlService.createHtmlOutput("OK");
+    }
 
-    } else {
+    // =====================================================================
+    // BLOK 2: PENANGANAN UNTUK PESAN TEKS BIASA (PERINTAH)
+    // =====================================================================
+    if (update.message && update.message.text) {
+      const userEvent = update.message;
+      const text = userEvent.text;
+
+      if (!text.startsWith('/')) {
+        return HtmlService.createHtmlOutput("OK");
+      }
+
+      const commandParts = text.split(' ');
+      const command = commandParts[0].toLowerCase().split('@')[0];
+
+      if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
+        const existingUserData = getUserData(userEvent.from.id);
+        if (existingUserData && existingUserData.email) {
+          kirimPesanTelegram(`Halo ${escapeHtml(userEvent.from.first_name)}, Anda sudah terdaftar.`, config, 'HTML');
+        } else {
+            const email = commandParts[1];
+            if (!email || !email.includes('@') || !email.includes('.')) {
+                kirimPesanTelegram(`Format salah. Gunakan:\n<code>/daftar email.anda@domain.com</code>`, config, 'HTML');
+            } else {
+                let notifPesan = `<b>🔔 Permintaan Pendaftaran Baru</b>\n\n<b>Nama:</b> ${escapeHtml(userEvent.from.first_name)}\n<b>Username:</b> ${userEvent.from.username ? '@' + userEvent.from.username : 'N/A'}\n<b>User ID:</b> <code>${userEvent.from.id}</code>\n<b>Email:</b> <code>${escapeHtml(email)}</code>`;
+                kirimPesanTelegram(notifPesan, config, 'HTML');
+                kirimPesanTelegram(`Terima kasih, ${escapeHtml(userEvent.from.first_name)}. Permintaan Anda telah diteruskan.`, config, 'HTML', null, userEvent.chat.id);
+            }
+        }
+        return HtmlService.createHtmlOutput("OK");
+      }
+
+      const userData = getUserData(userEvent.from.id);
+      if (!userData || !userData.email) {
+        const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
+        kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
+        return HtmlService.createHtmlOutput("Unauthorized");
+      }
+      userData.firstName = userEvent.from.first_name;
+      userData.userId = userEvent.from.id;
+
       const commandFunction = commandHandlers[command];
-
       if (commandFunction) {
         try {
           commandFunction(update, config, userData);
@@ -310,7 +407,10 @@ function doPost(e) {
       } else {
         kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
       }
+
+      return HtmlService.createHtmlOutput("OK");
     }
+
   } catch (err) {
     handleCentralizedError(err, "doPost (utama)", config);
   }

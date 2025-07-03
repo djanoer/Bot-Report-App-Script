@@ -183,11 +183,12 @@ function searchVmOnSheet(searchTerm, config) {
 }
 
 /**
- * [FIX] Memformat satu baris data VM. Sekarang menerima 'config' sebagai parameter.
+ * [MODIFIKASI KECERDASAN] Memformat satu baris data VM dan menambahkan keyboard kontekstual.
+ * Fungsi ini tidak lagi hanya mengembalikan string, tetapi sebuah objek: { pesan, keyboard }.
  * @param {Array} row - Array yang berisi data untuk satu baris VM.
  * @param {Array<string>} headers - Array header dari sheet VM.
  * @param {object} config - Objek konfigurasi bot yang aktif.
- * @returns {string} String format HTML yang berisi detail lengkap VM.
+ * @returns {object} Objek berisi { pesan: string, keyboard: object }.
  */
 function formatVmDetail(row, headers, config) {
   const indices = {
@@ -208,8 +209,6 @@ function formatVmDetail(row, headers, config) {
     vcenter: headers.indexOf(KONSTANTA.HEADER_VM.VCENTER)
   };
 
-  // Fungsi pembantu untuk menambahkan baris detail
-  // [PERBAIKAN] Tambahkan parameter 'isCode' untuk format copy-paste
   const addDetail = (value, icon, label, isCode = false) => {
     if (value !== undefined && value !== null && String(value).trim() !== '') {
       const formattedValue = isCode ? `<code>${escapeHtml(value)}</code>` : escapeHtml(value);
@@ -222,7 +221,6 @@ function formatVmDetail(row, headers, config) {
 
   pesan += "<b>Informasi Umum</b>\n";
   pesan += addDetail(row[indices.vmName], '🏷️', 'Nama VM', true);
-  // Ambil nilai Primary Key, lalu bersihkan dengan normalizePrimaryKey sebelum ditampilkan.
   const rawPk = row[indices.pk];
   const normalizedPk = normalizePrimaryKey(rawPk);
   pesan += addDetail(normalizedPk, '🔑', 'Primary Key', true);
@@ -236,10 +234,13 @@ function formatVmDetail(row, headers, config) {
   pesan += addDetail(`${row[indices.cpu]} vCPU`, '⚙️', 'CPU');
   pesan += addDetail(`${row[indices.memory]} GB`, '🧠', 'Memory');
   pesan += addDetail(`${row[indices.provGb]} GB`, '💽', 'Provisioned');
-  pesan += addDetail(row[indices.cluster], '☁️', 'Cluster');
-  pesan += addDetail(row[indices.datastore], '🗄️', 'Datastore');
+  
+  const clusterName = row[indices.cluster];
+  const datastoreName = row[indices.datastore];
+  pesan += addDetail(clusterName, '☁️', 'Cluster');
+  pesan += addDetail(datastoreName, '🗄️', 'Datastore');
 
-  const environment = getEnvironmentFromDsName(row[indices.datastore] || '', config[KONSTANTA.KUNCI_KONFIG.MAP_ENV]) || 'N/A';
+  const environment = getEnvironmentFromDsName(datastoreName || '', config[KONSTANTA.KUNCI_KONFIG.MAP_ENV]) || 'N/A';
   
   pesan += "\n<b>Konfigurasi & Manajemen</b>\n";
   pesan += addDetail(environment, '🌍', 'Environment');
@@ -249,12 +250,31 @@ function formatVmDetail(row, headers, config) {
   pesan += addDetail(row[indices.guestOs], '🐧', 'Guest OS');
   pesan += addDetail(row[indices.vcenter], '🏢', 'vCenter');
 
-  return pesan;
+  const keyboardRows = [];
+
+  if (normalizedPk) {
+    keyboardRows.push([{ text: `📜 Lihat Riwayat VM (${normalizedPk})`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX}${normalizedPk}` }]);
+  }
+
+  const secondRowButtons = [];
+  if (clusterName) {
+    secondRowButtons.push({ text: `⚙️ VM di Cluster ${clusterName}`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX}${clusterName}` });
+  }
+  if (datastoreName) {
+    secondRowButtons.push({ text: `🗄️ Detail DS ${datastoreName}`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX}${datastoreName}` });
+  }
+
+  if (secondRowButtons.length > 0) {
+    keyboardRows.push(secondRowButtons);
+  }
+
+  const keyboard = { inline_keyboard: keyboardRows };
+
+  return { pesan, keyboard };
 }
 
-
 /**
- * [FIX] Mengendalikan alur pencarian VM, sekarang memberikan 'config' saat memanggil formatVmDetail.
+ * [MODIFIKASI KECERDASAN] Mengendalikan alur pencarian VM, sekarang bisa mengirim keyboard kontekstual.
  */
 function handleVmSearchInteraction(update, config) {
   try {
@@ -298,11 +318,12 @@ function handleVmSearchInteraction(update, config) {
     const { headers, results } = searchVmOnSheet(searchTerm, config);
 
     if (results.length === 1 && !isCallback) {
-      // [PERBAIKAN UTAMA DI SINI] Memberikan objek 'config' sebagai parameter.
-      const detailMessage = formatVmDetail(results[0], headers, config);
+      const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
+      
       let fullMessage = `✅ Ditemukan 1 hasil untuk "<b>${escapeHtml(searchTerm)}</b>":\n\n`;
-      fullMessage += detailMessage;
-      kirimPesanTelegram(fullMessage, config, 'HTML');
+      fullMessage += pesan;
+
+      kirimPesanTelegram(fullMessage, config, 'HTML', keyboard);
       return;
     }
     
@@ -1475,4 +1496,68 @@ function diagnoseOverprovisioningCause(dsName, config) {
     }
 
     return null;
+}
+
+/**
+ * [FUNGSI BARU] Mencari semua VM yang berada di dalam cluster tertentu.
+ * @param {string} clusterName - Nama cluster yang akan dicari.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {{headers: Array<string>, results: Array<Array<any>>}} Objek berisi header dan baris data VM yang cocok.
+ */
+function searchVmsByCluster(clusterName, config) {
+  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const clusterIndex = headers.indexOf(KONSTANTA.HEADER_VM.CLUSTER);
+
+  if (clusterIndex === -1) {
+    throw new Error(`Kolom header penting "${KONSTANTA.HEADER_VM.CLUSTER}" tidak ditemukan di sheet "${sheetName}".`);
+  }
+
+  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
+  // Filter data berdasarkan nama cluster yang sama persis (case-insensitive)
+  const results = allData.filter(row => 
+    String(row[clusterIndex] || '').toLowerCase() === clusterName.toLowerCase()
+  );
+
+  return { headers, results };
+}
+
+/**
+ * [FUNGSI BARU] Mencari semua VM yang berada di dalam datastore tertentu.
+ * @param {string} datastoreName - Nama datastore yang akan dicari.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {{headers: Array<string>, results: Array<Array<any>>}} Objek berisi header dan baris data VM yang cocok.
+ */
+function searchVmsByDatastore(datastoreName, config) {
+  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const datastoreColumn = config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER];
+  const datastoreIndex = headers.indexOf(datastoreColumn);
+
+  if (datastoreIndex === -1) {
+    throw new Error(`Kolom header untuk datastore ("${datastoreColumn}") tidak ditemukan di sheet "${sheetName}".`);
+  }
+
+  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
+  const results = allData.filter(row => 
+    String(row[datastoreIndex] || '').toLowerCase() === datastoreName.toLowerCase()
+  );
+
+  return { headers, results };
 }
