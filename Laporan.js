@@ -135,36 +135,41 @@ function generateVcenterSummary(config) {
 }
 
 /**
- * [FINAL & STABIL] Membuat laporan harian VM dengan format teks yang konsisten dan penanganan error yang andal.
+ * [LOGIKA FINAL & BENAR] Membuat laporan harian yang kini secara akurat
+ * membaca log perubahan hari ini langsung dari sheet "Log Perubahan".
  */
 function buatLaporanHarianVM(config) {
   let pesanLaporan = `📊 <b>Laporan Harian VM & Datastore</b>\n`;
   pesanLaporan += `🗓️ <i>${new Date().toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</i>\n`;
   
   try {
-    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
-    if (!sheetName) throw new Error("Nama sheet data utama tidak diatur.");
-    
-    const kolomPantauConfig = config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU] || [];
-    const columnsToTrack = kolomPantauConfig.map(nama => ({nama}));
-    
-    const logEntriesToAdd = processDataChanges(config, sheetName, KONSTANTA.NAMA_FILE.ARSIP_VM, KONSTANTA.HEADER_VM.PK, columnsToTrack, KONSTANTA.NAMA_ENTITAS.VM);
-    
+    // --- Bagian 1: Analisis Log Perubahan Hari Ini ---
     pesanLaporan += "\n<b>Perubahan Hari Ini:</b>\n";
-    if (logEntriesToAdd.length > 0) {
+    
+    // [PERBAIKAN UTAMA] Ambil log langsung dari sheet "Log Perubahan" untuk hari ini.
+    const todayStartDate = new Date();
+    todayStartDate.setHours(0, 0, 0, 0);
+    const { headers, data: todaysLogs } = getCombinedLogs(todayStartDate, config);
+
+    if (todaysLogs.length > 0) {
       const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
-      logEntriesToAdd.forEach(log => {
-        const action = log[1];
+      const actionIndex = headers.indexOf(KONSTANTA.HEADER_LOG.ACTION);
+      
+      todaysLogs.forEach(log => {
+        const action = log[actionIndex];
         if (action.includes('PENAMBAHAN')) counts.baru++;
         else if (action.includes('MODIFIKASI')) counts.dimodifikasi++;
         else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
       });
       pesanLaporan += `➕ Baru: ${counts.baru} | ✏️ Dimodifikasi: ${counts.dimodifikasi} | ❌ Dihapus: ${counts.dihapus}\n`;
     } else {
-      pesanLaporan += "✅ Tidak ada perubahan data VM terdeteksi.\n";
+      pesanLaporan += "✅ Tidak ada perubahan data VM terdeteksi hari ini.\n";
     }
+    
+    // --- Bagian 2: Ringkasan Infrastruktur ---
     pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR;
 
+    // Bagian ini tidak perlu diubah karena sudah benar.
     const summary = generateVcenterSummary(config);
     pesanLaporan += "<b>Ringkasan vCenter:</b>\n" + summary.vCenterMessage;
     pesanLaporan += "\n<b>Analisis Uptime:</b>\n" + summary.uptimeMessage;
@@ -172,7 +177,7 @@ function buatLaporanHarianVM(config) {
     const provisioningSummary = getProvisioningStatusSummary(config);
     pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR + "<b>Status Provisioning:</b>\n" + provisioningSummary;
     
-    pesanLaporan += `\n\nGunakan /export untuk melihat detail perubahan.`;
+    pesanLaporan += `\n\nGunakan /cekhistory untuk detail perubahan lengkap.`;
 
     return pesanLaporan;
     
