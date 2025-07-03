@@ -166,13 +166,13 @@ function createPaginatedView({ allItems, page, title, formatEntryCallback, navCa
   const navigationButtons = [];
   
   if (page > 1) {
-    navigationButtons.push({ text: '⬅️ Halaman Sblm', callback_data: `${navCallbackPrefix}_${page - 1}` });
+    navigationButtons.push({ text: '⬅️ Prev', callback_data: `${navCallbackPrefix}_${page - 1}` });
   }
   if (totalPages > 1) {
     navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: KONSTANTA.CALLBACK.IGNORE });
   }
   if (page < totalPages) {
-    navigationButtons.push({ text: 'Halaman Brkt ➡️', callback_data: `${navCallbackPrefix}_${page + 1}` });
+    navigationButtons.push({ text: 'Next ➡️', callback_data: `${navCallbackPrefix}_${page + 1}` });
   }
   
   if(navigationButtons.length > 0) keyboardRows.push(navigationButtons);

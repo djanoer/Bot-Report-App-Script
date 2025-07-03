@@ -122,7 +122,17 @@ const commandHandlers = {
     if (update.message.text.split(' ').length > 1) {
         handleVmSearchInteraction(update, config);
     } else {
-        kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.CEK_VM} [IP / Nama / PK]</code>`, config, 'HTML');
+        // [IMPLEMENTASI] Mengganti pesan satu baris dengan pesan yang lebih edukatif dan detail.
+        // Logika untuk memeriksa jumlah argumen tetap sama.
+        const pesanBantuan = "<b>❌ Perintah tidak lengkap.</b>\n\n" +
+                             "Anda perlu memberikan informasi VM yang ingin dicari setelah <code>/cekvm</code>.\n\n" +
+                             "Anda dapat mencari berdasarkan:\n" +
+                             "•  <b>Nama VM</b>: <code>web-server-prod-01</code>\n" +
+                             "•  <b>Alamat IP</b>: <code>10.20.30.40</code>\n" +
+                             "•  <b>Primary Key/UUID</b>: <code>d4v30e1d-d4v3-ku12-n14w-4nd9d1c54999</code>\n\n" +
+                             "<b>Contoh Penggunaan:</b>\n" +
+                             "<code>/cekvm 10.20.30.40</code>";
+        kirimPesanTelegram(pesanBantuan, config, 'HTML');
     }
   },
   // [PERBAIKAN UX] Menerapkan pola status awal -> proses -> hasil -> status akhir
@@ -200,8 +210,19 @@ function doPost(e) {
   let config;
   try {
     config = bacaKonfigurasi();
+
+    // =====================================================================
+    // [IMPLEMENTASI KEAMANAN] Validasi token yang ada di URL webhook.
+    // Ini akan menolak semua permintaan yang tidak menyertakan token yang benar.
+    if (!e.parameter.token || e.parameter.token !== config.WEBHOOK_BOT_TOKEN) {
+      console.error("PERINGATAN KEAMANAN: Permintaan ke webhook ditolak karena token tidak valid.");
+      // Mengembalikan status 401 Unauthorized untuk menandakan masalah otentikasi
+      return HtmlService.createHtmlOutput("Invalid Token").setStatusCode(401);
+    }
+    // =====================================================================
+
     const update = JSON.parse(e.postData.contents);
-    
+
     let userId, fromChatId, text, firstName, isCallback = false, username;
 
     if (update.callback_query) {
@@ -220,7 +241,7 @@ function doPost(e) {
     } else {
       return HtmlService.createHtmlOutput("OK");
     }
-    
+
     if (String(fromChatId) !== String(config.TELEGRAM_CHAT_ID)) {
       return HtmlService.createHtmlOutput("OK");
     }
@@ -252,34 +273,34 @@ function doPost(e) {
     const userData = getUserData(userId);
     if (!userData || !userData.email) {
       const userMention = `<a href="tg://user?id=${userId}">${escapeHtml(firstName || userId)}</a>`;
-      kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML'); 
-      return HtmlService.createHtmlOutput("Unauthorized"); 
+      kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
+      return HtmlService.createHtmlOutput("Unauthorized");
     }
-    
+
     userData.firstName = firstName;
     userData.userId = userId;
 
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
-      
+
       if (text.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
         handleTicketInteraction(update, config);
       }
-      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) { 
+      else if (text.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
         handleHistoryInteraction(update, config);
       }
       else if (text.startsWith(KONSTANTA.CALLBACK_CEKVM.PREFIX)) {
         handleVmSearchInteraction(update, config);
-      } 
+      }
       else if (text.startsWith("run_export_log_") || text.startsWith("export_")) {
         handleExportRequest(text, config, userData);
       }
-      
+
       answerCallbackQuery(callbackQueryId, config);
 
-    } else { 
+    } else {
       const commandFunction = commandHandlers[command];
-      
+
       if (commandFunction) {
         try {
           commandFunction(update, config, userData);
@@ -321,7 +342,7 @@ function kirimPesanInfo(config) {
 }
 
 /**
- * [OPTIMALISASI FINAL] Membuat menu kustom yang lebih sederhana dan relevan.
+ * [PERBAIKAN DX] Membuat menu kustom yang lebih terstruktur dan menyertakan setup interaktif.
  */
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -332,7 +353,9 @@ function onOpen() {
       .addItem('3. Hapus Cache Konfigurasi & Akses', 'clearUserAccessCache')
       .addItem('4. Tes Koneksi ke Telegram', 'tesKoneksiTelegram')
       .addSeparator()
-      .addItem('SETUP: Set Webhook (Jalankan 1x saat awal)', 'setWebhook')
+      .addSubMenu(SpreadsheetApp.getUi().createMenu('🛠️ Setup Awal')
+          .addItem('SETUP: Set Token (Interaktif)', 'setupSimpanTokenInteraktif') // Memanggil fungsi baru
+          .addItem('SETUP: Set Webhook (Jalankan setelah token di-set)', 'setWebhook'))
       .addToUi();
 }
 

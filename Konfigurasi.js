@@ -95,6 +95,7 @@ function getMigrationConfig(migrationLogicSheet) {
   return migrationConfig;
 }
 
+/**
 function setupSimpanToken() {
   const tokenTelegram = 'ISI_TOKEN_TELEGRAM_BOT_ANDA_DI_SINI';
   const tokenWebhook = 'ISI_TOKEN_RAHASIA_WEBHOOK_ANDA_DI_SINI';
@@ -111,6 +112,50 @@ function setupSimpanToken() {
   });
 
   console.log('BERHASIL: Token Anda telah disimpan dengan aman di PropertiesService.');
+}
+*/
+
+/**
+ * [IMPLEMENTASI] Meminta token secara interaktif dari pengguna melalui UI
+ * dan menyimpannya ke PropertiesService. Ini lebih aman dan ramah pengguna.
+ */
+function setupSimpanTokenInteraktif() {
+  const ui = SpreadsheetApp.getUi();
+
+  // Meminta Token Telegram Bot
+  const responseTelegram = ui.prompt(
+    'Langkah 1/2: Setup Token Telegram',
+    'Salin-tempel token untuk Telegram Bot Anda dari BotFather:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (responseTelegram.getSelectedButton() !== ui.Button.OK || !responseTelegram.getResponseText()) {
+    ui.alert('Setup dibatalkan oleh pengguna.');
+    return;
+  }
+  const tokenTelegram = responseTelegram.getResponseText().trim();
+
+  // Meminta Token Rahasia Webhook
+  const responseWebhook = ui.prompt(
+    'Langkah 2/2: Setup Token Webhook',
+    'Sekarang, masukkan token rahasia untuk webhook Anda (ini adalah teks rahasia yang Anda buat sendiri untuk mengamankan webhook):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (responseWebhook.getSelectedButton() !== ui.Button.OK || !responseWebhook.getResponseText()) {
+    ui.alert('Setup dibatalkan oleh pengguna.');
+    return;
+  }
+  const tokenWebhook = responseWebhook.getResponseText().trim();
+
+  // Menyimpan token ke tempat yang aman (logika penyimpanan tidak berubah)
+  const properties = PropertiesService.getScriptProperties();
+  properties.setProperties({
+    'TELEGRAM_BOT_TOKEN': tokenTelegram,
+    'WEBHOOK_BOT_TOKEN': tokenWebhook
+  });
+
+  ui.alert('✅ BERHASIL!', 'Semua token telah disimpan dengan aman di PropertiesService.', ui.ButtonSet.OK);
 }
 
 function tesKoneksiTelegram() {

@@ -139,12 +139,14 @@ function searchVmOnSheet(searchTerm, config) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
+  // 1. Validasi Sheet
   if (!sheet || sheet.getLastRow() < 2) {
     throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
   }
 
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
+  // 2. Validasi Header yang Wajib Ada
   const requiredHeaders = {
     pkIndex: KONSTANTA.HEADER_VM.PK,
     nameIndex: KONSTANTA.HEADER_VM.VM_NAME,
@@ -161,6 +163,7 @@ function searchVmOnSheet(searchTerm, config) {
   }
 
   const { pkIndex, nameIndex, ipIndex } = indices;
+  // 3. Pengambilan Data yang Efisien
   const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
 
   const searchLower = searchTerm.toLowerCase();
@@ -168,34 +171,6 @@ function searchVmOnSheet(searchTerm, config) {
   let results = [];
 
   for (let i = 0; i < allData.length; i++) {
-    const row = allData[i];
-    const vmPk = normalizePrimaryKey(String(row[pkIndex] || '')).toLowerCase();
-    const vmName = String(row[nameIndex] || '').toLowerCase();
-    const vmIp = String(row[ipIndex] || '').toLowerCase();
-    if (vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower)) {
-      results.push(row);
-    }
-  }
-  return { headers, results };
-}
-
-/**
- * [FUNGSI HELPER BARU] Melakukan pencarian mentah di sheet dan mengembalikan hasilnya.
- */
-function searchVmOnSheet(searchTerm, config) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-  const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-
-  const allData = sheet.getDataRange().getValues();
-  const searchLower = searchTerm.toLowerCase();
-  const normalizedSearchTerm = normalizePrimaryKey(searchLower);
-  let results = [];
-
-  for (let i = 1; i < allData.length; i++) {
     const row = allData[i];
     const vmPk = normalizePrimaryKey(String(row[pkIndex] || '')).toLowerCase();
     const vmName = String(row[nameIndex] || '').toLowerCase();

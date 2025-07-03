@@ -105,24 +105,27 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
   }
 }
   
-  /**
-   * Memeriksa datastore yang kapasitasnya melebihi threshold.
-   * @returns {Array<string>} Array berisi pesan peringatan.
-   */
-  function cekKapasitasDatastore(config) {
+/**
+ * [PERBAIKAN KONSISTENSI]
+ * Memeriksa datastore yang kapasitasnya melebihi threshold dan MENGEMBALIKAN array berisi objek terstruktur.
+ * @param {object} config Objek konfigurasi bot.
+ * @returns {Array<object>} Array berisi objek peringatan.
+ */
+function cekKapasitasDatastore(config) {
   const threshold = parseInt(config.THRESHOLD_DS_USED_PERCENT, 10);
   if (isNaN(threshold)) return [];
 
   const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
-  if (!dsSheet) return ["- Pengecekan datastore gagal: sheet tidak ditemukan."];
+  // Mengembalikan objek error yang terstruktur jika sheet tidak ditemukan
+  if (!dsSheet) return [{ tipe: "Error Sistem", item: "Pengecekan Kapasitas Datastore", detailFormatted: "Sheet tidak ditemukan.", detailRaw: "Sheet tidak ditemukan.", icon: "⚠️", kritikalitas: "N/A" }];
 
   const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
   const nameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-  // [PERBAIKAN] Menggunakan konstanta terpusat
   const usedPercentIndex = headers.indexOf(KONSTANTA.HEADER_DS.USED_PERCENT);
 
-  if (nameIndex === -1 || usedPercentIndex === -1) return ["- Pengecekan datastore gagal: header tidak ditemukan."];
-  
+  // Mengembalikan objek error yang terstruktur jika header tidak ditemukan
+  if (nameIndex === -1 || usedPercentIndex === -1) return [{ tipe: "Error Sistem", item: "Pengecekan Kapasitas Datastore", detailFormatted: "Header penting tidak ditemukan.", detailRaw: "Header penting tidak ditemukan.", icon: "⚠️", kritikalitas: "N/A" }];
+
   const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
   const alerts = [];
 
@@ -130,14 +133,21 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
     const usedPercent = parseFloat(row[usedPercentIndex]);
     if (!isNaN(usedPercent) && usedPercent > threshold) {
       const dsName = row[nameIndex];
-      // Format pesan tidak berubah, hanya cara mendapatkan datanya yang lebih baik
-      alerts.push(`🔥 <b>Kapasitas Datastore Kritis</b>\n • Datastore: <code>${escapeHtml(dsName)}</code>\n • Kapasitas Terpakai: <b>${usedPercent.toFixed(1)}%</b> (Ambang Batas: ${threshold}%)`);
+      // [IMPLEMENTASI] Logika tidak berubah, hanya format output yang diubah menjadi OBJEK.
+      alerts.push({
+        tipe: "Kapasitas Datastore Kritis",
+        item: dsName,
+        detailFormatted: `Kapasitas Terpakai: <b>${usedPercent.toFixed(1)}%</b> (Ambang Batas: ${threshold}%)`,
+        detailRaw: `Terpakai: ${usedPercent.toFixed(1)}%, Batas: ${threshold}%`,
+        icon: "🔥",
+        kritikalitas: null // Datastore tidak memiliki kolom kritikalitas
+      });
     }
   });
   return alerts;
 }
   
-  function cekUptimeVmKritis(config) {
+function cekUptimeVmKritis(config) {
   const threshold = parseInt(config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME], 10);
   const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
   if (isNaN(threshold) || monitoredCrit.length === 0) return [];

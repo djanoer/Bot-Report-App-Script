@@ -1,3 +1,5 @@
+// ===== FILE: Datastore.gs =====
+
 /**
  * [REVISI KONSISTENSI] Menjalankan pemeriksaan perubahan datastore, mencatatnya ke log,
  * dan MENGEMBALIKAN pesan notifikasi jika ada perubahan.
