@@ -200,9 +200,16 @@ function buatLaporanPeriodik(periode) {
     const tglMulai = startDate.toLocaleDateString('id-ID', {day: '2-digit', month: 'long'});
     const tglSelesai = today.toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'});
     title = `📈 <b>Laporan Tren Mingguan</b>\n<i>Periode: ${tglMulai} - ${tglSelesai}</i>`;
+  
   } else if (periode === 'bulanan') {
     startDate.setMonth(today.getMonth() - 1);
-    title = `📈 <b>Laporan Tren Bulanan</b>\n<i>Bulan ${today.toLocaleString('id-ID', { month: 'long', year: 'numeric' })}</i>`;
+    
+    // [PERBAIKAN] Menggunakan rentang tanggal yang jelas untuk konsistensi.
+    const tglMulai = startDate.toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'});
+    const tglSelesai = today.toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'});
+    
+    title = `📈 <b>Laporan Tren Bulanan</b>\n<i>Periode: ${tglMulai} - ${tglSelesai}</i>`;
+  
   } else {
     return;
   }
