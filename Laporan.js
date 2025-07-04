@@ -394,3 +394,109 @@ function analisisTrenPerubahan(startDate, config) {
     counts: counts
   };
 }
+
+// ===== FILE: Laporan.js =====
+
+/**
+ * [FITUR BARU] Menghasilkan laporan distribusi aset VM berdasarkan kritikalitas dan environment
+ * dengan kategori yang dibaca dari sheet konfigurasi.
+ * @param {object} config - Objek konfigurasi bot yang sudah diproses.
+ * @returns {string} String pesan laporan yang sudah diformat untuk Telegram.
+ */
+function generateAssetDistributionReport(config) {
+  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    throw new Error(`Sheet data VM "${sheetName}" tidak dapat ditemukan atau kosong.`);
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
+  const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
+  const envIndex = headers.indexOf(KONSTANTA.HEADER_VM.ENVIRONMENT);
+  const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
+
+  if ([critIndex, envIndex, stateIndex].includes(-1)) {
+    throw new Error("Satu atau lebih header penting (Kritikalitas, Environment, State) tidak ditemukan di sheet VM.");
+  }
+
+  const report = {
+    criticality: {},
+    environment: {},
+    totalVm: allData.length
+  };
+  
+  const recognizedCriticality = config.LIST_KRITIKALITAS || [];
+  const recognizedEnvironment = config.LIST_ENVIRONMENT || [];
+
+  allData.forEach(row => {
+    // 1. Agregasi berdasarkan Kritikalitas (dengan kategori "Other")
+    let criticality = String(row[critIndex] || '').trim();
+    if (!recognizedCriticality.includes(criticality) || criticality === '') {
+      criticality = 'Other';
+    }
+    report.criticality[criticality] = (report.criticality[criticality] || 0) + 1;
+
+    // 2. Agregasi berdasarkan Environment (dengan kategori "Other")
+    let environment = String(row[envIndex] || '').trim();
+    if (!recognizedEnvironment.includes(environment) || environment === '') {
+      environment = 'Other';
+    }
+    if (!report.environment[environment]) {
+      report.environment[environment] = { total: 0, on: 0, off: 0 };
+    }
+    report.environment[environment].total++;
+    
+    if (String(row[stateIndex] || '').toLowerCase().includes('on')) {
+      report.environment[environment].on++;
+    } else {
+      report.environment[environment].off++;
+    }
+  });
+  
+  const timestamp = new Date().toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Makassar' });
+  let message = `📊 <b>Laporan Distribusi Aset VM</b>\n`;
+  message += `<i>Analisis per ${timestamp} WITA</i>\n\n`;
+  message += KONSTANTA.UI_STRINGS.SEPARATOR + "\n";
+  
+  message += `🔥 <b>Analisis Berdasarkan Kritikalitas</b>\n`;
+  message += `<i>Total Keseluruhan: ${report.totalVm} VM</i>\n\n`;
+  
+  const criticalityOrder = [...recognizedCriticality, 'Other'];
+  for (const crit of criticalityOrder) {
+    if (report.criticality[crit]) {
+        const count = report.criticality[crit];
+        const percentage = ((count / report.totalVm) * 100).toFixed(1);
+        message += `• <b>${escapeHtml(crit)}:</b> <code>${count}</code> VM (${percentage}%)\n`;
+    }
+  }
+
+  message += "\n" + KONSTANTA.UI_STRINGS.SEPARATOR + "\n";
+
+  message += `🌍 <b>Analisis Berdasarkan Environment</b>\n\n`;
+  let grandTotal = { total: 0, on: 0, off: 0 };
+  const envOrder = [...recognizedEnvironment, 'Other'];
+  
+  for (const env of envOrder) {
+    if (report.environment[env]) {
+        const data = report.environment[env];
+        const icon = env.toLowerCase().includes('production') ? '🏢' : (env.toLowerCase().includes('dev') ? '🛠️' : '⚙️');
+        message += `${icon} <b>${escapeHtml(env)}</b>\n`;
+        message += ` • Total: <code>${data.total}</code> VM\n`;
+        message += ` • Status: 🟢 <code>${data.on}</code> On | 🔴 <code>${data.off}</code> Off\n\n`;
+        
+        grandTotal.total += data.total;
+        grandTotal.on += data.on;
+        grandTotal.off += data.off;
+    }
+  }
+  
+  message += `--- <i>Grand Total</i> ---\n`;
+  message += ` • Total: <code>${grandTotal.total}</code> VM\n`;
+  message += ` • Status: 🟢 <code>${grandTotal.on}</code> On | 🔴 <code>${grandTotal.off}</code> Off\n`;
+
+  return message;
+}

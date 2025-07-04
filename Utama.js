@@ -199,6 +199,27 @@ const commandHandlers = {
     const isCleared = clearUserAccessCache();
     kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
   },
+  [KONSTANTA.PERINTAH_BOT.DISTRIBUSI_VM]: (update, config) => {
+    let statusMessageId = null;
+    try {
+      const sentMessage = kirimPesanTelegram("📊 Menganalisis dan menyusun laporan distribusi aset...", config, 'HTML');
+      if (sentMessage && sentMessage.ok) {
+        statusMessageId = sentMessage.result.message_id;
+      }
+      
+      const laporan = generateAssetDistributionReport(config);
+      kirimPesanTelegram(laporan, config, 'HTML');
+
+      if (statusMessageId) {
+        editMessageText("✅ Laporan distribusi aset VM selesai dibuat.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    } catch (e) {
+      handleCentralizedError(e, `Perintah: ${KONSTANTA.PERINTAH_BOT.DISTRIBUSI_VM}`, config);
+      if (statusMessageId) {
+        editMessageText("❌ Gagal membuat laporan distribusi.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    }
+  },
   [KONSTANTA.PERINTAH_BOT.INFO]: (update, config) => kirimPesanInfo(config),
 };
 
@@ -422,22 +443,29 @@ function doPost(e) {
  * Mengirim pesan bantuan (/info) yang dinamis menggunakan konstanta.
  */
 function kirimPesanInfo(config) {
-  const K = KONSTANTA.PERINTAH_BOT; // Alias untuk kemudahan
-  const infoPesan = "<b>Daftar Perintah Bot Laporan VM</b>\n" +
-                    "------------------------------------\n\n" +
-                    `<code>${K.DAFTAR} [email]</code>\nMeminta hak akses untuk menggunakan bot.\n\n` +
-                    `<code>${K.LAPORAN}</code>\n(Cepat) Membuat laporan instan.\n\n` +
-                    `<code>${K.SYNC_LAPORAN}</code>\n(Lengkap) Menyalin data terbaru, lalu membuat laporan.\n\n` +
-                    `<code>${K.PROVISIONING}</code>\nMenampilkan laporan analisis alokasi resource.\n\n` +
-                    `<code>${K.CEK_TIKET}</code>\nMenampilkan laporan monitoring tiket interaktif.\n\n` +
-                    `<code>${K.MIGRASI_CHECK}</code>\nMenjalankan analisis & rekomendasi migrasi datastore.\n\n` +
-                    `<code>${K.EXPORT}</code>\nMenampilkan menu untuk mengunduh laporan.\n\n` +
-                    `<code>${K.CEK_VM} [IP/Nama/PK]</code>\nMencari detail sebuah VM.\n\n` +
-                    `<code>${K.HISTORY} [PK]</code>\nMenampilkan riwayat perubahan VM.\n\n` +
-                    `<code>${K.CEK_HISTORY}</code>\nMenampilkan semua log perubahan hari ini.\n\n` +
-                    `<code>${K.ARSIPKAN_LOG}</code>\nMemeriksa & menjalankan pengarsipan log.\n\n` +
-                    `<code>${K.CLEAR_CACHE}</code>\nMembersihkan cache hak akses.\n\n` +
-                    `<code>${K.INFO}</code>\nMenampilkan daftar perintah ini.`;
+  const K = KONSTANTA.PERINTAH_BOT;
+  const infoPesan = "<b>Bot Laporan Infrastruktur</b>\n\n" +
+                    "Berikut adalah daftar perintah yang tersedia:\n\n" +
+
+                    "📊 <b>Laporan & Analisis</b>\n" +
+                    `<code>${K.LAPORAN}</code> - Membuat laporan harian (tanpa sinkronisasi).\n` +
+                    `<code>${K.SYNC_LAPORAN}</code> - Sinkronisasi data & buat laporan.\n` +
+                    `<code>${K.DISTRIBUSI_VM}</code> - Laporan VM per kritikalitas & environment.\n` +
+                    `<code>${K.PROVISIONING}</code> - Laporan alokasi resource infrastruktur.\n` +
+                    `<code>${K.MIGRASI_CHECK}</code> - Analisis dan rekomendasi migrasi.\n` +
+                    `<code>${K.CEK_TIKET}</code> - Buka laporan monitoring tiket.\n\n` +
+
+                    "🔍 <b>Pencarian & Riwayat</b>\n" +
+                    `<code>${K.CEK_VM} [IP/Nama/UUID]</code> - Cari VM berdasarkan IP/Nama/UUID.\n` +
+                    `<code>${K.CEK_HISTORY}</code> - Tampilkan log perubahan hari ini.\n` +
+                    `<code>${K.HISTORY} [PK]</code> - Tampilkan riwayat lengkap sebuah VM.\n\n` +
+
+                    "🛠️ <b>Utilitas & Bantuan</b>\n" +
+                    `<code>${K.EXPORT}</code> - Menu ekspor data ke Sheet.\n` +
+                    `<code>${K.DAFTAR} [email]</code> - Registrasi atau minta hak akses.\n` +
+                    `<code>${K.ARSIPKAN_LOG}</code> - Jalankan pengarsipan log manual.\n` +
+                    `<code>${K.CLEAR_CACHE}</code> - Bersihkan cache hak akses pengguna.\n` +
+                    `<code>${K.INFO}</code> - Tampilkan pesan bantuan ini.`;
   kirimPesanTelegram(infoPesan, config, 'HTML');
 }
 

@@ -94,7 +94,8 @@ const KONSTANTA = {
     PROV_TB: 'Provisioned Space (TB)', 
     KRITIKALITAS: 'Kritikalitas By BIA 2024', 
     KELOMPOK_APP: 'Kelompok Aplikasi by BIA VM 2024', 
-    DEV_OPS: 'DEV/OPS by BIA 2024'
+    DEV_OPS: 'DEV/OPS by BIA 2024',
+    ENVIRONMENT: 'Environment'
   },
   
   // Header kolom Datastore
@@ -142,7 +143,9 @@ const KONSTANTA = {
     THRESHOLD_DS_USED: 'THRESHOLD_DS_USED_PERCENT', 
     THRESHOLD_VM_UPTIME: 'THRESHOLD_VM_UPTIME_DAYS', 
     KRITIKALITAS_PANTAU: 'KRITIKALITAS_VM_DIPANTAU', 
-    STATUS_TIKET_AKTIF: 'STATUS_TIKET_AKTIF'
+    STATUS_TIKET_AKTIF: 'STATUS_TIKET_AKTIF',
+    KATEGORI_KRITIKALITAS: 'KATEGORI_KRITIKALITAS',
+    KATEGORI_ENVIRONMENT: 'KATEGORI_ENVIRONMENT',
   },
   
   // Nama file arsip
@@ -180,10 +183,11 @@ const KONSTANTA = {
     CEK_HISTORY: '/cekhistory', 
     ARSIPKAN_LOG: '/arsipkanlog', 
     CLEAR_CACHE: '/clearcache', 
-    INFO: '/info'
+    INFO: '/info',
+    DISTRIBUSI_VM: '/distribusi_vm',
   },
   // String yang sering digunakan
   UI_STRINGS: {
-    SEPARATOR: "\n--------------------------------------------------\n"
+    SEPARATOR: "\n--------------------------------------------------\n",
   },
 };

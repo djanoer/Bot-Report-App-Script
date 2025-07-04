@@ -1,13 +1,9 @@
 // ===== FILE: Konfigurasi.gs =====
 
 /**
- * [PERBAIKAN FINAL] Membaca konfigurasi dari spreadsheet dengan validasi.
- * Fungsi ini sekarang akan memeriksa apakah semua kunci konfigurasi yang wajib ada
- * benar-benar ditemukan di sheet "Konfigurasi".
- * @returns {object} Objek konfigurasi yang sudah divalidasi.
- */
-/**
- * [PERBAIKAN FINAL] Membaca konfigurasi dari spreadsheet dengan validasi.
+ * Membaca konfigurasi dari sheet "Konfigurasi" dan menyimpannya di cache.
+ * @param {string} namaSheet Nama sheet konfigurasi.
+ * @returns {object} Objek konfigurasi yang berisi semua pengaturan.
  */
 function bacaKonfigurasi() {
   try {
@@ -46,6 +42,15 @@ function bacaKonfigurasi() {
         throw new Error(`Kunci konfigurasi wajib "${key}" tidak ditemukan atau kosong di sheet "Konfigurasi".`);
       }
     }
+
+    // --- [BLOK BARU] Membaca dan memproses daftar kategori untuk laporan distribusi ---
+    const kritikalitasString = config[KONSTANTA.KUNCI_KONFIG.KATEGORI_KRITIKALITAS] || '';
+    const environmentString = config[KONSTANTA.KUNCI_KONFIG.KATEGORI_ENVIRONMENT] || '';
+
+    // Mengubah string yang dipisahkan koma menjadi array yang bersih
+    config.LIST_KRITIKALITAS = kritikalitasString.split(',').map(item => item.trim()).filter(Boolean);
+    config.LIST_ENVIRONMENT = environmentString.split(',').map(item => item.trim()).filter(Boolean);
+    // --- [AKHIR BLOK BARU] ---
     
     return config;
   } catch (e) {
