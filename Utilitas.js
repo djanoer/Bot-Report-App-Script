@@ -183,3 +183,99 @@ function createPaginatedView({ allItems, page, title, formatEntryCallback, navCa
   
   return { text: text, keyboard: { inline_keyboard: keyboardRows } };
 }
+
+/**
+ * @const {object|null}
+ * Variabel global untuk menyimpan state bot (konfigurasi & hak akses) selama eksekusi.
+ * Ini mencegah pembacaan berulang dari cache atau sheet dalam satu siklus eksekusi.
+ */
+let botState = null;
+
+/**
+ * [FUNGSI BARU - STATE MANAGER]
+ * Mendapatkan state bot (konfigurasi dan hak akses) dari cache atau membacanya dari sheet jika perlu.
+ * Ini adalah PENGGANTI dari pemanggilan `bacaKonfigurasi()` dan `getUserData()` secara terpisah.
+ *
+ * @returns {{config: object, userAccessMap: Map}} Objek yang berisi konfigurasi dan peta hak akses.
+ */
+function getBotState() {
+  // 1. Jika state sudah ada di memori (untuk eksekusi yang sama), langsung kembalikan.
+  console.log("✅ Verifikasi: State diambil dari MEMORI.");
+  if (botState) {
+    // console.log("Menggunakan state dari memori.");
+    return botState;
+  }
+
+  const cache = CacheService.getScriptCache();
+  const CACHE_KEY = 'BOT_STATE_V2'; // Gunakan kunci baru
+  const CACHE_DURATION_SECONDS = 21600; // Cache untuk 6 jam
+
+  // 2. Coba ambil dari cache.
+  const cachedStateJSON = cache.get(CACHE_KEY);
+  if (cachedStateJSON) {
+    try {
+      const cachedState = JSON.parse(cachedStateJSON);
+      // Ubah array hasil JSON.stringify kembali menjadi Map
+      cachedState.userAccessMap = new Map(cachedState.userAccessMap);
+      botState = cachedState; // Simpan ke memori global
+      // console.log("State berhasil dimuat dari cache.");
+      console.log("✅ Verifikasi: State diambil dari CACHE.");
+      return botState;
+    } catch (e) {
+      console.log("🟡 Verifikasi: State dibaca dari SPREADSHEET.");
+      console.warn("Gagal mem-parsing state dari cache, akan membaca ulang dari sheet.", e);
+    }
+  }
+
+  // 3. Jika tidak ada di memori atau cache, baca dari Spreadsheet (fallback).
+  console.log("State tidak ditemukan di memori atau cache. Membaca ulang dari Spreadsheet...");
+  const config = bacaKonfigurasi(); // Fungsi bacaKonfigurasi tetap ada
+  const userAccessMap = new Map();
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetHakAkses = ss.getSheetByName(KONSTANTA.NAMA_SHEET.HAK_AKSES);
+  if (sheetHakAkses && sheetHakAkses.getLastRow() > 1) {
+    const dataAkses = sheetHakAkses.getRange(2, 1, sheetHakAkses.getLastRow() - 1, 3).getValues();
+    dataAkses.forEach(row => {
+      const userId = String(row[0]);
+      const email = row[2];
+      if (userId && email) {
+        userAccessMap.set(userId, { email: email });
+      }
+    });
+  }
+
+  // Gabungkan semua menjadi satu objek state
+  const newState = {
+    config: config,
+    userAccessMap: userAccessMap
+  };
+  
+  // Simpan state baru ke cache untuk eksekusi berikutnya.
+  // Perlu mengubah Map menjadi array agar bisa disimpan sebagai JSON.
+  const stateToCache = {
+      ...newState,
+      userAccessMap: Array.from(newState.userAccessMap.entries())
+  };
+  cache.put(CACHE_KEY, JSON.stringify(stateToCache), CACHE_DURATION_SECONDS);
+
+  botState = newState; // Simpan ke memori global
+  return botState;
+}
+
+/**
+ * [FUNGSI BARU - PENGGANTI clearUserAccessCache]
+ * Menghapus cache state bot secara keseluruhan.
+ */
+function clearBotStateCache() {
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.remove('BOT_STATE_V2');
+    botState = null; // Hapus juga dari memori
+    console.log("Cache state bot berhasil dihapus.");
+    return true;
+  } catch (e) {
+    console.error("Gagal menghapus cache state bot: " + e.message);
+    return false;
+  }
+}

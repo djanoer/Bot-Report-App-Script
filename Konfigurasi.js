@@ -58,31 +58,6 @@ function bacaKonfigurasi() {
   }
 }
 
-function getUserData(userId) {
-  const cache = CacheService.getScriptCache();
-  const cacheKey = 'USER_ACCESS_MAP';
-  let userMap = new Map();
-
-  const cachedUsers = cache.get(cacheKey);
-  if (cachedUsers) {
-    userMap = new Map(JSON.parse(cachedUsers));
-  } else {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(KONSTANTA.NAMA_SHEET.HAK_AKSES);
-    if (sheet && sheet.getLastRow() > 1) {
-      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
-      data.forEach(row => {
-        const currentUserId = String(row[0]);
-        const email = row[2];
-        if (currentUserId && email) {
-          userMap.set(currentUserId, { email: email });
-        }
-      });
-      cache.put(cacheKey, JSON.stringify(Array.from(userMap.entries())), 3600);
-    }
-  }
-  return userMap.get(String(userId)) || null;
-}
 
 function getMigrationConfig(migrationLogicSheet) {
   const migrationConfig = new Map();
@@ -173,21 +148,6 @@ function tesKoneksiTelegram() {
       console.error("Gagal menjalankan tes koneksi Telegram: " + e.message);
       showUiFeedback("Gagal", `Gagal mengirim pesan tes. Error: ${e.message}`);
     }
-}
-
-/**
-* Menghapus cache hak akses pengguna secara manual.
-*/
-function clearUserAccessCache() {
-  try {
-    const cache = CacheService.getScriptCache();
-    cache.remove('USER_ACCESS_MAP');
-    console.log("Cache hak akses pengguna berhasil dihapus.");
-    return true;
-  } catch (e) {
-    console.error("Gagal menghapus cache: " + e.message);
-    return false;
-  }
 }
 
 /**

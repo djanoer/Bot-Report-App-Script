@@ -1,29 +1,20 @@
 // ===== FILE: Utama.gs =====
 
-// [OPTIMALISASI] Definisikan objek handler untuk semua perintah bot.
+// [FINAL & STABIL] Definisikan objek handler untuk semua perintah bot.
 const commandHandlers = {
-  // [PERBAIKAN UX] Menerapkan pola status awal -> proses -> hasil -> status akhir
   [KONSTANTA.PERINTAH_BOT.LAPORAN]: (update, config) => {
     if (update.message.text.split(' ').length > 1) {
         kirimPesanTelegram(`❌ Perintah tidak valid.`, config, 'HTML');
         return;
     }
-
     let statusMessageId = null;
     try {
-        // 1. Kirim Status Awal
         const sentMessage = kirimPesanTelegram("⏳ Membuat laporan instan...", config, 'HTML');
         if (sentMessage && sentMessage.ok) {
             statusMessageId = sentMessage.result.message_id;
         }
-
-        // 2. Proses di Latar Belakang
         const pesanLaporan = buatLaporanHarianVM(config);
-
-        // 3. Kirim Hasil Lengkap
         kirimPesanTelegram(pesanLaporan, config, 'HTML');
-
-        // 4. Edit Status Awal
         if (statusMessageId) {
             editMessageText("✅ Laporan harian selesai dibuat.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
         }
@@ -42,10 +33,8 @@ const commandHandlers = {
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
-      
       const laporan = generateProvisioningReport(config);
       kirimPesanTelegram(laporan, config, 'HTML');
-
       if (statusMessageId) {
         editMessageText("✅ Laporan provisioning selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       }
@@ -61,30 +50,20 @@ const commandHandlers = {
         kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_TIKET}</code> tanpa argumen tambahan.`, config, 'HTML');
         return;
     }
-
     let statusMessageId = null;
     try {
-        // Langkah 1: Kirim Status Awal dan SIMPAN message_id nya
         const sentMessage = kirimPesanTelegram("⏳ Menyiapkan laporan tiket...", config, 'HTML');
         if (sentMessage && sentMessage.ok) {
             statusMessageId = sentMessage.result.message_id;
         }
-
-        // Langkah 2 & 3: Proses dan Kirim Hasil (ini tidak berubah, tetap dilakukan oleh handleTicketInteraction)
         handleTicketInteraction(update, config);
-
-        // Langkah 4: Edit Status Awal menjadi Konfirmasi Akhir
         if (statusMessageId) {
             editMessageText("✅ Laporan tiket interaktif telah dikirim.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
         }
     } catch (e) {
         console.error(`Gagal memproses /cektiket (interaktif): ${e.message}\nStack: ${e.stack}`);
         const errorMessage = `❌ Gagal membuat laporan tiket interaktif.\n\n<b>Detail Error:</b>\n<code>${escapeHtml(e.message)}</code>`;
-        
-        // Jika gagal, kirim pesan error sebagai balasan baru
         kirimPesanTelegram(errorMessage, config, 'HTML');
-        
-        // Dan ubah status awal menjadi pesan error
         if (statusMessageId) {
             editMessageText("❌ Terjadi kesalahan saat menyiapkan laporan tiket.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
         }
@@ -97,10 +76,8 @@ const commandHandlers = {
        if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
-      
       const laporan = jalankanRekomendasiMigrasi(config);
       kirimPesanTelegram(laporan, config, 'HTML');
-
       if (statusMessageId) {
         editMessageText("✅ Analisis migrasi selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       }
@@ -118,24 +95,11 @@ const commandHandlers = {
         kirimMenuEkspor(config);
     }
   },
-  [KONSTANTA.PERINTAH_BOT.CEK_VM]: (update, config) => {
-    if (update.message.text.split(' ').length > 1) {
-        handleVmSearchInteraction(update, config);
-    } else {
-        // [IMPLEMENTASI] Mengganti pesan satu baris dengan pesan yang lebih edukatif dan detail.
-        // Logika untuk memeriksa jumlah argumen tetap sama.
-        const pesanBantuan = "<b>❌ Perintah tidak lengkap.</b>\n\n" +
-                             "Anda perlu memberikan informasi VM yang ingin dicari setelah <code>/cekvm</code>.\n\n" +
-                             "Anda dapat mencari berdasarkan:\n" +
-                             "•  <b>Nama VM</b>: <code>web-server-prod-01</code>\n" +
-                             "•  <b>Alamat IP</b>: <code>10.20.30.40</code>\n" +
-                             "•  <b>Primary Key/UUID</b>: <code>d4v30e1d-d4v3-ku12-n14w-4nd9d1c54999</code>\n\n" +
-                             "<b>Contoh Penggunaan:</b>\n" +
-                             "<code>/cekvm 10.20.30.40</code>";
-        kirimPesanTelegram(pesanBantuan, config, 'HTML');
-    }
+  // Handler untuk /cekvm yang langsung mendelegasikan ke fungsi utama
+  [KONSTANTA.PERINTAH_BOT.CEK_VM]: (update, config, userData) => {
+    // Langsung dan hanya panggil handler utama.
+    handleVmSearchInteraction(update, config, userData);
   },
-  // [PERBAIKAN UX] Menerapkan pola status awal -> proses -> hasil -> status akhir
   [KONSTANTA.PERINTAH_BOT.HISTORY]: (update, config, userData) => {
     const parts = update.message.text.split(' ');
     const pk = parts[1] ? parts[1].trim() : null;
@@ -144,34 +108,23 @@ const commandHandlers = {
         kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
         return;
     }
-
     let statusMessageId = null;
     try {
-        // 1. Kirim Status Awal
         const pkToDisplay = normalizePrimaryKey(pk);
         const sentMessage = kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pkToDisplay)}</code>...\n<i>Ini mungkin memerlukan beberapa saat...</i>`, config, 'HTML');
         if (sentMessage && sentMessage.ok) {
             statusMessageId = sentMessage.result.message_id;
         }
-
-        // 2. Proses di Latar Belakang
         const result = getVmHistory(pk, config);
-
-        // 3. Kirim Hasil Lengkap
         if (result.success) {
             kirimPesanTelegram(result.message, config, 'HTML');
-            
-            // Jika ada data untuk diekspor
             if (result.data) {
                 exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
             }
-            
-            // 4. Edit Status Awal menjadi Konfirmasi Akhir
             if (statusMessageId) {
                 editMessageText("✅ Pencarian riwayat selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
             }
         } else {
-            // Jika proses gagal, kirim pesan error dan edit status awal
             kirimPesanTelegram(result.message, config, 'HTML');
             if (statusMessageId) {
                 editMessageText("❌ Gagal mencari riwayat.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
@@ -184,11 +137,12 @@ const commandHandlers = {
         }
     }
   },
-  [KONSTANTA.PERINTAH_BOT.CEK_HISTORY]: (update, config) => {
+  // Handler untuk /cekhistory yang sekarang menerima userData
+  [KONSTANTA.PERINTAH_BOT.CEK_HISTORY]: (update, config, userData) => {
       if (update.message.text.split(' ').length > 1) {
         kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_HISTORY}</code> tanpa argumen tambahan.`, config, 'HTML');
     } else {
-        handleHistoryInteraction(update, config);
+        handleHistoryInteraction(update, config, userData);
     }
   },
   [KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG]: (update, config) => {
@@ -196,8 +150,8 @@ const commandHandlers = {
     cekDanArsipkanLogJikaPenuh(config);
   },
   [KONSTANTA.PERINTAH_BOT.CLEAR_CACHE]: (update, config) => {
-    const isCleared = clearUserAccessCache();
-    kirimPesanTelegram(isCleared ? "✅ Cache hak akses telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
+    const isCleared = clearBotStateCache();
+    kirimPesanTelegram(isCleared ? "✅ Cache state bot (konfigurasi & hak akses) telah berhasil dibersihkan." : "❌ Gagal membersihkan cache.", config);
   },
   [KONSTANTA.PERINTAH_BOT.DISTRIBUSI_VM]: (update, config) => {
     let statusMessageId = null;
@@ -206,10 +160,8 @@ const commandHandlers = {
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
-      
       const laporan = generateAssetDistributionReport(config);
       kirimPesanTelegram(laporan, config, 'HTML');
-
       if (statusMessageId) {
         editMessageText("✅ Laporan distribusi aset VM selesai dibuat.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       }
@@ -223,14 +175,18 @@ const commandHandlers = {
   [KONSTANTA.PERINTAH_BOT.INFO]: (update, config) => kirimPesanInfo(config),
 };
 
+/**
+ * [FINAL & STABIL] Fungsi utama untuk menangani semua permintaan dari Telegram.
+ * Router callback telah diperbaiki untuk mem-parsing nama item dan nomor halaman
+ * pada saat paginasi dengan benar, menyelesaikan bug "nama item tergabung dengan nomor halaman".
+ */
 function doPost(e) {
-  if (!e || !e.postData || !e.postData.contents) {
-    return HtmlService.createHtmlOutput("Bad Request");
-  }
-
-  let config;
+  if (!e || !e.postData || !e.postData.contents) { return HtmlService.createHtmlOutput("Bad Request"); }
+  let state = null; 
   try {
-    config = bacaKonfigurasi();
+    state = getBotState();
+    const config = state.config;
+    const userAccessMap = state.userAccessMap;
 
     if (!e.parameter.token || e.parameter.token !== config.WEBHOOK_BOT_TOKEN) {
       console.error("PERINGATAN KEAMANAN: Permintaan ke webhook ditolak karena token tidak valid.");
@@ -240,9 +196,6 @@ function doPost(e) {
     const update = JSON.parse(e.postData.contents);
     const isCallback = !!update.callback_query;
 
-    // =====================================================================
-    // BLOK 1: PENANGANAN UNTUK TOMBOL INTERAKTIF (CALLBACK)
-    // =====================================================================
     if (isCallback) {
       const callbackQueryId = update.callback_query.id;
       const callbackData = update.callback_query.data;
@@ -250,7 +203,7 @@ function doPost(e) {
       const chatId = userEvent.message.chat.id;
       const messageId = userEvent.message.message_id;
 
-      const userData = getUserData(userEvent.from.id);
+      const userData = userAccessMap.get(String(userEvent.from.id));
       if (!userData || !userData.email) {
         const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
         kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
@@ -260,142 +213,103 @@ function doPost(e) {
       userData.firstName = userEvent.from.first_name;
       userData.userId = userEvent.from.id;
 
-      if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.PREFIX)) {
-        if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX)) {
-          const pk = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX, '');
-          const result = getVmHistory(pk, config);
-          kirimPesanTelegram(result.message, config, 'HTML', null, chatId);
-          if (result.success && result.data) {
-            exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
-          }
-        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX)) {
-            const clusterName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX, '');
-            const { headers, results } = searchVmsByCluster(clusterName, config);
-            exportResultsToSheet(headers, results, `Daftar VM di Cluster ${clusterName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-            answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
-        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX)) {
-          const parts = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX, '').split('_');
-          const page = parseInt(parts.pop(), 10);
-          const clusterName = parts.join('_');
-          const { headers, results } = searchVmsByCluster(clusterName, config);
-          const formatVmEntry = (row) => {
-            const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-            const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-            const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-            return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
-          };
-          const paginatedView = createPaginatedView({
-            allItems: results,
-            page: page,
-            title: `VM di Cluster "${escapeHtml(clusterName)}"`,
-            formatEntryCallback: formatVmEntry,
-            navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX}${clusterName}`,
-            exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX}${clusterName}`
-          });
-          editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
-        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX)) {
-          const clusterName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX, '');
-          const { headers, results } = searchVmsByCluster(clusterName, config);
-          const formatVmEntry = (row) => {
-            const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-            const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-            const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-            return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
-          };
-          const paginatedView = createPaginatedView({
-            allItems: results,
-            page: 1,
-            title: `VM di Cluster "${escapeHtml(clusterName)}"`,
-            formatEntryCallback: formatVmEntry,
-            navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_NAV_PREFIX}${clusterName}`,
-            exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_EXPORT_PREFIX}${clusterName}`
-          });
-          kirimPesanTelegram(paginatedView.text, config, 'HTML', paginatedView.keyboard, chatId);
-        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX)) {
-            const parts = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX, '').split('_');
-            const page = parseInt(parts.pop(), 10);
-            const datastoreName = parts.join('_');
-            const { headers, results } = searchVmsByDatastore(datastoreName, config);
-            const formatVmEntry = (row) => {
-                const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-                const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-                const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-                return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
-            };
-            const paginatedView = createPaginatedView({
-                allItems: results,
-                page: page,
-                title: `VM di Datastore "${escapeHtml(datastoreName)}"`,
-                formatEntryCallback: formatVmEntry,
-                navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX}${datastoreName}`,
-                exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX}${datastoreName}`
-            });
-            editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
-        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_LIST_VMS_PREFIX)) {
-            const datastoreName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_LIST_VMS_PREFIX, '');
-            const { headers, results } = searchVmsByDatastore(datastoreName, config);
-            const formatVmEntry = (row) => {
-                const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-                const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-                const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-                return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
-            };
-            const paginatedView = createPaginatedView({
-                allItems: results,
-                page: 1,
-                title: `VM di Datastore "${escapeHtml(datastoreName)}"`,
-                formatEntryCallback: formatVmEntry,
-                navCallbackPrefix: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_NAV_PREFIX}${datastoreName}`,
-                exportCallbackData: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX}${datastoreName}`
-            });
-            kirimPesanTelegram(paginatedView.text, config, 'HTML', paginatedView.keyboard, chatId);
-        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX)) {
-            const datastoreName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_EXPORT_PREFIX, '');
-            const { headers, results } = searchVmsByDatastore(datastoreName, config);
-            exportResultsToSheet(headers, results, `Daftar VM di Datastore ${datastoreName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-            answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
-        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX)) {
-          const dsName = callbackData.replace(KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX, '');
-          try {
-            const details = getDatastoreDetails(dsName, config);
-            const { pesan, keyboard } = formatDatastoreDetail(details);
-            kirimPesanTelegram(pesan, config, 'HTML', keyboard, chatId);
-          } catch (err) {
-            handleCentralizedError(err, `Detail Datastore: ${dsName}`, config);
-          }
-        } else {
-          handleVmSearchInteraction(update, config);
+      const K = KONSTANTA.CALLBACK_CEKVM;
+
+      // ======================================================
+      // ===== ROUTER CALLBACK DENGAN LOGIKA PARSING BARU =====
+      // ======================================================
+      
+      // Handler untuk semua callback yang berhubungan dengan daftar VM di Cluster
+      if (callbackData.startsWith(K.CLUSTER_PREFIX)) {
+        const isInitial = !callbackData.startsWith(K.CLUSTER_NAV_PREFIX);
+        const prefixToRemove = isInitial ? K.CLUSTER_PREFIX : K.CLUSTER_NAV_PREFIX;
+        const data = callbackData.replace(prefixToRemove, '');
+        
+        let itemName = data;
+        // Hanya pisahkan nomor halaman jika ini adalah navigasi
+        if (!isInitial) {
+             const lastUnderscoreIndex = data.lastIndexOf('_');
+             if (lastUnderscoreIndex > -1) {
+                itemName = data.substring(0, lastUnderscoreIndex);
+             }
         }
-      } else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
+        
+        handlePaginatedVmList(update, config, 'cluster', itemName, isInitial);
+      }
+      // Handler untuk semua callback yang berhubungan dengan daftar VM di Datastore
+      else if (callbackData.startsWith(K.DATASTORE_LIST_VMS_PREFIX) || callbackData.startsWith(K.DATASTORE_NAV_PREFIX)) {
+        const isInitial = callbackData.startsWith(K.DATASTORE_LIST_VMS_PREFIX);
+        const prefixToRemove = isInitial ? K.DATASTORE_LIST_VMS_PREFIX : K.DATASTORE_NAV_PREFIX;
+        const data = callbackData.replace(prefixToRemove, '');
+
+        let itemName = data;
+        // Hanya pisahkan nomor halaman jika ini adalah navigasi
+        if (!isInitial) {
+            const lastUnderscoreIndex = data.lastIndexOf('_');
+            if (lastUnderscoreIndex > -1) {
+                itemName = data.substring(0, lastUnderscoreIndex);
+            }
+        }
+        
+        handlePaginatedVmList(update, config, 'datastore', itemName, isInitial);
+      }
+      // Handler untuk aksi-aksi spesifik lainnya
+      else if (callbackData.startsWith(K.HISTORY_PREFIX)) {
+        const pk = callbackData.replace(K.HISTORY_PREFIX, '');
+        const result = getVmHistory(pk, config);
+        kirimPesanTelegram(result.message, config, 'HTML', null, chatId);
+        if (result.success && result.data) {
+          exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
+        }
+      } 
+      else if (callbackData.startsWith(K.CLUSTER_EXPORT_PREFIX)) {
+        const clusterName = callbackData.replace(K.CLUSTER_EXPORT_PREFIX, '');
+        const { headers, results } = searchVmsByCluster(clusterName, config);
+        exportResultsToSheet(headers, results, `Daftar VM di Cluster ${clusterName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+      }
+      else if (callbackData.startsWith(K.DATASTORE_EXPORT_PREFIX)) {
+        const datastoreName = callbackData.replace(K.DATASTORE_EXPORT_PREFIX, '');
+        const { headers, results } = searchVmsByDatastore(datastoreName, config);
+        exportResultsToSheet(headers, results, `Daftar VM di Datastore ${datastoreName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+      }
+      else if (callbackData.startsWith(K.DATASTORE_PREFIX)) {
+        const dsName = callbackData.replace(K.DATASTORE_PREFIX, '');
+        try {
+          const details = getDatastoreDetails(dsName, config);
+          const { pesan, keyboard } = formatDatastoreDetail(details);
+          editMessageText(pesan, keyboard, chatId, messageId, config);
+        } catch (err) { handleCentralizedError(err, `Detail Datastore: ${dsName}`, config); }
+      }
+      else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
         handleTicketInteraction(update, config);
-      } else if (callbackData.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
-        handleHistoryInteraction(update, config);
-      } else if (callbackData.startsWith("run_export_log_") || callbackData.startsWith("export_")) {
+      } 
+      else if (callbackData.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
+        handleHistoryInteraction(update, config, userData);
+      } 
+      else if (callbackData.startsWith("run_export_log_") || callbackData.startsWith("export_")) {
         handleExportRequest(callbackData, config, userData);
+      }
+      else {
+        // Fallback untuk callback /cekvm (paginasi hasil pencarian)
+        handleVmSearchInteraction(update, config, userData);
       }
 
       answerCallbackQuery(callbackQueryId, config);
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // =====================================================================
-    // BLOK 2: PENANGANAN UNTUK PESAN TEKS BIASA (PERINTAH)
-    // =====================================================================
     if (update.message && update.message.text) {
+      // Handler untuk perintah teks (tidak berubah, sudah stabil)
       const userEvent = update.message;
       const text = userEvent.text;
-
-      if (!text.startsWith('/')) {
-        return HtmlService.createHtmlOutput("OK");
-      }
-
+      if (!text.startsWith('/')) { return HtmlService.createHtmlOutput("OK"); }
       const commandParts = text.split(' ');
       const command = commandParts[0].toLowerCase().split('@')[0];
 
       if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
-        const existingUserData = getUserData(userEvent.from.id);
+        const existingUserData = userAccessMap.get(String(userEvent.from.id));
         if (existingUserData && existingUserData.email) {
-          kirimPesanTelegram(`Halo ${escapeHtml(userEvent.from.first_name)}, Anda sudah terdaftar.`, config, 'HTML');
+            kirimPesanTelegram(`Halo ${escapeHtml(userEvent.from.first_name)}, Anda sudah terdaftar.`, config, 'HTML');
         } else {
             const email = commandParts[1];
             if (!email || !email.includes('@') || !email.includes('.')) {
@@ -408,8 +322,8 @@ function doPost(e) {
         }
         return HtmlService.createHtmlOutput("OK");
       }
-
-      const userData = getUserData(userEvent.from.id);
+      
+      const userData = userAccessMap.get(String(userEvent.from.id));
       if (!userData || !userData.email) {
         const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
         kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
@@ -428,13 +342,9 @@ function doPost(e) {
       } else {
         kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
       }
-
       return HtmlService.createHtmlOutput("OK");
     }
-
-  } catch (err) {
-    handleCentralizedError(err, "doPost (utama)", config);
-  }
+  } catch (err) { handleCentralizedError(err, "doPost (proses utama)", state ? state.config : null); }
   return HtmlService.createHtmlOutput("OK");
 }
 
@@ -469,6 +379,8 @@ function kirimPesanInfo(config) {
   kirimPesanTelegram(infoPesan, config, 'HTML');
 }
 
+// ===== FILE: Utama.js =====
+
 /**
  * [PERBAIKAN DX] Membuat menu kustom yang lebih terstruktur dan menyertakan setup interaktif.
  */
@@ -478,11 +390,13 @@ function onOpen() {
       .addItem('1. Jalankan Pekerjaan Harian Sekarang', 'runDailyJobs')
       .addItem('2. Jalankan Laporan Migrasi Saja', 'jalankanRekomendasiMigrasi')
       .addSeparator()
-      .addItem('3. Hapus Cache Konfigurasi & Akses', 'clearUserAccessCache')
+      // ===== PERUBAHAN DI SINI =====
+      .addItem('3. Hapus Cache Bot (State)', 'clearBotStateCache') // Menggunakan nama fungsi baru
+      // =============================
       .addItem('4. Tes Koneksi ke Telegram', 'tesKoneksiTelegram')
       .addSeparator()
       .addSubMenu(SpreadsheetApp.getUi().createMenu('🛠️ Setup Awal')
-          .addItem('SETUP: Set Token (Interaktif)', 'setupSimpanTokenInteraktif') // Memanggil fungsi baru
+          .addItem('SETUP: Set Token (Interaktif)', 'setupSimpanTokenInteraktif')
           .addItem('SETUP: Set Webhook (Jalankan setelah token di-set)', 'setWebhook'))
       .addToUi();
 }
