@@ -52,23 +52,11 @@ const KONSTANTA = {
     DATASTORE_LIST_VMS_PREFIX: 'cekvm_ds_list_', // Untuk melihat daftar VM di datastore
     DATASTORE_NAV_PREFIX: 'cekvm_ds_nav_',       // Untuk navigasi halaman VM di datastore
   },
-  
   // Aksi spesifik untuk pagination
   PAGINATION_ACTIONS: {
     NAVIGATE: 'nav',
     EXPORT: 'export',
   },
-
-  // Tingkat kritikalitas
-  TINGKAT_KRITIKALITAS: {
-    'BRONZE': 1, 
-    'SILVER': 2, 
-    'GOLD': 3, 
-    'PLATINUM': 4, 
-    'CRITICAL': 5, 
-    'DEFAULT': 10
-  },
-  
   // Header sheet Log Perubahan
   HEADER_LOG: {
     TIMESTAMP: 'Timestamp', 
@@ -146,6 +134,7 @@ const KONSTANTA = {
     STATUS_TIKET_AKTIF: 'STATUS_TIKET_AKTIF',
     KATEGORI_KRITIKALITAS: 'KATEGORI_KRITIKALITAS',
     KATEGORI_ENVIRONMENT: 'KATEGORI_ENVIRONMENT',
+    SKOR_KRITIKALITAS: 'SKOR_KRITIKALITAS',
   },
   
   // Nama file arsip

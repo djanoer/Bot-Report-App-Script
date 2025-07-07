@@ -1,14 +1,10 @@
 // ===== FILE: ManajemenData.gs =====
 
 /**
- * [REVISI KONSISTENSI] Menjalankan sinkronisasi dengan alur pengiriman pesan terpusat.
- * Bot akan mengirim status awal, memproses semua data, menggabungkan semua hasil,
- * mengirim satu laporan lengkap, lalu mengedit status awal.
+ * [MODIFIKASI v2.3 - REVISI] Mengembalikan fungsi ke tanggung jawab aslinya:
+ * hanya untuk sinkronisasi data dan pengiriman laporan operasional.
  */
 function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI", config = null) {
-  // [PERBAIKAN] Tentukan satu sumber config yang andal di awal.
-  // Jika config tidak diberikan (misal: dari menu), baca dari sheet.
-  // Jika diberikan (dari trigger), gunakan yang itu.
   const activeConfig = config || bacaKonfigurasi();
 
   const lock = LockService.getScriptLock();
@@ -19,15 +15,13 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
     return;
   }
   
-  // Variabel 'statusMessageId' dipindahkan ke sini agar bisa diakses di blok 'finally'
   let statusMessageId = null;
 
   try {
     const startTime = new Date();
     const timestamp = startTime.toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n⏳ Memulai sinkronisasi penuh & pembuatan laporan...\n<i>Ini mungkin memerlukan waktu beberapa menit.</i>`;
+    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n⏳ Memulai sinkronisasi penuh & pembuatan laporan harian...`;
     
-    // Gunakan 'activeConfig' untuk mengirim pesan
     const sentMessage = kirimPesanTelegram(pesanAwal, activeConfig, 'HTML');
     if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
@@ -43,16 +37,20 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
       salinDataSheet(sheetDsName, sumberId, activeConfig);
     }
 
-    let pesanLaporanFinal = buatLaporanHarianVM(activeConfig);
-    const pesanNotifikasiDs = jalankanPemeriksaanDatastore(activeConfig);
+    // --- AWAL PERBAIKAN ---
+    // Logika penggabungan laporan dihapus. Kini hanya mengirim laporan operasional.
+    const pesanLaporanOperasional = buatLaporanHarianVM(activeConfig);
+    const pesanNotifikasiDs = jalankanPemeriksaanDatastore(activeConfig); // Pemeriksaan datastore tetap ada
 
+    let pesanLaporanFinal = pesanLaporanOperasional;
     if (pesanNotifikasiDs) {
       pesanLaporanFinal += KONSTANTA.UI_STRINGS.SEPARATOR + pesanNotifikasiDs;
     }
+    // --- AKHIR PERBAIKAN ---
 
     kirimPesanTelegram(pesanLaporanFinal, activeConfig, 'HTML');
 
-    const pesanKonfirmasi = `<b>✅ Proses Selesai</b>\n\nLaporan lengkap telah dikirimkan.`;
+    const pesanKonfirmasi = `<b>✅ Proses Selesai</b>\n\nLaporan harian telah dikirimkan.`;
     if (statusMessageId) {
         editMessageText(pesanKonfirmasi, null, activeConfig.TELEGRAM_CHAT_ID, statusMessageId, activeConfig);
     }
@@ -134,6 +132,11 @@ function salinDataSheet(namaSheet, sumberId) {
   }
 }
 
+/**
+ * [FINAL & MULTI-PK SUPPORT] Mencari VM di sheet.
+ * Fungsi ini sekarang dapat mencari satu istilah (untuk pencarian awal)
+ * atau banyak Primary Key yang dipisahkan oleh '|' (untuk menampilkan halaman dari cache).
+ */
 function searchVmOnSheet(searchTerm, config) {
   const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
 
@@ -144,56 +147,55 @@ function searchVmOnSheet(searchTerm, config) {
   }
 
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const requiredHeaders = {
-    pkIndex: KONSTANTA.HEADER_VM.PK,
-    nameIndex: KONSTANTA.HEADER_VM.VM_NAME,
-    ipIndex: KONSTANTA.HEADER_VM.IP
-  };
+  const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+  const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
 
-  const indices = {};
-  for (const key in requiredHeaders) {
-    const headerName = requiredHeaders[key];
-    indices[key] = headers.indexOf(headerName);
-    if (indices[key] === -1) {
-      throw new Error(`Kolom header penting <b>"${headerName}"</b> tidak ditemukan di sheet "${sheetName}".`);
-    }
+  if (pkIndex === -1 || nameIndex === -1 || ipIndex === -1) {
+    throw new Error(`Satu atau lebih kolom header penting (PK, Nama, IP) tidak ditemukan di sheet "${sheetName}".`);
   }
 
-  const { pkIndex, nameIndex, ipIndex } = indices;
   const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-
-  const searchLower = searchTerm.toLowerCase().trim(); // Bersihkan input dari pengguna
-  const normalizedSearchTerm = normalizePrimaryKey(searchLower);
   let results = [];
 
-  for (let i = 0; i < allData.length; i++) {
-    const row = allData[i];
+  // --- [MODIFIKASI UTAMA DIMULAI DI SINI] ---
+  // Cek apakah searchTerm adalah untuk multi-PK atau pencarian biasa
+  if (searchTerm.includes('|')) {
+    // Mode Multi-PK: Buat Set untuk pencarian yang sangat cepat
+    const searchPks = new Set(searchTerm.split('|').map(pk => normalizePrimaryKey(pk.trim())));
+    results = allData.filter(row => {
+      const vmPk = normalizePrimaryKey(String(row[pkIndex] || '').trim());
+      return searchPks.has(vmPk);
+    });
+  } else {
+    // Mode Pencarian Biasa (logika yang sudah ada)
+    const searchLower = searchTerm.toLowerCase().trim();
+    const normalizedSearchTerm = normalizePrimaryKey(searchLower);
     
-    // ======================================================
-    // ===== PERUBAHAN UTAMA: Tambahkan .trim() pada data dari sheet =====
-    const vmPk = normalizePrimaryKey(String(row[pkIndex] || '').trim()).toLowerCase();
-    const vmName = String(row[nameIndex] || '').trim().toLowerCase();
-    const vmIp = String(row[ipIndex] || '').trim().toLowerCase();
-    // ======================================================
-
-    if (vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower)) {
-      results.push(row);
-    }
+    results = allData.filter(row => {
+      const vmPk = normalizePrimaryKey(String(row[pkIndex] || '').trim()).toLowerCase();
+      const vmName = String(row[nameIndex] || '').trim().toLowerCase();
+      const vmIp = String(row[ipIndex] || '').trim().toLowerCase();
+      
+      return vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower);
+    });
   }
+  // --- [AKHIR MODIFIKASI] ---
+
   return { headers, results };
 }
 
 /**
- * [MODIFIKASI FINAL] Memformat satu baris data VM dan menambahkan keyboard kontekstual.
- * [DIKEMBALIKAN] Tombol kembali kontekstual dihapus dari tampilan ini sesuai permintaan untuk menjaga kebersihan UI.
+ * [MODIFIKASI FITUR 2] Memformat satu baris data VM dan menambahkan keyboard kontekstual.
+ * Fungsi ini sekarang bisa menerima 'origin' untuk membuat tombol kembali yang cerdas.
  *
  * @param {Array} row - Array yang berisi data untuk satu baris VM.
  * @param {Array<string>} headers - Array header dari sheet VM.
  * @param {object} config - Objek konfigurasi bot yang aktif.
- * @param {boolean} [addBackButton=false] - Jika true, tambahkan tombol "Kembali ke Pencarian" (untuk hasil pencarian tunggal).
+ * @param {object|null} origin - Objek berisi info asal { searchTerm: '...', page: '...' }
  * @returns {object} Objek berisi { pesan: string, keyboard: object }.
  */
-function formatVmDetail(row, headers, config, addBackButton = false) {
+function formatVmDetail(row, headers, config) {
   const indices = {
     vmName: headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME),
     pk: headers.indexOf(KONSTANTA.HEADER_VM.PK),
@@ -270,7 +272,7 @@ function formatVmDetail(row, headers, config, addBackButton = false) {
     keyboardRows.push(secondRowButtons);
   }
 
-  const keyboard = { inline_keyboard: keyboardRows };
+  const keyboard = keyboardRows.length > 0 ? { inline_keyboard: keyboardRows } : null;
   return { pesan, keyboard };
 }
 
@@ -324,16 +326,17 @@ function formatDatastoreDetail(details, originPk = null) {
   return { pesan: message, keyboard: { inline_keyboard: keyboardRows } };
 }
 
+// ===== FILE: ManajemenData.js =====
+
 /**
- * [FINAL & STABIL] Handler pencarian /cekvm yang ditulis ulang secara total.
- * Fungsi ini menjadi satu-satunya titik pusat untuk semua logika /cekvm,
- * menangani kasus tunggal, ganda, dan tidak ada hasil dengan alur yang jelas dan aman.
+ * [v1.1-stabil] Handler /cekvm yang sudah di-harden.
+ * Versi ini menangani error dari fungsi pencarian dan memberikan feedback yang jelas.
  */
 function handleVmSearchInteraction(update, config, userData) {
+  const isCallback = !!update.callback_query;
+  const userEvent = isCallback ? update.callback_query : update.message;
+
   try {
-    const isCallback = !!update.callback_query;
-    const userEvent = isCallback ? update.callback_query : update.message;
-    
     if (userData) {
       userData.userId = userEvent.from.id;
       userData.firstName = userEvent.from.first_name;
@@ -341,17 +344,21 @@ function handleVmSearchInteraction(update, config, userData) {
 
     let searchTerm;
     let page = 1;
+
     if (isCallback) {
       const callbackData = userEvent.data;
       const parts = callbackData.split('_');
-      const action = parts[1];
       page = parseInt(parts.pop(), 10) || 1;
       searchTerm = decodeURIComponent(parts.slice(2).join('_'));
       
-      if (action === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
-        const { headers, results } = searchVmOnSheet(searchTerm, config);
-        exportResultsToSheet(headers, results, `Pencarian VM '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-        answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
+      if (parts[1] === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
+        try {
+          const { headers, results } = searchVmOnSheet(searchTerm, config);
+          exportResultsToSheet(headers, results, `Pencarian VM '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+          answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
+        } catch (exportError) {
+          kirimPesanTelegram(`⚠️ Gagal membuat file ekspor.\n<b>Detail:</b> ${escapeHtml(exportError.message)}`, config, 'HTML');
+        }
         return;
       }
     } else {
@@ -370,17 +377,11 @@ function handleVmSearchInteraction(update, config, userData) {
     }
 
     if (results.length === 1 && !isCallback) {
-      try {
-        const { pesan, keyboard } = formatVmDetail(results[0], headers, config, true);
+        const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
         let fullMessage = `✅ Ditemukan 1 hasil untuk "<b>${escapeHtml(searchTerm)}</b>":\n\n`;
         fullMessage += pesan;
         kirimPesanTelegram(fullMessage, config, 'HTML', keyboard);
-      } catch (e) {
-        const errorMessage = `❌ Gagal menampilkan detail untuk "${escapeHtml(searchTerm)}".\n\n<b>Kemungkinan Penyebab:</b> Data di sheet tidak lengkap atau korup.\n\n<b>Detail Error:</b> <code>${e.message}</code>`;
-        kirimPesanTelegram(errorMessage, config, 'HTML');
-        console.error(`Gagal memformat detail VM tunggal: ${e.stack}`);
-      }
-      return;
+        return;
     }
 
     const formatVmEntry = (row) => {
@@ -408,7 +409,8 @@ function handleVmSearchInteraction(update, config, userData) {
       kirimPesanTelegram(text, config, 'HTML', keyboard, userEvent.chat.id);
     }
   } catch (err) {
-    handleCentralizedError(err, "Perintah: /cekvm", config);
+    console.error(`[handleVmSearchInteraction] Gagal total: ${err.message}\nStack: ${err.stack}`);
+    kirimPesanTelegram(`🔴 Terjadi kesalahan saat memproses pencarian.\n\n<b>Penyebab:</b>\n<code>${escapeHtml(err.message)}</code>`, config, 'HTML');
   }
 }
 
@@ -470,9 +472,8 @@ function handleHistoryInteraction(update, config, userData) {
 }
 
 /**
- * [FUNGSI VERSI FINAL YANG DISEMPURNAKAN]
- * Mengekspor data ke Google Sheet baru dengan logika pembagian yang jelas.
- * [DIPERBAIKI] Menggunakan format timestamp yang lebih aman untuk nama file.
+ * [MODIFIKASI v2.5 - FIX] Mengekspor data ke Google Sheet dengan logika pengurutan
+ * otomatis berdasarkan kolom "Kritikalitas", kini dengan pembersihan spasi (trim).
  */
 function exportResultsToSheet(headers, dataRows, title, config, userData, highlightColumnName = null) {
   const folderId = config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR];
@@ -487,19 +488,33 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
   }
 
   try {
-    const timezone = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    const critHeaderName = KONSTANTA.HEADER_VM.KRITIKALITAS;
+    const critIndex = headers.indexOf(critHeaderName);
     
-    // =================================================================
-    // PERUBAHAN UTAMA DI BARIS INI: Mengganti "HH.mm.ss" menjadi "HH-mm-ss"
-    const timestamp = Utilities.formatDate(new Date(), timezone, "yyyy-MM-dd_HH-mm-ss");
-    // =================================================================
+    if (critIndex !== -1 && dataRows.length > 0) {
+      console.log(`Kolom '${critHeaderName}' ditemukan. Melakukan pengurutan otomatis...`);
+      const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+      
+      dataRows.sort((a, b) => {
+        // --- AWAL PERBAIKAN: Menambahkan .trim() ---
+        const critA = String(a[critIndex] || '').toUpperCase().trim();
+        const critB = String(b[critIndex] || '').toUpperCase().trim();
+        // --- AKHIR PERBAIKAN ---
+        
+        const scoreA = skorKritikalitas[critA] || -1;
+        const scoreB = skorKritikalitas[critB] || -1;
+        
+        return scoreB - scoreA;
+      });
+    }
 
+    const timezone = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    const timestamp = Utilities.formatDate(new Date(), timezone, "yyyy-MM-dd_HH-mm-ss");
     const fileName = `Laporan - ${title.replace(/<|>/g, '')} - ${timestamp}`;
     const newSs = SpreadsheetApp.create(fileName);
     const sheet = newSs.getSheets()[0];
     sheet.setName(title.substring(0, 100));
 
-    // Pengaturan Header dan Data
     sheet.getRange("A1").setValue(title).setFontWeight("bold").setFontSize(12).setHorizontalAlignment("center");
     sheet.getRange(1, 1, 1, headers.length).merge();
     sheet.getRange(2, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
@@ -507,7 +522,6 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
       sheet.getRange(3, 1, dataRows.length, headers.length).setValues(dataRows);
     }
     
-    // Pemformatan
     const dataRange = sheet.getRange(2, 1, sheet.getLastRow() > 2 ? sheet.getLastRow() - 1 : 1, headers.length);
     if (highlightColumnName) {
       const highlightColIndex = headers.indexOf(highlightColumnName) + 1;
@@ -518,7 +532,6 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
     dataRange.createFilter();
     headers.forEach((_, i) => sheet.autoResizeColumn(i + 1));
     
-    // Memindahkan file dan mengatur hak akses
     const file = DriveApp.getFileById(newSs.getId());
     const folder = DriveApp.getFolderById(folderId);
     file.moveTo(folder);
@@ -656,7 +669,12 @@ function formatHistoryEntry(entry, headers) {
 }
 
 /**
- * [HELPER] Mengurutkan kandidat VM migrasi.
+ * [MODIFIKASI v2.2] Mengurutkan kandidat VM migrasi dengan 5 tingkat prioritas cerdas:
+ * 1. Prioritaskan VM 'poweredOff'.
+ * 2. Prioritaskan VM yang namanya mengandung kata 'unused'.
+ * 3. Prioritaskan VM yang kritikalitasnya tidak terdefinisi di konfigurasi skor.
+ * 4. Urutkan sisanya berdasarkan skor kritikalitas terendah.
+ * 5. Jika semua sama, urutkan berdasarkan ukuran disk terkecil.
  */
 function sortVmForMigration(a, b) {
   // Prioritas 1: VM yang mati (poweredOff) didahulukan
@@ -665,17 +683,35 @@ function sortVmForMigration(a, b) {
   if (isAOff && !isBOff) return -1;
   if (!isAOff && isBOff) return 1;
 
-  // [PERBAIKAN] Prioritas 2: Kritikalitas berdasarkan daftar pantauan
-  const config = bacaKonfigurasi(); // Perlu baca config untuk dapat daftar pantauan
-  const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
+  // Prioritas 2: VM yang namanya mengandung "unused" didahulukan
+  const aName = String(a.name || '').toLowerCase();
+  const bName = String(b.name || '').toLowerCase();
+  const aIsUnused = aName.includes('unused');
+  const bIsUnused = bName.includes('unused');
+  if (aIsUnused && !bIsUnused) return -1;
+  if (!aIsUnused && bIsUnused) return 1;
+
+  // Mendapatkan sistem skoring dari konfigurasi yang telah dibaca
+  const config = bacaKonfigurasi();
+  const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+
+  // Ambil skor untuk VM A dan B. Jika kritikalitasnya tidak ada di kamus,
+  // berikan skor sangat rendah (0) agar menjadi prioritas utama.
+  const scoreA = skorKritikalitas[String(a.criticality || '').toUpperCase()] || 0;
+  const scoreB = skorKritikalitas[String(b.criticality || '').toUpperCase()] || 0;
   
-  const isACritical = monitoredCrit.includes(String(a.criticality || '').toUpperCase());
-  const isBCritical = monitoredCrit.includes(String(b.criticality || '').toUpperCase());
+  // Prioritas 3: VM yang tidak terdefinisi (skor 0) didahulukan.
+  if (scoreB === 0 && scoreA > 0) return -1; 
+  if (scoreA === 0 && scoreB > 0) return 1;
 
-  if (isACritical && !isBCritical) return 1;  // VM non-kritis (other) didahulukan
-  if (!isACritical && isBCritical) return -1; // VM non-kritis (other) didahulukan
+  // Prioritas 4: Jika keduanya sama-sama terdefinisi atau sama-sama tidak,
+  // bandingkan berdasarkan skor numeriknya.
+  // Urutkan agar skor yang LEBIH KECIL (kurang kritis) didahulukan.
+  if (scoreA !== scoreB) {
+    return scoreA - scoreB;
+  }
 
-  // Prioritas 3: Ukuran provisioned terkecil didahulukan
+  // Prioritas 5: Jika semua sama, urutkan berdasarkan ukuran provisioned terkecil
   return a.provisionedGb - b.provisionedGb;
 }
 
@@ -683,24 +719,25 @@ function sortVmForMigration(a, b) {
  * [LOGIKA FINAL & BENAR] Mencari datastore tujuan terbaik dengan memastikan
  * aturan dari 'Logika Migrasi' diterapkan sebagai prioritas utama.
  * @returns {object|null} Objek datastore tujuan jika berhasil, atau objek error dengan alasan jika gagal.
+ * [MODIFIKASI v2.1] Memperbaiki logika pengecualian datastore agar case-insensitive.
  */
 function findBestDestination(sourceDs, requiredGb, availableDestinations, migrationConfig, config) {
     const sourceType = sourceDs.type;
-    const excludedKeywords = config[KONSTANTA.KUNCI_KONFIG.DS_KECUALI] || [];
+    // Mengubah daftar kata kunci menjadi huruf besar sekali saja di awal
+    const excludedKeywords = (config[KONSTANTA.KUNCI_KONFIG.DS_KECUALI] || []).map(k => k.toUpperCase());
 
     // --- Filter Tahap 1: Syarat Mutlak ---
-    let candidates = availableDestinations.filter(destDs => 
-        destDs.cluster === sourceDs.cluster && 
-        destDs.environment === sourceDs.environment &&
-        destDs.name !== sourceDs.name &&
-        destDs.freeSpace > requiredGb &&
-        !excludedKeywords.some(exc => destDs.name.toUpperCase().includes(exc))
-    );
+    let candidates = availableDestinations.filter(destDs => {
+        // Mengubah nama datastore menjadi huruf besar saat pengecekan
+        const destDsNameUpper = destDs.name.toUpperCase();
+        return destDs.cluster === sourceDs.cluster && 
+               destDs.environment === sourceDs.environment &&
+               destDs.name !== sourceDs.name &&
+               destDs.freeSpace > requiredGb &&
+               !excludedKeywords.some(exc => destDsNameUpper.includes(exc));
+    });
 
     if (candidates.length === 0) {
-        // Jika setelah filter dasar tidak ada kandidat, kita bisa berhenti di sini
-        // dan cari tahu alasan pastinya untuk diagnosa yang lebih baik.
-        // (Logika diagnosa yang ada sudah menangani ini dengan baik)
         const initialCandidates = availableDestinations.filter(d => d.name !== sourceDs.name);
         if(initialCandidates.filter(d => d.cluster !== sourceDs.cluster).length === initialCandidates.length) return {error: true, reason: `Tidak ada kandidat di Cluster ${sourceDs.cluster}.`};
         if(initialCandidates.filter(d => d.environment !== sourceDs.environment).length === initialCandidates.length) return {error: true, reason: `Tidak ada kandidat di Environment ${sourceDs.environment}.`};
@@ -711,37 +748,29 @@ function findBestDestination(sourceDs, requiredGb, availableDestinations, migrat
     // --- Filter Tahap 2: Aturan Prioritas dari 'Logika Migrasi' ---
     const sourceRule = migrationConfig.get(sourceType) || Array.from(migrationConfig.values()).find(rule => rule.alias === sourceType);
     
-    // Jika ada aturan yang terdefinisi untuk tipe datastore sumber
     if (sourceType && sourceRule && sourceRule.destinations.length > 0) {
         const priorityTypes = sourceRule.destinations;
         
-        // Cari kandidat yang cocok dengan urutan prioritas
         for (const priorityType of priorityTypes) {
             const found = candidates.find(d => d.type === priorityType);
-            // Jika ditemukan yang cocok dengan prioritas, langsung kembalikan sebagai pilihan terbaik
             if (found) {
-                // Untuk memastikan kita tetap memilih yang paling kosong di antara tipe yang sama
                 return candidates
                     .filter(c => c.type === priorityType)
                     .sort((a,b) => b.freeSpace - a.freeSpace)[0];
             }
         }
-        // Jika setelah loop tidak ada yang cocok sama sekali dengan aturan, jangan lanjutkan ke fallback.
-        // Ini berarti aturan ada, tapi tidak ada tujuan yang memenuhinya.
-        return { error: true, reason: `Tidak ditemukan datastore tujuan yang cocok dengan aturan prioritas di 'Logika Migrasi'.` };
+        return { error: true, reason: `Tidak ditemukan datastore tujuan yang memenuhi syarat migrasi.` };
     }
 
     // --- Tahap 3: Logika Fallback (Jika TIDAK ADA Aturan Migrasi) ---
-    // Logika ini hanya berjalan jika tidak ada aturan sama sekali untuk tipe datastore sumber.
-    // Urutkan sisa kandidat berdasarkan ruang kosong terbesar.
     candidates.sort((a, b) => b.freeSpace - a.freeSpace);
     
     return candidates.length > 0 ? candidates[0] : { error: true, reason: `Tidak ditemukan datastore yang cocok.` };
 }
 
 /**
- * [FINAL & DIAGNOSA] Menjalankan analisis migrasi dengan logika simulasi
- * dan menyertakan diagnosa penyebab serta alasan kegagalan migrasi.
+ * [MODIFIKASI v2.4 - LENGKAP & FINAL] Perombakan total logika simulasi migrasi 
+ * dengan algoritma "Pengisian Cerdas" dan penyempurnaan detail pada laporan kegagalan.
  */
 function jalankanRekomendasiMigrasi(config) {
     console.log("Memulai simulasi & diagnosa migrasi datastore...");
@@ -788,7 +817,7 @@ function jalankanRekomendasiMigrasi(config) {
         const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
 
         // --- Tahap 2: Penyusunan Laporan & Simulasi Migrasi ---
-        let finalMessage = `🚨 <b>Laporan Rekomendasi Migrasi Datastore</b>\n`;
+        let finalMessage = `⚖️ <b>Analisis & Rekomendasi Migrasi Datastore</b>\n`;
         finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>`;
 
         overProvisionedDsNames.forEach(dsName => {
@@ -797,12 +826,12 @@ function jalankanRekomendasiMigrasi(config) {
             const usagePercent = dsInfo.capacity > 0 ? (dsInfo.provisioned / dsInfo.capacity * 100).toFixed(1) : 0;
             const migrationTarget = dsInfo.provisioned - dsInfo.capacity;
 
-            finalMessage += `❗️ <b>Datastore Over-Provisioned:</b> <code>${dsName}</code>\n`;
+            finalMessage += `❗️ <b>Datastore Teridentifikasi Over-Provisioned:</b> <code>${dsName}</code>\n`;
             finalMessage += `• <b>Status:</b> Provisioned ${dsInfo.provisioned.toFixed(2)} / ${dsInfo.capacity.toFixed(2)} GB (<b>${usagePercent}%</b>)\n`;
             
             const diagnosis = diagnoseOverprovisioningCause(dsName, config);
             if (diagnosis) {
-                finalMessage += `• <b>Diagnosa:</b> ${diagnosis}\n`;
+                finalMessage += `• <b>Indikasi Penyebab:</b> ${diagnosis}\n`;
             }
 
             finalMessage += `• <b>Target Migrasi:</b> ${migrationTarget.toFixed(2)} GB\n`;
@@ -817,53 +846,84 @@ function jalankanRekomendasiMigrasi(config) {
                 }))
                 .sort(sortVmForMigration);
             
-            // --- Tahap 3: Logika Simulasi ---
+            // --- AWAL PEROMBAKAN LOGIKA SIMULASI ---
             const simulatedDatastoreMap = new Map(JSON.parse(JSON.stringify(Array.from(originalDatastoreMap))));
             const migrationPlan = new Map();
-            const failedMigrations = [];
             let totalMigrated = 0;
+            let candidatePool = [...vmCandidates]; // Membuat kolam kandidat yang bisa dimodifikasi
 
-            for (const vm of vmCandidates) {
-                if (totalMigrated >= migrationTarget) break;
+            while (totalMigrated < migrationTarget && candidatePool.length > 0) {
+                let foundVmToMigrateThisRound = false;
+                let bestVmIndex = -1;
 
-                const availableDests = Array.from(simulatedDatastoreMap.values());
-                const bestDest = findBestDestination(dsInfo, vm.provisionedGb, availableDests, migrationConfig, config);
+                // Cari kandidat pertama yang paling pas di dalam kolam
+                for (let i = 0; i < candidatePool.length; i++) {
+                    const vm = candidatePool[i];
+                    const availableDests = Array.from(simulatedDatastoreMap.values());
+                    const bestDest = findBestDestination(dsInfo, vm.provisionedGb, availableDests, migrationConfig, config);
 
-                if (bestDest && !bestDest.error) {
+                    if (bestDest && !bestDest.error) {
+                        // Jika ditemukan, catat indeksnya dan hentikan pencarian di putaran ini
+                        bestVmIndex = i;
+                        foundVmToMigrateThisRound = true;
+                        break;
+                    }
+                }
+
+                if (foundVmToMigrateThisRound) {
+                    // Proses VM yang ditemukan
+                    const vmToMove = candidatePool[bestVmIndex];
+                    const availableDests = Array.from(simulatedDatastoreMap.values());
+                    const bestDest = findBestDestination(dsInfo, vmToMove.provisionedGb, availableDests, migrationConfig, config);
+                    
                     if (!migrationPlan.has(bestDest.name)) {
                         migrationPlan.set(bestDest.name, []);
                     }
-                    migrationPlan.get(bestDest.name).push(vm);
-                    totalMigrated += vm.provisionedGb;
+                    migrationPlan.get(bestDest.name).push(vmToMove);
+                    totalMigrated += vmToMove.provisionedGb;
 
+                    // Update peta virtual
                     const destInSimMap = simulatedDatastoreMap.get(bestDest.name);
-                    destInSimMap.freeSpace -= vm.provisionedGb;
+                    destInSimMap.freeSpace -= vmToMove.provisionedGb;
+                    
+                    // Hapus VM dari kolam kandidat
+                    candidatePool.splice(bestVmIndex, 1);
                 } else {
-                    failedMigrations.push({ ...vm, reason: bestDest.reason });
+                    // Jika setelah memeriksa seluruh kolam tidak ada yang bisa dipindah, hentikan loop
+                    break;
                 }
             }
+            // --- AKHIR PEROMBAKAN LOGIKA SIMULASI ---
 
             // --- TAHAP 4: Format Tampilan Laporan ---
-            finalMessage += `\n✅ <b>Rencana Aksi:</b>\n`;
+            finalMessage += `\n✅ <b>Rencana Tindak Lanjut:</b>\n`;
             if (migrationPlan.size > 0) {
                 migrationPlan.forEach((vms, destDsName) => {
                     const totalSizeToDest = vms.reduce((sum, vm) => sum + vm.provisionedGb, 0);
                     finalMessage += `\n➡️ Migrasi ke <code>${destDsName}</code> (~${totalSizeToDest.toFixed(2)} GB):\n`;
                     vms.forEach(vm => {
-                        finalMessage += ` • <code>${vm.name}</code> (${vm.provisionedGb.toFixed(2)} GB) | ${vm.criticality} | ${vm.state}\n`;
+                        finalMessage += ` • <code>${escapeHtml(vm.name)}</code> (${vm.provisionedGb.toFixed(2)} GB) | ${escapeHtml(vm.criticality)} | ${escapeHtml(vm.state)}\n`;
                     });
                 });
             } else {
                 finalMessage += "<i>Tidak ada rencana migrasi yang dapat dibuat dengan kondisi saat ini.</i>\n";
             }
 
+            // VM yang gagal adalah yang masih tersisa di dalam candidatePool
+            const failedMigrations = candidatePool;
             if (failedMigrations.length > 0) {
-                finalMessage += `\n❌ <b>Tindakan Lanjutan Diperlukan:</b>\n`;
-                finalMessage += `Tidak ditemukan tujuan yang cocok untuk VM berikut:\n`;
+                finalMessage += `\n⭕️  <b>Memerlukan Perhatian Khusus:</b>\n`;
+                finalMessage += `Rekomendasi migrasi tidak dapat diterapkan untuk VM berikut karena keterbatasan kapasitas pada cluster <b>${escapeHtml(dsInfo.cluster)}</b>.\n\n`;
+                
                 failedMigrations.forEach(vm => {
-                    finalMessage += `- <code>${vm.name}</code> (${vm.provisionedGb.toFixed(2)} GB)\n`;
-                    finalMessage += `  └ <i>Alasan: ${vm.reason}</i>\n`;
+                    finalMessage += `- <code>${escapeHtml(vm.name)}</code> (${vm.provisionedGb.toFixed(2)} GB) | ${escapeHtml(vm.state)} | ${escapeHtml(vm.criticality)} \n`;
+                    const lastAttemptReason = "Tidak ada datastore tujuan yang tersedia dengan kapasitas yang cukup atau memenuhi syarat migrasi.";
+                    finalMessage += `  └ <i>Penyebab: ${lastAttemptReason}</i>\n`;
                 });
+
+                finalMessage += `\n<b>Rekomendasi Strategis:</b>\n`;
+                finalMessage += `•  <b>Opsi 1:</b> Alokasikan datastore baru untuk menambah kapasitas lokal.\n`;
+                finalMessage += `•  <b>Opsi 2:</b> Lakukan migrasi VM ini ke cluster lain yang memiliki sumber daya memadai.\n`;
             }
         });
 

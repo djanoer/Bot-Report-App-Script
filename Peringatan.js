@@ -1,25 +1,18 @@
 // ===== FILE: Peringatan.gs =====
 
-  /**
-   * Fungsi utama untuk menjalankan semua pemeriksaan ambang batas (thresholds).
-   */
+// ===== FILE: Peringatan.js =====
+
 /**
- * [FINAL & STABIL] Fungsi utama untuk menjalankan semua pemeriksaan dengan penanganan config yang benar
- * agar dapat dijalankan oleh pemicu (trigger) maupun secara manual.
- *
- * @param {object} [config=null] - Objek konfigurasi. Jika null, fungsi akan membacanya sendiri.
+ * [MODIFIKASI v2.3 - REVISI LENGKAP] Fungsi kembali mengirim pesannya sendiri ke Telegram.
+ * Selalu mengirim pesan status (aman atau anomali) setiap kali dijalankan.
+ * Menambahkan logika pengurutan pada rincian kritikalitas.
  */
 function jalankanPemeriksaanAmbangBatas(config = null) {
-  // [PERBAIKAN] Tentukan satu sumber config yang andal di awal.
-  // Jika config tidak diberikan (misal: dari menu), baca dari sheet.
-  // Jika diberikan (dari trigger), gunakan yang itu.
   const activeConfig = config || bacaKonfigurasi();
-  
   console.log("Memulai pemeriksaan ambang batas sistem...");
+  
   try {
     let semuaPeringatan = [];
-
-    // Menggabungkan hasil dari semua fungsi pemeriksaan, masing-masing diberikan config yang aktif
     semuaPeringatan.push(...cekKapasitasDatastore(activeConfig));
     semuaPeringatan.push(...cekUptimeVmKritis(activeConfig));
     semuaPeringatan.push(...cekVmKritisMati(activeConfig));
@@ -28,11 +21,7 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
       const BATAS_PESAN_DETAIL = 20;
 
       if (semuaPeringatan.length > BATAS_PESAN_DETAIL) {
-          const counts = {
-              datastore: 0,
-              uptime: { total: 0, byCrit: {} },
-              vmMati: { total: 0, byCrit: {} }
-          };
+          const counts = { datastore: 0, uptime: { total: 0, byCrit: {} }, vmMati: { total: 0, byCrit: {} } };
           const dataUntukEkspor = [];
           const headers = ["Tipe Peringatan", "Item yang Diperiksa", "Detail", "Kritikalitas"];
 
@@ -43,7 +32,7 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
               counts.uptime.total++;
               const crit = alert.kritikalitas || 'Lainnya';
               counts.uptime.byCrit[crit] = (counts.uptime.byCrit[crit] || 0) + 1;
-            } else if (alert.tipe.includes("VM Kritis Mati")) {
+            } else if (alert.tipe.includes("VM Kritis")) {
               counts.vmMati.total++;
               const crit = alert.kritikalitas || 'Lainnya';
               counts.vmMati.byCrit[crit] = (counts.vmMati.byCrit[crit] || 0) + 1;
@@ -54,34 +43,37 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
           const dsThreshold = activeConfig[KONSTANTA.KUNCI_KONFIG.THRESHOLD_DS_USED] || 'N/A';
           const uptimeThreshold = activeConfig[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME] || 'N/A';
           
-          let ringkasanPesan = `🚨 <b>Laporan Peringatan Dini Sistem</b> 🚨\n`;
+          let ringkasanPesan = `🚨 <b>Laporan Kondisi Sistem</b> 🚨\n`;
           ringkasanPesan += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>\n\n`;
-          ringkasanPesan += `Ditemukan total <b>${semuaPeringatan.length}</b> potensi masalah. Detail lengkap telah diekspor ke dalam file Google Sheet.\n\n`;
+          ringkasanPesan += `Teridentifikasi total <b>${semuaPeringatan.length}</b> item yang memerlukan tinjauan. Detail lengkap telah diekspor ke dalam file Google Sheet.\n\n`;
           ringkasanPesan += `<b>Ringkasan Peringatan:</b>\n\n`;
           
-          ringkasanPesan += `• 🔥 <b>Kapasitas Datastore Kritis (&gt;${dsThreshold}%):</b> <code>${counts.datastore}</code>\n`;
+          ringkasanPesan += `• 🔥 <b>Kapasitas Datastore Melebihi Ambang Batas (>${dsThreshold}%):</b> <code>${counts.datastore}</code>\n`;
           
-          ringkasanPesan += `\n• 💡 <b>Uptime VM Terlalu Lama (&gt;${uptimeThreshold} hari):</b> <code>${counts.uptime.total}</code>\n`;
+          const skorKritikalitas = activeConfig[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+          const sortCrit = (a, b) => (skorKritikalitas[b.toUpperCase()] || 0) - (skorKritikalitas[a.toUpperCase()] || 0);
+          
+          ringkasanPesan += `\n• 💡 <b>Uptime VM Melebihi Batas Operasional (>${uptimeThreshold} hari):</b> <code>${counts.uptime.total}</code>\n`;
           if (counts.uptime.total > 0) {
-              for (const crit in counts.uptime.byCrit) {
+              Object.keys(counts.uptime.byCrit).sort(sortCrit).forEach(crit => {
                   ringkasanPesan += `  - ${escapeHtml(crit)}: ${counts.uptime.byCrit[crit]}\n`;
-              }
+              });
           }
           
-          ringkasanPesan += `\n• ❗️ <b>VM Kritis Mati:</b> <code>${counts.vmMati.total}</code>\n`;
+          ringkasanPesan += `\n• ❗️ <b>VM Kritis Dalam Status Non-Aktif:</b> <code>${counts.vmMati.total}</code>\n`;
           if (counts.vmMati.total > 0) {
-              for (const crit in counts.vmMati.byCrit) {
+              Object.keys(counts.vmMati.byCrit).sort(sortCrit).forEach(crit => {
                   ringkasanPesan += `  - ${escapeHtml(crit)}: ${counts.vmMati.byCrit[crit]}\n`;
-              }
+              });
           }
 
-          // Gunakan 'activeConfig' untuk mengirim pesan dan mengekspor
           kirimPesanTelegram(ringkasanPesan, activeConfig, 'HTML');
-          exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Peringatan Sistem", activeConfig, null, "Kritikalitas");
+          exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Kondisi Sistem", activeConfig, null, "Kritikalitas");
 
       } else {
-        let pesanDetail = `🚨 <b>Peringatan Dini Sistem</b> 🚨\n`;
-        pesanDetail += `<i>Ditemukan ${semuaPeringatan.length} potensi masalah yang perlu ditindaklanjuti:</i>\n`;
+        // Logika lengkap jika anomali sedikit
+        let pesanDetail = `🚨 <b>Laporan Kondisi Sistem</b> 🚨\n`;
+        pesanDetail += `<i>Teridentifikasi ${semuaPeringatan.length} item yang memerlukan tinjauan:</i>\n`;
         
         const formattedAlerts = semuaPeringatan.map(alert => {
             let alertMessage = `${alert.icon} <b>${alert.tipe}</b>\n • <b>Item:</b> <code>${escapeHtml(alert.item)}</code>\n • <b>Detail:</b> ${alert.detailFormatted}`;
@@ -91,17 +83,16 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
             return alertMessage;
         });
         pesanDetail += "\n" + formattedAlerts.join('\n\n');
-        
         kirimPesanTelegram(pesanDetail, activeConfig, 'HTML');
       }
-      console.log(`Laporan peringatan dini telah dikirim dengan ${semuaPeringatan.length} item.`);
     } else {
+      const pesanAman = "✅  <b>Kondisi Sistem: Aman</b>\n<i>Tidak ada anomali yang terdeteksi pada semua sistem yang dipantau.</i>";
       console.log("Semua sistem terpantau dalam batas aman.");
+      kirimPesanTelegram(pesanAman, activeConfig, 'HTML');
     }
   } catch (e) {
     console.error(`Gagal menjalankan pemeriksaan ambang batas: ${e.message}\nStack: ${e.stack}`);
-    // Gunakan 'activeConfig' untuk mengirim pesan error
-    kirimPesanTelegram(`⚠️ Gagal menjalankan Sistem Peringatan Dini.\nError: ${e.message}`, activeConfig);
+    kirimPesanTelegram(`⚠️ <b>Gagal Memeriksa Kondisi Sistem</b>\n<i>Error: ${e.message}</i>`, activeConfig, 'HTML');
   }
 }
   
@@ -146,10 +137,21 @@ function cekKapasitasDatastore(config) {
   });
   return alerts;
 }
-  
+
+/**
+ * [MODIFIKASI v2.3 - FIX] Menggunakan sumber skor kritikalitas yang benar dari config,
+ * bukan dari konstanta yang telah dihapus.
+ */
 function cekUptimeVmKritis(config) {
   const threshold = parseInt(config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME], 10);
-  const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
+  
+  // --- AWAL PERBAIKAN ---
+  // Mendapatkan sistem skoring dari konfigurasi, bukan konstanta.
+  const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+  // Mengambil daftar level kritikalitas dari kunci objek skor.
+  const monitoredCrit = Object.keys(skorKritikalitas).filter(k => k !== 'DEFAULT');
+  // --- AKHIR PERBAIKAN ---
+
   if (isNaN(threshold) || monitoredCrit.length === 0) return [];
 
   const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
@@ -166,24 +168,36 @@ function cekUptimeVmKritis(config) {
   const alerts = [];
   vmData.forEach(row => {
     const uptimeDays = parseInt(row[uptimeIndex], 10);
-    const criticality = String(row[critIndex] || '');
+    const criticality = String(row[critIndex] || '').toUpperCase().trim();
 
-    if (monitoredCrit.some(c => criticality.toUpperCase().includes(c)) && !isNaN(uptimeDays) && uptimeDays > threshold) {
+    if (monitoredCrit.includes(criticality) && !isNaN(uptimeDays) && uptimeDays > threshold) {
       alerts.push({
-        tipe: "Uptime VM Terlalu Lama",
+        tipe: "Uptime VM Melebihi Batas Operasional",
         item: row[nameIndex],
         detailFormatted: `Uptime: <b>${uptimeDays} hari</b> (Batas: ${threshold} hari)`,
         detailRaw: `Uptime: ${uptimeDays} hari, Batas: ${threshold} hari`,
         icon: "💡",
-        kritikalitas: criticality
+        kritikalitas: row[critIndex]
       });
     }
   });
   return alerts;
 }
 
+// ===================================================================================
+
+/**
+ * [MODIFIKASI v2.3 - FIX] Menggunakan sumber skor kritikalitas yang benar dari config,
+ * bukan dari konstanta yang telah dihapus.
+ */
 function cekVmKritisMati(config) {
-  const monitoredCrit = config[KONSTANTA.KUNCI_KONFIG.KRITIKALITAS_PANTAU] || [];
+  // --- AWAL PERBAIKAN ---
+  // Mendapatkan sistem skoring dari konfigurasi, bukan konstanta.
+  const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+  // Mengambil daftar level kritikalitas dari kunci objek skor.
+  const monitoredCrit = Object.keys(skorKritikalitas).filter(k => k !== 'DEFAULT');
+  // --- AKHIR PERBAIKAN ---
+
   if (monitoredCrit.length === 0) return [];
 
   const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
@@ -200,16 +214,16 @@ function cekVmKritisMati(config) {
   const alerts = [];
   vmData.forEach(row => {
     const state = String(row[stateIndex] || '').toLowerCase();
-    const criticality = String(row[critIndex] || '');
+    const criticality = String(row[critIndex] || '').toUpperCase().trim();
 
-    if (monitoredCrit.some(c => criticality.toUpperCase().includes(c)) && state.includes('off')) {
+    if (monitoredCrit.includes(criticality) && state.includes('off')) {
        alerts.push({
-        tipe: "VM Kritis Mati",
+        tipe: "VM Kritis Dalam Status Non-Aktif",
         item: row[nameIndex],
         detailFormatted: `Status: <b>poweredOff</b>`,
         detailRaw: `Status: poweredOff`,
         icon: "❗️",
-        kritikalitas: criticality
+        kritikalitas: row[critIndex]
       });
     }
   });

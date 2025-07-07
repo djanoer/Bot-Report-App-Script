@@ -139,14 +139,12 @@ function generateVcenterSummary(config) {
  * membaca log perubahan hari ini langsung dari sheet "Log Perubahan".
  */
 function buatLaporanHarianVM(config) {
-  let pesanLaporan = `📊 <b>Laporan Harian VM & Datastore</b>\n`;
+  let pesanLaporan = `📊 <b>Status Operasional Infrastruktur</b>\n`;
   pesanLaporan += `🗓️ <i>${new Date().toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</i>\n`;
   
   try {
-    // --- Bagian 1: Analisis Log Perubahan Hari Ini ---
-    pesanLaporan += "\n<b>Perubahan Hari Ini:</b>\n";
+    pesanLaporan += "\n<b>Aktivitas Sistem Hari Ini:</b>\n";
     
-    // [PERBAIKAN UTAMA] Ambil log langsung dari sheet "Log Perubahan" untuk hari ini.
     const todayStartDate = new Date();
     todayStartDate.setHours(0, 0, 0, 0);
     const { headers, data: todaysLogs } = getCombinedLogs(todayStartDate, config);
@@ -161,23 +159,22 @@ function buatLaporanHarianVM(config) {
         else if (action.includes('MODIFIKASI')) counts.dimodifikasi++;
         else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
       });
+      pesanLaporan += `Teridentifikasi <b>${todaysLogs.length}</b> aktivitas perubahan data:\n`;
       pesanLaporan += `➕ Baru: ${counts.baru} | ✏️ Dimodifikasi: ${counts.dimodifikasi} | ❌ Dihapus: ${counts.dihapus}\n`;
     } else {
-      pesanLaporan += "✅ Tidak ada perubahan data VM terdeteksi hari ini.\n";
+      pesanLaporan += "Tidak terdeteksi aktivitas perubahan data VM.\n";
     }
     
-    // --- Bagian 2: Ringkasan Infrastruktur ---
     pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR;
 
-    // Bagian ini tidak perlu diubah karena sudah benar.
     const summary = generateVcenterSummary(config);
-    pesanLaporan += "<b>Ringkasan vCenter:</b>\n" + summary.vCenterMessage;
-    pesanLaporan += "\n<b>Analisis Uptime:</b>\n" + summary.uptimeMessage;
+    pesanLaporan += "<b>Status VMs vCenter:</b>\n" + summary.vCenterMessage;
+    pesanLaporan += "\n<b>Tinjauan Uptime:</b>\n" + summary.uptimeMessage;
     
     const provisioningSummary = getProvisioningStatusSummary(config);
     pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR + "<b>Status Provisioning:</b>\n" + provisioningSummary;
     
-    pesanLaporan += `\n\nGunakan /cekhistory untuk detail perubahan lengkap.`;
+    pesanLaporan += `\n\n<i>Rincian aktivitas dapat dilihat melalui perintah /cekhistory.</i>`;
 
     return pesanLaporan;
     
@@ -292,9 +289,10 @@ function generateProvisioningReport(config) {
       updateTop5(reportData.Top5.disk, { ...vmInfo, value: disk });
     }
 
-    let message = `⚙️ <b>Laporan Provisioning Sumber Daya</b>\n`;
-    message += `<i>Berdasarkan data per ${new Date().toLocaleString('id-ID')}</i>`;
+    let message = `⚙️ <b>Laporan Alokasi Sumber Daya Infrastruktur</b>\n`;
+    message += `<i>Data per ${new Date().toLocaleString('id-ID')}</i>`;
 
+    // Bagian 1: Rincian per vCenter
     Object.keys(reportData).filter(key => key !== 'Top5' && key !== 'Total').sort().forEach(vc => {
       message += KONSTANTA.UI_STRINGS.SEPARATOR;
       message += `🏢 <b>vCenter: ${vc}</b>\n\n`;
@@ -310,8 +308,9 @@ function generateProvisioningReport(config) {
       message += ` • Total Provisioned: <b>${reportData[vc].disk.toFixed(2)} TB</b>\n`;
     });
     
+    // Bagian 2: Total Keseluruhan
     message += KONSTANTA.UI_STRINGS.SEPARATOR;
-    message += `🌍 <b>GRAND TOTAL</b>\n\n`;
+    message += `🌍 <b>Total Keseluruhan</b>\n\n`;
     const totalCpuGrand = reportData['Total'].cpuOn + reportData['Total'].cpuOff;
     const totalMemGrand = reportData['Total'].memOn + reportData['Total'].memOff;
     message += `💻 <b>vCPU:</b>\n`;
@@ -323,14 +322,17 @@ function generateProvisioningReport(config) {
     message += `💽 <b>Disk:</b>\n`;
     message += ` • Total Provisioned: <b>${reportData['Total'].disk.toFixed(2)} TB</b>\n`;
 
+    // Bagian 3: Pengguna Resource Teratas
     message += KONSTANTA.UI_STRINGS.SEPARATOR;
-    message += `🏆 <b>Top 5 Pengguna Resource Tertinggi</b>\n`;
+    message += `🏆 <b>Pengguna Resource Teratas</b>\n`;
     const topCpuText = reportData.Top5.cpu.map((vm, i) => `${i+1}. <code>${escapeHtml(vm.name)}</code> (${vm.value} vCPU)`).join('\n');
     const topMemText = reportData.Top5.memory.map((vm, i) => `${i+1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toLocaleString('id')} GB)`).join('\n');
     const topDiskText = reportData.Top5.disk.map((vm, i) => `${i+1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toFixed(2)} TB)`).join('\n');
     message += `\n<i>vCPU Terbesar:</i>\n${topCpuText}\n`;
     message += `\n<i>Memori Terbesar:</i>\n${topMemText}\n`;
     message += `\n<i>Disk Terbesar:</i>\n${topDiskText}\n`;
+
+    message += `\n\n<i>Detail alokasi per vCenter dapat dianalisis lebih lanjut melalui perintah /export.</i>`;
     
     return message;
 

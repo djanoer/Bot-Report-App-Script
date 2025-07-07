@@ -124,19 +124,7 @@ function handleCentralizedError(errorObject, context, config) {
 }
 
 /**
- * [FINAL DENGAN FIX DESKTOP]
- * Membuat tampilan berhalaman (pesan teks dan keyboard) untuk data apa pun secara generik.
- * Fungsi ini mengotomatiskan pembuatan tombol navigasi dan tombol aksi seperti "Ekspor".
- *
- * @param {object} options - Objek berisi parameter untuk pagination.
- * @param {Array<Array<any>>} options.allItems - Array dari semua item/baris data yang akan ditampilkan.
- * @param {number} options.page - Halaman saat ini yang diminta.
- * @param {string} options.title - Judul utama yang akan ditampilkan di atas daftar (misal: "Hasil Pencarian untuk '10.10.1.1'").
- * @param {function} options.formatEntryCallback - Fungsi yang menerima satu baris data dan mengembalikan string format HTML-nya.
- * @param {string} options.navCallbackPrefix - Awalan callback untuk tombol navigasi (misal: 'cekvm_nav_10.10.1.1').
- * @param {string|null} [options.exportCallbackData=null] - Callback data untuk tombol ekspor. Jika null, tombol tidak akan ditampilkan.
- * @param {number} [options.entriesPerPage=15] - Jumlah item per halaman.
- * @returns {{text: string, keyboard: object|null}} Objek berisi teks pesan dan keyboard.
+ * [v1.1-stabil] Membuat tampilan berhalaman (pesan teks dan keyboard) untuk data apa pun secara generik.
  */
 function createPaginatedView({ allItems, page, title, formatEntryCallback, navCallbackPrefix, exportCallbackData = null, entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES }) {
   const totalEntries = allItems.length;
@@ -181,7 +169,7 @@ function createPaginatedView({ allItems, page, title, formatEntryCallback, navCa
     keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: exportCallbackData }]);
   }
   
-  return { text: text, keyboard: { inline_keyboard: keyboardRows } };
+  return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
 
 /**

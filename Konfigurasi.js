@@ -1,8 +1,8 @@
 // ===== FILE: Konfigurasi.gs =====
 
 /**
- * Membaca konfigurasi dari sheet "Konfigurasi" dan menyimpannya di cache.
- * @param {string} namaSheet Nama sheet konfigurasi.
+ * [HARDENED] Membaca konfigurasi dari sheet "Konfigurasi" dan menyimpannya di cache.
+ * Fungsi ini sekarang tangguh terhadap kesalahan parsing JSON per-item.
  * @returns {object} Objek konfigurasi yang berisi semua pengaturan.
  */
 function bacaKonfigurasi() {
@@ -25,10 +25,14 @@ function bacaKonfigurasi() {
       const key = row[0];
       const value = row[1];
       if (key) {
-        if (['KOLOM_YANG_DIPANTAU', 'PEMETAAN_ENVIRONMENT'].includes(key)) {
-          try { config[key] = JSON.parse(value); } 
-          catch (e) { throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}.`); }
-        } else if (['KATA_KUNCI_DS_DIKECUALIKAN', 'KRITIKALITAS_VM_DIPANTAU', 'STATUS_TIKET_AKTIF'].includes(key)) { 
+        // Menggunakan konstanta terpusat untuk mencari kunci
+        if ([KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU, KONSTANTA.KUNCI_KONFIG.MAP_ENV, KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS].includes(key)) {
+          try { 
+            config[key] = JSON.parse(value); 
+          } catch (e) { 
+            throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}. Periksa format di sheet Konfigurasi.`); 
+          }
+        } else if ([KONSTANTA.KUNCI_KONFIG.DS_KECUALI, KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF].includes(key)) { 
           config[key] = value ? value.toString().toLowerCase().split(',').map(k => k.trim()).filter(Boolean) : [];
         } else {
           config[key] = value;
@@ -43,14 +47,11 @@ function bacaKonfigurasi() {
       }
     }
 
-    // --- [BLOK BARU] Membaca dan memproses daftar kategori untuk laporan distribusi ---
     const kritikalitasString = config[KONSTANTA.KUNCI_KONFIG.KATEGORI_KRITIKALITAS] || '';
     const environmentString = config[KONSTANTA.KUNCI_KONFIG.KATEGORI_ENVIRONMENT] || '';
 
-    // Mengubah string yang dipisahkan koma menjadi array yang bersih
     config.LIST_KRITIKALITAS = kritikalitasString.split(',').map(item => item.trim()).filter(Boolean);
     config.LIST_ENVIRONMENT = environmentString.split(',').map(item => item.trim()).filter(Boolean);
-    // --- [AKHIR BLOK BARU] ---
     
     return config;
   } catch (e) {

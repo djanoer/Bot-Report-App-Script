@@ -176,13 +176,15 @@ const commandHandlers = {
 };
 
 /**
- * [FINAL & STABIL] Fungsi utama untuk menangani semua permintaan dari Telegram.
- * Router callback telah diperbaiki untuk mem-parsing nama item dan nomor halaman
- * pada saat paginasi dengan benar, menyelesaikan bug "nama item tergabung dengan nomor halaman".
+ * [HARDENED] Fungsi utama untuk menangani semua permintaan dari Telegram.
+ * Logika error diperbaiki untuk memberikan konteks yang lebih spesifik.
  */
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) { return HtmlService.createHtmlOutput("Bad Request"); }
-  let state = null; 
+  
+  let state = null;
+  let contextForError = "Inisialisasi Awal"; // Konteks error default
+
   try {
     state = getBotState();
     const config = state.config;
@@ -197,155 +199,169 @@ function doPost(e) {
     const isCallback = !!update.callback_query;
 
     if (isCallback) {
-      const callbackQueryId = update.callback_query.id;
-      const callbackData = update.callback_query.data;
-      const userEvent = update.callback_query;
-      const chatId = userEvent.message.chat.id;
-      const messageId = userEvent.message.message_id;
+      // --- [MODIFIKASI UTAMA 1: BLOK TRY-CATCH SPESIFIK] ---
+      contextForError = "Pemrosesan Callback Query";
+      try {
+        const callbackQueryId = update.callback_query.id;
+        const callbackData = update.callback_query.data;
+        const userEvent = update.callback_query;
+        const chatId = userEvent.message.chat.id;
+        const messageId = userEvent.message.message_id;
 
-      const userData = userAccessMap.get(String(userEvent.from.id));
-      if (!userData || !userData.email) {
-        const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
-        kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
+        const userData = userAccessMap.get(String(userEvent.from.id));
+        if (!userData || !userData.email) {
+          const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
+          kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
+          answerCallbackQuery(callbackQueryId, config);
+          return HtmlService.createHtmlOutput("Unauthorized");
+        }
+        userData.firstName = userEvent.from.first_name;
+        userData.userId = userEvent.from.id;
+
+        const K = KONSTANTA.CALLBACK_CEKVM;
+
+        // ======================================================
+        // ===== ROUTER CALLBACK DENGAN LOGIKA PARSING BARU =====
+        // ======================================================
+        
+        // Handler untuk semua callback yang berhubungan dengan daftar VM di Cluster
+        if (callbackData.startsWith(K.CLUSTER_PREFIX)) {
+          const isInitial = !callbackData.startsWith(K.CLUSTER_NAV_PREFIX);
+          const prefixToRemove = isInitial ? K.CLUSTER_PREFIX : K.CLUSTER_NAV_PREFIX;
+          const data = callbackData.replace(prefixToRemove, '');
+          
+          let itemName = data;
+          // Hanya pisahkan nomor halaman jika ini adalah navigasi
+          if (!isInitial) {
+              const lastUnderscoreIndex = data.lastIndexOf('_');
+              if (lastUnderscoreIndex > -1) {
+                  itemName = data.substring(0, lastUnderscoreIndex);
+              }
+          }
+          
+          handlePaginatedVmList(update, config, 'cluster', itemName, isInitial);
+        }
+        // Handler untuk semua callback yang berhubungan dengan daftar VM di Datastore
+        else if (callbackData.startsWith(K.DATASTORE_LIST_VMS_PREFIX) || callbackData.startsWith(K.DATASTORE_NAV_PREFIX)) {
+          const isInitial = callbackData.startsWith(K.DATASTORE_LIST_VMS_PREFIX);
+          const prefixToRemove = isInitial ? K.DATASTORE_LIST_VMS_PREFIX : K.DATASTORE_NAV_PREFIX;
+          const data = callbackData.replace(prefixToRemove, '');
+
+          let itemName = data;
+          // Hanya pisahkan nomor halaman jika ini adalah navigasi
+          if (!isInitial) {
+              const lastUnderscoreIndex = data.lastIndexOf('_');
+              if (lastUnderscoreIndex > -1) {
+                  itemName = data.substring(0, lastUnderscoreIndex);
+              }
+          }
+          
+          handlePaginatedVmList(update, config, 'datastore', itemName, isInitial);
+        }
+        // Handler untuk aksi-aksi spesifik lainnya
+        else if (callbackData.startsWith(K.HISTORY_PREFIX)) {
+          const pk = callbackData.replace(K.HISTORY_PREFIX, '');
+          const result = getVmHistory(pk, config);
+          kirimPesanTelegram(result.message, config, 'HTML', null, chatId);
+          if (result.success && result.data) {
+            exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
+          }
+        } 
+        else if (callbackData.startsWith(K.CLUSTER_EXPORT_PREFIX)) {
+          const clusterName = callbackData.replace(K.CLUSTER_EXPORT_PREFIX, '');
+          const { headers, results } = searchVmsByCluster(clusterName, config);
+          exportResultsToSheet(headers, results, `Daftar VM di Cluster ${clusterName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+        }
+        else if (callbackData.startsWith(K.DATASTORE_EXPORT_PREFIX)) {
+          const datastoreName = callbackData.replace(K.DATASTORE_EXPORT_PREFIX, '');
+          const { headers, results } = searchVmsByDatastore(datastoreName, config);
+          exportResultsToSheet(headers, results, `Daftar VM di Datastore ${datastoreName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
+        }
+        else if (callbackData.startsWith(K.DATASTORE_PREFIX)) {
+          const dsName = callbackData.replace(K.DATASTORE_PREFIX, '');
+          try {
+            const details = getDatastoreDetails(dsName, config);
+            const { pesan, keyboard } = formatDatastoreDetail(details);
+            editMessageText(pesan, keyboard, chatId, messageId, config);
+          } catch (err) { handleCentralizedError(err, `Detail Datastore: ${dsName}`, config); }
+        }
+        else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
+          handleTicketInteraction(update, config);
+        } 
+        else if (callbackData.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
+          handleHistoryInteraction(update, config, userData);
+        } 
+        else if (callbackData.startsWith("run_export_log_") || callbackData.startsWith("export_")) {
+          handleExportRequest(callbackData, config, userData);
+        }
+        else {
+          // Fallback untuk callback /cekvm (paginasi hasil pencarian)
+          handleVmSearchInteraction(update, config, userData);
+        }
+
         answerCallbackQuery(callbackQueryId, config);
-        return HtmlService.createHtmlOutput("Unauthorized");
+
+      } catch (err) {
+        // Tangkap error spesifik dari blok callback dan lempar kembali dengan konteks
+        throw new Error(`[${contextForError}] ${err.message}`);
       }
-      userData.firstName = userEvent.from.first_name;
-      userData.userId = userEvent.from.id;
+      // --- [AKHIR MODIFIKASI 1] ---
 
-      const K = KONSTANTA.CALLBACK_CEKVM;
+    } else if (update.message && update.message.text) {
+      // --- [MODIFIKASI UTAMA 2: BLOK TRY-CATCH SPESIFIK] ---
+      contextForError = "Pemrosesan Perintah Teks";
+      try {
+        const userEvent = update.message;
+        const text = userEvent.text;
+        if (!text.startsWith('/')) { return HtmlService.createHtmlOutput("OK"); }
+        const commandParts = text.split(' ');
+        const command = commandParts[0].toLowerCase().split('@')[0];
 
-      // ======================================================
-      // ===== ROUTER CALLBACK DENGAN LOGIKA PARSING BARU =====
-      // ======================================================
-      
-      // Handler untuk semua callback yang berhubungan dengan daftar VM di Cluster
-      if (callbackData.startsWith(K.CLUSTER_PREFIX)) {
-        const isInitial = !callbackData.startsWith(K.CLUSTER_NAV_PREFIX);
-        const prefixToRemove = isInitial ? K.CLUSTER_PREFIX : K.CLUSTER_NAV_PREFIX;
-        const data = callbackData.replace(prefixToRemove, '');
-        
-        let itemName = data;
-        // Hanya pisahkan nomor halaman jika ini adalah navigasi
-        if (!isInitial) {
-             const lastUnderscoreIndex = data.lastIndexOf('_');
-             if (lastUnderscoreIndex > -1) {
-                itemName = data.substring(0, lastUnderscoreIndex);
-             }
+        if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
+          const existingUserData = userAccessMap.get(String(userEvent.from.id));
+          if (existingUserData && existingUserData.email) {
+              kirimPesanTelegram(`Halo ${escapeHtml(userEvent.from.first_name)}, Anda sudah terdaftar.`, config, 'HTML');
+          } else {
+              const email = commandParts[1];
+              if (!email || !email.includes('@') || !email.includes('.')) {
+                  kirimPesanTelegram(`Format salah. Gunakan:\n<code>/daftar email.anda@domain.com</code>`, config, 'HTML');
+              } else {
+                  let notifPesan = `<b>🔔 Permintaan Pendaftaran Baru</b>\n\n<b>Nama:</b> ${escapeHtml(userEvent.from.first_name)}\n<b>Username:</b> ${userEvent.from.username ? '@' + userEvent.from.username : 'N/A'}\n<b>User ID:</b> <code>${userEvent.from.id}</code>\n<b>Email:</b> <code>${escapeHtml(email)}</code>`;
+                  kirimPesanTelegram(notifPesan, config, 'HTML');
+                  kirimPesanTelegram(`Terima kasih, ${escapeHtml(userEvent.from.first_name)}. Permintaan Anda telah diteruskan.`, config, 'HTML', null, userEvent.chat.id);
+              }
+          }
+          return HtmlService.createHtmlOutput("OK");
         }
         
-        handlePaginatedVmList(update, config, 'cluster', itemName, isInitial);
-      }
-      // Handler untuk semua callback yang berhubungan dengan daftar VM di Datastore
-      else if (callbackData.startsWith(K.DATASTORE_LIST_VMS_PREFIX) || callbackData.startsWith(K.DATASTORE_NAV_PREFIX)) {
-        const isInitial = callbackData.startsWith(K.DATASTORE_LIST_VMS_PREFIX);
-        const prefixToRemove = isInitial ? K.DATASTORE_LIST_VMS_PREFIX : K.DATASTORE_NAV_PREFIX;
-        const data = callbackData.replace(prefixToRemove, '');
-
-        let itemName = data;
-        // Hanya pisahkan nomor halaman jika ini adalah navigasi
-        if (!isInitial) {
-            const lastUnderscoreIndex = data.lastIndexOf('_');
-            if (lastUnderscoreIndex > -1) {
-                itemName = data.substring(0, lastUnderscoreIndex);
-            }
+        const userData = userAccessMap.get(String(userEvent.from.id));
+        if (!userData || !userData.email) {
+          const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
+          kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
+          return HtmlService.createHtmlOutput("Unauthorized");
         }
-        
-        handlePaginatedVmList(update, config, 'datastore', itemName, isInitial);
-      }
-      // Handler untuk aksi-aksi spesifik lainnya
-      else if (callbackData.startsWith(K.HISTORY_PREFIX)) {
-        const pk = callbackData.replace(K.HISTORY_PREFIX, '');
-        const result = getVmHistory(pk, config);
-        kirimPesanTelegram(result.message, config, 'HTML', null, chatId);
-        if (result.success && result.data) {
-          exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
-        }
-      } 
-      else if (callbackData.startsWith(K.CLUSTER_EXPORT_PREFIX)) {
-        const clusterName = callbackData.replace(K.CLUSTER_EXPORT_PREFIX, '');
-        const { headers, results } = searchVmsByCluster(clusterName, config);
-        exportResultsToSheet(headers, results, `Daftar VM di Cluster ${clusterName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-      }
-      else if (callbackData.startsWith(K.DATASTORE_EXPORT_PREFIX)) {
-        const datastoreName = callbackData.replace(K.DATASTORE_EXPORT_PREFIX, '');
-        const { headers, results } = searchVmsByDatastore(datastoreName, config);
-        exportResultsToSheet(headers, results, `Daftar VM di Datastore ${datastoreName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-      }
-      else if (callbackData.startsWith(K.DATASTORE_PREFIX)) {
-        const dsName = callbackData.replace(K.DATASTORE_PREFIX, '');
-        try {
-          const details = getDatastoreDetails(dsName, config);
-          const { pesan, keyboard } = formatDatastoreDetail(details);
-          editMessageText(pesan, keyboard, chatId, messageId, config);
-        } catch (err) { handleCentralizedError(err, `Detail Datastore: ${dsName}`, config); }
-      }
-      else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
-        handleTicketInteraction(update, config);
-      } 
-      else if (callbackData.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
-        handleHistoryInteraction(update, config, userData);
-      } 
-      else if (callbackData.startsWith("run_export_log_") || callbackData.startsWith("export_")) {
-        handleExportRequest(callbackData, config, userData);
-      }
-      else {
-        // Fallback untuk callback /cekvm (paginasi hasil pencarian)
-        handleVmSearchInteraction(update, config, userData);
-      }
+        userData.firstName = userEvent.from.first_name;
+        userData.userId = userEvent.from.id;
 
-      answerCallbackQuery(callbackQueryId, config);
-      return HtmlService.createHtmlOutput("OK");
-    }
-
-    if (update.message && update.message.text) {
-      // Handler untuk perintah teks (tidak berubah, sudah stabil)
-      const userEvent = update.message;
-      const text = userEvent.text;
-      if (!text.startsWith('/')) { return HtmlService.createHtmlOutput("OK"); }
-      const commandParts = text.split(' ');
-      const command = commandParts[0].toLowerCase().split('@')[0];
-
-      if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
-        const existingUserData = userAccessMap.get(String(userEvent.from.id));
-        if (existingUserData && existingUserData.email) {
-            kirimPesanTelegram(`Halo ${escapeHtml(userEvent.from.first_name)}, Anda sudah terdaftar.`, config, 'HTML');
+        const commandFunction = commandHandlers[command];
+        if (commandFunction) {
+            commandFunction(update, config, userData);
         } else {
-            const email = commandParts[1];
-            if (!email || !email.includes('@') || !email.includes('.')) {
-                kirimPesanTelegram(`Format salah. Gunakan:\n<code>/daftar email.anda@domain.com</code>`, config, 'HTML');
-            } else {
-                let notifPesan = `<b>🔔 Permintaan Pendaftaran Baru</b>\n\n<b>Nama:</b> ${escapeHtml(userEvent.from.first_name)}\n<b>Username:</b> ${userEvent.from.username ? '@' + userEvent.from.username : 'N/A'}\n<b>User ID:</b> <code>${userEvent.from.id}</code>\n<b>Email:</b> <code>${escapeHtml(email)}</code>`;
-                kirimPesanTelegram(notifPesan, config, 'HTML');
-                kirimPesanTelegram(`Terima kasih, ${escapeHtml(userEvent.from.first_name)}. Permintaan Anda telah diteruskan.`, config, 'HTML', null, userEvent.chat.id);
-            }
+          kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
         }
-        return HtmlService.createHtmlOutput("OK");
+      } catch (err) {
+        // Tangkap error spesifik dari blok perintah dan lempar kembali dengan konteks
+        throw new Error(`[${contextForError}] ${err.message}`);
       }
-      
-      const userData = userAccessMap.get(String(userEvent.from.id));
-      if (!userData || !userData.email) {
-        const userMention = `<a href="tg://user?id=${userEvent.from.id}">${escapeHtml(userEvent.from.first_name || userEvent.from.id)}</a>`;
-        kirimPesanTelegram(`❌ Maaf ${userMention}, Anda tidak terdaftar.\n\nGunakan <code>/daftar [email_anda]</code> untuk meminta akses.`, config, 'HTML');
-        return HtmlService.createHtmlOutput("Unauthorized");
-      }
-      userData.firstName = userEvent.from.first_name;
-      userData.userId = userEvent.from.id;
-
-      const commandFunction = commandHandlers[command];
-      if (commandFunction) {
-        try {
-          commandFunction(update, config, userData);
-        } catch (err) {
-          handleCentralizedError(err, `Perintah: ${command}`, config);
-        }
-      } else {
-        kirimPesanTelegram(`❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah.`, config, 'HTML');
-      }
-      return HtmlService.createHtmlOutput("OK");
+      // --- [AKHIR MODIFIKASI 2] ---
     }
-  } catch (err) { handleCentralizedError(err, "doPost (proses utama)", state ? state.config : null); }
-  return HtmlService.createHtmlOutput("OK");
+    
+  } catch (err) {
+    // Blok catch utama sekarang akan menerima error dengan konteks yang lebih baik
+    handleCentralizedError(err, `doPost (${contextForError})`, state ? state.config : null);
+  } finally {
+    return HtmlService.createHtmlOutput("OK");
+  }
 }
 
 /**
