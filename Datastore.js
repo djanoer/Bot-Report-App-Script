@@ -1,10 +1,8 @@
 // ===== FILE: Datastore.gs =====
 
 /**
- * [REVISI KONSISTENSI] Menjalankan pemeriksaan perubahan datastore, mencatatnya ke log,
- * dan MENGEMBALIKAN pesan notifikasi jika ada perubahan.
- * @param {object} config - Objek konfigurasi yang diteruskan dari fungsi pemanggil.
- * @returns {string|null} String pesan notifikasi jika ada perubahan, atau null jika tidak ada.
+ * [MODIFIKASI v3.1] Fungsi kini membaca daftar kolom pantau dari sheet "Konfigurasi",
+ * membuatnya menjadi fleksibel dan tidak lagi hardcoded.
  */
 function jalankanPemeriksaanDatastore(config) {
   console.log("Memulai pemeriksaan perubahan datastore...");
@@ -17,21 +15,30 @@ function jalankanPemeriksaanDatastore(config) {
 
     const archiveFileName = KONSTANTA.NAMA_FILE.ARSIP_DS;
     const primaryKeyHeader = config['HEADER_DATASTORE_NAME'];
-    const kolomUntukDipantau = 'Capacity (TB)'; 
-    const columnsToTrack = [{nama: kolomUntukDipantau}];
+
+    // --- AWAL MODIFIKASI: Membaca kolom pantau dari konfigurasi ---
+    // Membaca dari kunci baru yang kita definisikan
+    const kolomDsUntukDipantau = config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU_DS] || [];
+    // Mengubahnya menjadi format yang dimengerti oleh processDataChanges
+    const columnsToTrack = kolomDsUntukDipantau.map(namaKolom => ({ nama: namaKolom }));
+
+    if (columnsToTrack.length === 0) {
+        console.warn("Pemeriksaan datastore dilewati: 'KOLOM_PANTAU_DATASTORE' tidak diatur atau kosong di Konfigurasi.");
+        return null;
+    }
 
     console.log(`Memantau perubahan pada sheet: '${sheetName}'`);
-    console.log(`Kolom yang dipantau untuk perubahan: '${kolomUntukDipantau}'`);
+    console.log(`Kolom datastore yang dipantau: '${kolomDsUntukDipantau.join(', ')}'`);
+    // --- AKHIR MODIFIKASI ---
 
     const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, KONSTANTA.NAMA_ENTITAS.DATASTORE);
 
     if (logEntriesToAdd.length > 0) {
-      const pesanNotifikasi = `🔔 Terdeteksi ${logEntriesToAdd.length} perubahan kapasitas pada infrastruktur ${KONSTANTA.NAMA_ENTITAS.DATASTORE}. Silakan cek /cekhistory untuk detail.`;
+      const pesanNotifikasi = `🔔 Terdeteksi ${logEntriesToAdd.length} perubahan pada infrastruktur ${KONSTANTA.NAMA_ENTITAS.DATASTORE}. Silakan cek /cekhistory untuk detail.`;
       console.log(pesanNotifikasi);
-      // [PERUBAHAN UTAMA] Kembalikan pesan sebagai string, jangan kirim.
       return pesanNotifikasi;
     } else {
-      console.log("Tidak ada perubahan pada data kapasitas datastore yang terdeteksi.");
+      console.log("Tidak ada perubahan pada data datastore yang terdeteksi.");
       return null;
     }
   } catch (e) {

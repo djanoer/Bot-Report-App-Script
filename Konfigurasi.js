@@ -1,10 +1,5 @@
 // ===== FILE: Konfigurasi.gs =====
 
-/**
- * [HARDENED] Membaca konfigurasi dari sheet "Konfigurasi" dan menyimpannya di cache.
- * Fungsi ini sekarang tangguh terhadap kesalahan parsing JSON per-item.
- * @returns {object} Objek konfigurasi yang berisi semua pengaturan.
- */
 function bacaKonfigurasi() {
   try {
     const config = {};
@@ -25,15 +20,17 @@ function bacaKonfigurasi() {
       const key = row[0];
       const value = row[1];
       if (key) {
-        // Menggunakan konstanta terpusat untuk mencari kunci
-        if ([KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU, KONSTANTA.KUNCI_KONFIG.MAP_ENV, KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS].includes(key)) {
+        // Hanya PEMETAAN_ENVIRONMENT dan SKOR_KRITIKALITAS yang berupa JSON
+        if ([KONSTANTA.KUNCI_KONFIG.MAP_ENV, KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS].includes(key)) {
           try { 
             config[key] = JSON.parse(value); 
           } catch (e) { 
             throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}. Periksa format di sheet Konfigurasi.`); 
           }
-        } else if ([KONSTANTA.KUNCI_KONFIG.DS_KECUALI, KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF].includes(key)) { 
-          config[key] = value ? value.toString().toLowerCase().split(',').map(k => k.trim()).filter(Boolean) : [];
+        // --- AWAL MODIFIKASI: Memindahkan KOLOM_PANTAU ke blok yang benar ---
+        } else if ([KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU, KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU_DS, KONSTANTA.KUNCI_KONFIG.DS_KECUALI, KONSTANTA.KUNCI_KONFIG.STATUS_TIKET_AKTIF].includes(key)) {
+        // --- AKHIR MODIFIKASI ---
+          config[key] = value ? value.toString().split(',').map(k => k.trim()).filter(Boolean) : [];
         } else {
           config[key] = value;
         }
@@ -58,7 +55,6 @@ function bacaKonfigurasi() {
     throw new Error(`Gagal membaca konfigurasi: ${e.message}`);
   }
 }
-
 
 function getMigrationConfig(migrationLogicSheet) {
   const migrationConfig = new Map();

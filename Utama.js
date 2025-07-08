@@ -172,6 +172,30 @@ const commandHandlers = {
       }
     }
   },
+  [KONSTANTA.PERINTAH_BOT.CEK_KONDISI]: (update, config) => {
+    let statusMessageId = null;
+    try {
+        const sentMessage = kirimPesanTelegram("🔬 Memulai pemeriksaan kondisi sistem...", config, 'HTML');
+        if (sentMessage && sentMessage.ok) {
+            statusMessageId = sentMessage.result.message_id;
+        }
+        // Langsung memanggil fungsi pemeriksaan
+        jalankanPemeriksaanAmbangBatas(config);
+        
+        // Hapus pesan status karena jalankanPemeriksaanAmbangBatas sudah mengirim laporannya sendiri
+        if (statusMessageId) {
+            // Gunakan fitur hapus pesan jika ada, atau edit jika tidak ada
+            // Ini adalah contoh, implementasi bisa berbeda tergantung API Telegram Anda
+            // Untuk saat ini, kita akan mengeditnya menjadi pesan konfirmasi singkat
+            editMessageText("✅ Pemeriksaan kondisi sistem selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        }
+    } catch(e) {
+        handleCentralizedError(e, `Perintah: ${KONSTANTA.PERINTAH_BOT.CEK_KONDISI}`, config);
+        if (statusMessageId) {
+            editMessageText("❌ Gagal menjalankan pemeriksaan kondisi.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        }
+    }
+  },
   [KONSTANTA.PERINTAH_BOT.INFO]: (update, config) => kirimPesanInfo(config),
 };
 
@@ -376,6 +400,7 @@ function kirimPesanInfo(config) {
                     "📊 <b>Laporan & Analisis</b>\n" +
                     `<code>${K.LAPORAN}</code> - Membuat laporan harian (tanpa sinkronisasi).\n` +
                     `<code>${K.SYNC_LAPORAN}</code> - Sinkronisasi data & buat laporan.\n` +
+                    `<code>${K.CEK_KONDISI}</code> - Cek kondisi sistem saat ini.\n` +
                     `<code>${K.DISTRIBUSI_VM}</code> - Laporan VM per kritikalitas & environment.\n` +
                     `<code>${K.PROVISIONING}</code> - Laporan alokasi resource infrastruktur.\n` +
                     `<code>${K.MIGRASI_CHECK}</code> - Analisis dan rekomendasi migrasi.\n` +
@@ -452,17 +477,23 @@ function kirimMenuEkspor(config) {
 // [OPTIMALISASI] KUMPULAN FUNGSI UNTUK PEMICU (TRIGGER)
 // =====================================================================
 
-
+/**
+ * [MODIFIKASI] Fungsi kini menjadi satu-satunya pusat untuk semua pekerjaan harian
+ * dengan alur yang bersih, berurutan, dan tidak redundan.
+ */
 function runDailyJobs() {
   console.log("Memulai pekerjaan harian via trigger...");
   
   // Baca konfigurasi sekali di awal
   const config = bacaKonfigurasi();
 
-  // Berikan objek 'config' ke semua fungsi yang membutuhkannya
+  // Langkah 1: Jalankan sinkronisasi dan kirim laporan operasional
   syncDanBuatLaporanHarian(false, "TRIGGER HARIAN", config); 
+  
+  // Langkah 2: Jalankan pemeriksaan kondisi dan kirim laporannya
   jalankanPemeriksaanAmbangBatas(config);
-  jalankanPemeriksaanDatastore(config);
+  
+  // Panggilan yang redundan ke jalankanPemeriksaanDatastore telah dihapus.
   
   console.log("Pekerjaan harian via trigger selesai.");
 }

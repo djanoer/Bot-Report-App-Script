@@ -63,7 +63,8 @@ const KONSTANTA = {
     ACTION: 'Action/Tipe perubahan', 
     OLD_VAL: 'Old Value', 
     NEW_VAL: 'New Value', 
-    DETAIL: 'Detail Perubahan'
+    DETAIL: 'Detail Perubahan',
+    TIPE_LOG: 'Tipe Log',
   },
   
   // Header kolom krusial VM
@@ -135,6 +136,8 @@ const KONSTANTA = {
     KATEGORI_KRITIKALITAS: 'KATEGORI_KRITIKALITAS',
     KATEGORI_ENVIRONMENT: 'KATEGORI_ENVIRONMENT',
     SKOR_KRITIKALITAS: 'SKOR_KRITIKALITAS',
+    KOLOM_PANTAU_DS: 'KOLOM_PANTAU_DATASTORE',
+    LOG_TOLERANCE_PROV_GB: 'LOG_TOLERANCE_PROV_GB',
   },
   
   // Nama file arsip
@@ -174,6 +177,7 @@ const KONSTANTA = {
     CLEAR_CACHE: '/clearcache', 
     INFO: '/info',
     DISTRIBUSI_VM: '/distribusi_vm',
+    CEK_KONDISI: '/cek_kondisi',
   },
   // String yang sering digunakan
   UI_STRINGS: {

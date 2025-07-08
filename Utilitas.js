@@ -267,3 +267,41 @@ function clearBotStateCache() {
     return false;
   }
 }
+
+/**
+ * [MODIFIKASI v3.0 - FINAL & ROBUST] Fungsi pembantu yang lebih tangguh untuk mem-parse
+ * string angka, kini dapat menangani format standar dan internasional dengan benar
+ * tanpa merusak nilai desimal.
+ * @param {string | number} numberString - String angka yang akan di-parse.
+ * @returns {number} Angka dalam format float.
+ */
+function parseLocaleNumber(numberString) {
+  // Jika sudah berupa angka, langsung kembalikan
+  if (typeof numberString === 'number') {
+    return numberString;
+  }
+  // Jika bukan string, ubah menjadi string
+  if (typeof numberString !== 'string') {
+    numberString = String(numberString);
+  }
+
+  // 1. Bersihkan semua karakter non-numerik kecuali titik, koma, dan tanda minus.
+  let cleaned = numberString.replace(/[^0-9.,-]/g, '');
+
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+
+  // 2. Tentukan format berdasarkan pemisah desimal terakhir
+  // Jika koma adalah pemisah terakhir, atau satu-satunya pemisah, asumsikan format Eropa
+  if (lastComma > -1 && lastComma > lastDot) {
+    // Hapus semua titik (pemisah ribuan), lalu ganti koma desimal dengan titik
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  } else {
+    // Asumsikan format US/standar. Cukup hapus koma (pemisah ribuan).
+    // Titik desimal (jika ada) akan di-handle oleh parseFloat.
+    cleaned = cleaned.replace(/,/g, '');
+  }
+
+  // 3. Lakukan parseFloat pada string yang sudah bersih.
+  return parseFloat(cleaned) || 0;
+}

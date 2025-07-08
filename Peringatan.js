@@ -1,11 +1,8 @@
 // ===== FILE: Peringatan.gs =====
 
-// ===== FILE: Peringatan.js =====
-
 /**
- * [MODIFIKASI v2.3 - REVISI LENGKAP] Fungsi kembali mengirim pesannya sendiri ke Telegram.
- * Selalu mengirim pesan status (aman atau anomali) setiap kali dijalankan.
- * Menambahkan logika pengurutan pada rincian kritikalitas.
+ * [MODIFIKASI v3.4 - FINAL] Menempatkan pesan "call to action" /migrasicheck
+ * secara kontekstual tepat di bawah peringatan kapasitas datastore.
  */
 function jalankanPemeriksaanAmbangBatas(config = null) {
   const activeConfig = config || bacaKonfigurasi();
@@ -24,18 +21,20 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
           const counts = { datastore: 0, uptime: { total: 0, byCrit: {} }, vmMati: { total: 0, byCrit: {} } };
           const dataUntukEkspor = [];
           const headers = ["Tipe Peringatan", "Item yang Diperiksa", "Detail", "Kritikalitas"];
+          const dsAlerts = semuaPeringatan.filter(alert => alert.tipe.includes("Kapasitas Datastore"));
+          counts.datastore = dsAlerts.length;
 
           semuaPeringatan.forEach(alert => {
-            if (alert.tipe.includes("Kapasitas Datastore")) {
-              counts.datastore++;
-            } else if (alert.tipe.includes("Uptime VM")) {
-              counts.uptime.total++;
-              const crit = alert.kritikalitas || 'Lainnya';
-              counts.uptime.byCrit[crit] = (counts.uptime.byCrit[crit] || 0) + 1;
-            } else if (alert.tipe.includes("VM Kritis")) {
-              counts.vmMati.total++;
-              const crit = alert.kritikalitas || 'Lainnya';
-              counts.vmMati.byCrit[crit] = (counts.vmMati.byCrit[crit] || 0) + 1;
+            if (!alert.tipe.includes("Kapasitas Datastore")) {
+                if (alert.tipe.includes("Uptime VM")) {
+                  counts.uptime.total++;
+                  const crit = alert.kritikalitas || 'Lainnya';
+                  counts.uptime.byCrit[crit] = (counts.uptime.byCrit[crit] || 0) + 1;
+                } else if (alert.tipe.includes("VM Kritis")) {
+                  counts.vmMati.total++;
+                  const crit = alert.kritikalitas || 'Lainnya';
+                  counts.vmMati.byCrit[crit] = (counts.vmMati.byCrit[crit] || 0) + 1;
+                }
             }
             dataUntukEkspor.push([alert.tipe, alert.item, alert.detailRaw, alert.kritikalitas || 'N/A']);
           });
@@ -49,6 +48,20 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
           ringkasanPesan += `<b>Ringkasan Peringatan:</b>\n\n`;
           
           ringkasanPesan += `• 🔥 <b>Kapasitas Datastore Melebihi Ambang Batas (>${dsThreshold}%):</b> <code>${counts.datastore}</code>\n`;
+          if (dsAlerts.length > 0) {
+              const MAX_DS_TO_SHOW = 3;
+              for (let i = 0; i < Math.min(dsAlerts.length, MAX_DS_TO_SHOW); i++) {
+                  const alert = dsAlerts[i];
+                  const usage = alert.detailRaw.split(',')[0].split(':')[1].trim();
+                  ringkasanPesan += `  - <code>${escapeHtml(alert.item)}</code> (${usage})\n`;
+              }
+              if (dsAlerts.length > MAX_DS_TO_SHOW) {
+                  ringkasanPesan += `  - <i>... dan ${dsAlerts.length - MAX_DS_TO_SHOW} lainnya.</i>\n`;
+              }
+              // --- AWAL MODIFIKASI: Menambahkan pesan Call to Action di sini ---
+              ringkasanPesan += `  └ <i>Jalankan <code>/migrasicheck</code> untuk mendapatkan rekomendasi perbaikan.</i>\n`;
+              // --- AKHIR MODIFIKASI ---
+          }
           
           const skorKritikalitas = activeConfig[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
           const sortCrit = (a, b) => (skorKritikalitas[b.toUpperCase()] || 0) - (skorKritikalitas[a.toUpperCase()] || 0);
@@ -71,7 +84,6 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
           exportResultsToSheet(headers, dataUntukEkspor, "Laporan Detail Kondisi Sistem", activeConfig, null, "Kritikalitas");
 
       } else {
-        // Logika lengkap jika anomali sedikit
         let pesanDetail = `🚨 <b>Laporan Kondisi Sistem</b> 🚨\n`;
         pesanDetail += `<i>Teridentifikasi ${semuaPeringatan.length} item yang memerlukan tinjauan:</i>\n`;
         
@@ -83,6 +95,12 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
             return alertMessage;
         });
         pesanDetail += "\n" + formattedAlerts.join('\n\n');
+        
+        const dsAlertsDetail = semuaPeringatan.filter(alert => alert.tipe.includes("Kapasitas Datastore"));
+        if (dsAlertsDetail.length > 0) {
+            pesanDetail += `\n\n<i>Jalankan <code>/migrasicheck</code> untuk mendapatkan rekomendasi perbaikan.</i>`;
+        }
+        
         kirimPesanTelegram(pesanDetail, activeConfig, 'HTML');
       }
     } else {

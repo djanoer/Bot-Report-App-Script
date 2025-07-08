@@ -1,12 +1,11 @@
 // ===== FILE: ManajemenData.gs =====
 
 /**
- * [MODIFIKASI v2.3 - REVISI] Mengembalikan fungsi ke tanggung jawab aslinya:
- * hanya untuk sinkronisasi data dan pengiriman laporan operasional.
+ * [MODIFIKASI FINAL] Menghapus pemanggilan ke jalankanPemeriksaanAmbangBatas.
+ * Fungsi ini kini hanya bertanggung jawab untuk sinkronisasi dan laporan operasional.
  */
 function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI", config = null) {
   const activeConfig = config || bacaKonfigurasi();
-
   const lock = LockService.getScriptLock();
   const lockAcquired = lock.tryLock(KONSTANTA.LIMIT.LOCK_TIMEOUT_MS); 
 
@@ -16,11 +15,10 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
   }
   
   let statusMessageId = null;
-
   try {
     const startTime = new Date();
     const timestamp = startTime.toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n⏳ Memulai sinkronisasi penuh & pembuatan laporan harian...`;
+    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n⏳ Memulai sinkronisasi penuh & pembuatan laporan operasional...`;
     
     const sentMessage = kirimPesanTelegram(pesanAwal, activeConfig, 'HTML');
     if (sentMessage && sentMessage.ok) {
@@ -32,25 +30,42 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
     const sheetVmName = activeConfig[KUNCI.SHEET_VM];
     const sheetDsName = activeConfig[KUNCI.SHEET_DS];
 
+    // --- Proses Sinkronisasi dan Log ---
+    console.log("Memulai sinkronisasi dan pemeriksaan perubahan VM...");
     salinDataSheet(sheetVmName, sumberId, activeConfig);
+    try {
+      const kolomVmUntukDipantau = activeConfig[KUNCI.KOLOM_PANTAU] || [];
+      const columnsToTrackVm = kolomVmUntukDipantau.map(namaKolom => ({ nama: namaKolom }));
+      if (columnsToTrackVm.length > 0) {
+        processDataChanges(activeConfig, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, KONSTANTA.HEADER_VM.PK, columnsToTrackVm, KONSTANTA.NAMA_ENTITAS.VM);
+      }
+    } catch(e) {
+      console.error(`Gagal Menjalankan Pemeriksaan Perubahan VM. Penyebab: ${e.message}`);
+    }
+
     if (sheetDsName) {
+      console.log("Memulai sinkronisasi dan pemeriksaan perubahan Datastore...");
       salinDataSheet(sheetDsName, sumberId, activeConfig);
+      try {
+        const kolomDsUntukDipantau = activeConfig[KUNCI.KOLOM_PANTAU_DS] || [];
+        const columnsToTrackDs = kolomDsUntukDipantau.map(namaKolom => ({ nama: namaKolom }));
+        if (columnsToTrackDs.length > 0) {
+          processDataChanges(activeConfig, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, activeConfig['HEADER_DATASTORE_NAME'], columnsToTrackDs, KONSTANTA.NAMA_ENTITAS.DATASTORE);
+        }
+      } catch(e) {
+        console.error(`Gagal Menjalankan Pemeriksaan Perubahan Datastore. Penyebab: ${e.message}`);
+      }
     }
-
-    // --- AWAL PERBAIKAN ---
-    // Logika penggabungan laporan dihapus. Kini hanya mengirim laporan operasional.
+    
+    // --- Langkah Pembuatan Laporan ---
     const pesanLaporanOperasional = buatLaporanHarianVM(activeConfig);
-    const pesanNotifikasiDs = jalankanPemeriksaanDatastore(activeConfig); // Pemeriksaan datastore tetap ada
+    kirimPesanTelegram(pesanLaporanOperasional, activeConfig, 'HTML');
+    
+    // --- AWAL MODIFIKASI: Pemanggilan ke jalankanPemeriksaanAmbangBatas dihapus dari sini ---
+    // jalankanPemeriksaanAmbangBatas(activeConfig); // Baris ini telah dihapus.
+    // --- AKHIR MODIFIKASI ---
 
-    let pesanLaporanFinal = pesanLaporanOperasional;
-    if (pesanNotifikasiDs) {
-      pesanLaporanFinal += KONSTANTA.UI_STRINGS.SEPARATOR + pesanNotifikasiDs;
-    }
-    // --- AKHIR PERBAIKAN ---
-
-    kirimPesanTelegram(pesanLaporanFinal, activeConfig, 'HTML');
-
-    const pesanKonfirmasi = `<b>✅ Proses Selesai</b>\n\nLaporan harian telah dikirimkan.`;
+    const pesanKonfirmasi = `<b>✅ Proses Selesai</b>\n\nLaporan operasional telah dikirimkan.`;
     if (statusMessageId) {
         editMessageText(pesanKonfirmasi, null, activeConfig.TELEGRAM_CHAT_ID, statusMessageId, activeConfig);
     }
@@ -325,8 +340,6 @@ function formatDatastoreDetail(details, originPk = null) {
   }
   return { pesan: message, keyboard: { inline_keyboard: keyboardRows } };
 }
-
-// ===== FILE: ManajemenData.js =====
 
 /**
  * [v1.1-stabil] Handler /cekvm yang sudah di-harden.
@@ -669,50 +682,55 @@ function formatHistoryEntry(entry, headers) {
 }
 
 /**
- * [MODIFIKASI v2.2] Mengurutkan kandidat VM migrasi dengan 5 tingkat prioritas cerdas:
- * 1. Prioritaskan VM 'poweredOff'.
- * 2. Prioritaskan VM yang namanya mengandung kata 'unused'.
- * 3. Prioritaskan VM yang kritikalitasnya tidak terdefinisi di konfigurasi skor.
- * 4. Urutkan sisanya berdasarkan skor kritikalitas terendah.
- * 5. Jika semua sama, urutkan berdasarkan ukuran disk terkecil.
+ * [FUNGSI BARU v3.1] Menghitung skor kelayakan migrasi untuk sebuah VM
+ * berdasarkan kombinasi status, nama, kritikalitas, dan ukuran.
+ * Semakin tinggi skor, semakin tinggi prioritas untuk dimigrasi.
+ * @param {object} vm - Objek VM yang berisi { name, state, criticality, provisionedGb }.
+ * @param {object} config - Objek konfigurasi yang aktif.
+ * @returns {number} Skor kelayakan migrasi.
  */
-function sortVmForMigration(a, b) {
-  // Prioritas 1: VM yang mati (poweredOff) didahulukan
-  const isAOff = String(a.state || '').toLowerCase().includes('off');
-  const isBOff = String(b.state || '').toLowerCase().includes('off');
-  if (isAOff && !isBOff) return -1;
-  if (!isAOff && isBOff) return 1;
-
-  // Prioritas 2: VM yang namanya mengandung "unused" didahulukan
-  const aName = String(a.name || '').toLowerCase();
-  const bName = String(b.name || '').toLowerCase();
-  const aIsUnused = aName.includes('unused');
-  const bIsUnused = bName.includes('unused');
-  if (aIsUnused && !bIsUnused) return -1;
-  if (!aIsUnused && bIsUnused) return 1;
-
-  // Mendapatkan sistem skoring dari konfigurasi yang telah dibaca
-  const config = bacaKonfigurasi();
+function calculateMigrationScore(vm, config) {
+  let score = 0;
   const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
 
-  // Ambil skor untuk VM A dan B. Jika kritikalitasnya tidak ada di kamus,
-  // berikan skor sangat rendah (0) agar menjadi prioritas utama.
-  const scoreA = skorKritikalitas[String(a.criticality || '').toUpperCase()] || 0;
-  const scoreB = skorKritikalitas[String(b.criticality || '').toUpperCase()] || 0;
-  
-  // Prioritas 3: VM yang tidak terdefinisi (skor 0) didahulukan.
-  if (scoreB === 0 && scoreA > 0) return -1; 
-  if (scoreA === 0 && scoreB > 0) return 1;
-
-  // Prioritas 4: Jika keduanya sama-sama terdefinisi atau sama-sama tidak,
-  // bandingkan berdasarkan skor numeriknya.
-  // Urutkan agar skor yang LEBIH KECIL (kurang kritis) didahulukan.
-  if (scoreA !== scoreB) {
-    return scoreA - scoreB;
+  // 1. Bobot Status (Paling Penting)
+  const isOff = String(vm.state || '').toLowerCase().includes('off');
+  if (isOff) {
+    score += 1000000; // Bobot sangat besar untuk VM yang mati
   }
 
-  // Prioritas 5: Jika semua sama, urutkan berdasarkan ukuran provisioned terkecil
-  return a.provisionedGb - b.provisionedGb;
+  // 2. Bobot Nama "unused"
+  const isUnused = String(vm.name || '').toLowerCase().includes('unused');
+  if (isUnused) {
+    score += 500000; // Bobot besar untuk VM yang tidak terpakai
+  }
+
+  // 3. Bobot Kritikalitas (Terbalik)
+  const criticalityScore = skorKritikalitas[String(vm.criticality || '').toUpperCase().trim()] || 0;
+  // Bobot tertinggi untuk yang tidak terdefinisi (skor 0), terendah untuk CRITICAL (skor 5)
+  score += (10 - criticalityScore) * 1000;
+
+  // 4. Bobot Ukuran (Terbalik)
+  // Memberi skor lebih tinggi pada VM yang lebih kecil.
+  // Angka 10000 digunakan sebagai basis maksimum agar perhitungannya signifikan.
+  const size = vm.provisionedGb || 0;
+  if (size > 0) {
+    score += (10000 - size);
+  }
+
+  return score;
+}
+
+/**
+ * [MODIFIKASI v3.1] Fungsi pengurutan kini disederhanakan. Ia hanya memanggil
+ * calculateMigrationScore untuk setiap VM dan mengurutkannya dari skor tertinggi ke terendah.
+ */
+function sortVmForMigration(a, b, config) {
+  const scoreA = calculateMigrationScore(a, config);
+  const scoreB = calculateMigrationScore(b, config);
+
+  // Mengurutkan secara menurun (descending), dari skor tertinggi ke terendah.
+  return scoreB - scoreA;
 }
 
 /**
@@ -768,12 +786,39 @@ function findBestDestination(sourceDs, requiredGb, availableDestinations, migrat
     return candidates.length > 0 ? candidates[0] : { error: true, reason: `Tidak ditemukan datastore yang cocok.` };
 }
 
+
 /**
- * [MODIFIKASI v2.4 - LENGKAP & FINAL] Perombakan total logika simulasi migrasi 
- * dengan algoritma "Pengisian Cerdas" dan penyempurnaan detail pada laporan kegagalan.
+ * [FUNGSI BARU v3.1] Menganalisis semua datastore dalam sebuah cluster untuk
+ * menghitung metrik kesehatan dan target ekuilibrium.
+ * @param {Array<object>} datastoresInCluster - Array objek datastore dalam satu cluster.
+ * @returns {object} Objek yang berisi { totalCapacity, totalProvisioned, averageUtilization }.
  */
-function jalankanRekomendasiMigrasi(config) {
-    console.log("Memulai simulasi & diagnosa migrasi datastore...");
+function getClusterEquilibriumStatus(datastoresInCluster) {
+  let totalCapacity = 0;
+  let totalProvisioned = 0;
+
+  datastoresInCluster.forEach(ds => {
+    totalCapacity += ds.capacity;
+    totalProvisioned += ds.provisioned;
+  });
+
+  const averageUtilization = (totalCapacity > 0) ? (totalProvisioned / totalCapacity * 100) : 0;
+
+  return {
+    totalCapacity: totalCapacity,
+    totalProvisioned: totalProvisioned,
+    averageUtilization: averageUtilization
+  };
+}
+
+/**
+ * [MODIFIKASI v3.2 - FINAL & HOLISTIC] Mengimplementasikan "Algoritma Rekomendasi Cerdas Holistik".
+ * Fungsi ini secara terintegrasi mencari paket VM dan datastore tujuan terbaik
+ * untuk menghasilkan satu rencana migrasi yang paling efisien.
+ */
+function jalankanRekomendasiMigrasi() {
+    const config = bacaKonfigurasi();
+    console.log("Memulai analisis penyeimbangan cluster...");
     try {
         // --- Tahap 1: Pengumpulan Data ---
         const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
@@ -790,24 +835,20 @@ function jalankanRekomendasiMigrasi(config) {
 
         const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
         const migrationConfig = getMigrationConfig(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_LOGIKA_MIGRASI]));
-        const originalDatastoreMap = new Map();
-
-        dsData.forEach(row => {
+        const allDatastores = dsData.map(row => {
             const dsName = row[dsNameIndex];
-            const capacity = parseFloat(String(row[dsCapGbIndex]).replace(/,/g, '')) || 0;
-            const provisioned = parseFloat(String(row[dsProvGbIndex]).replace(/,/g, '')) || 0;
-            originalDatastoreMap.set(dsName, {
+            const capacity = parseLocaleNumber(row[dsCapGbIndex]);
+            const provisioned = parseLocaleNumber(row[dsProvGbIndex]);
+            const dsInfo = getDsInfo(dsName, migrationConfig);
+            return {
                 name: dsName, capacity: capacity, provisioned: provisioned, freeSpace: capacity - provisioned,
-                ...getDsInfo(dsName, migrationConfig),
-                environment: getEnvironmentFromDsName(dsName, config[KONSTANTA.KUNCI_KONFIG.MAP_ENV])
-            });
+                utilization: capacity > 0 ? (provisioned / capacity * 100) : 0, cluster: dsInfo.cluster,
+                type: dsInfo.type, environment: getEnvironmentFromDsName(dsName, config[KONSTANTA.KUNCI_KONFIG.MAP_ENV])
+            };
         });
 
-        const overProvisionedDsNames = Array.from(originalDatastoreMap.values())
-            .filter(ds => ds.provisioned > ds.capacity)
-            .map(ds => ds.name);
-
-        if (overProvisionedDsNames.length === 0) {
+        const overProvisionedDsList = allDatastores.filter(ds => ds.provisioned > ds.capacity);
+        if (overProvisionedDsList.length === 0) {
             return "✅ Semua datastore dalam kondisi provisioning yang aman (1:1).";
         }
 
@@ -815,87 +856,94 @@ function jalankanRekomendasiMigrasi(config) {
         if (!vmSheet) throw new Error(`Sheet VM '${config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]}' tidak ditemukan.`);
         const vmHeaders = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
         const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
+        const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
 
-        // --- Tahap 2: Penyusunan Laporan & Simulasi Migrasi ---
         let finalMessage = `⚖️ <b>Analisis & Rekomendasi Migrasi Datastore</b>\n`;
         finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>`;
 
-        overProvisionedDsNames.forEach(dsName => {
+        // --- AWAL PEROMBAKAN LOGIKA ---
+        overProvisionedDsList.forEach(dsInfo => {
             finalMessage += KONSTANTA.UI_STRINGS.SEPARATOR;
-            const dsInfo = originalDatastoreMap.get(dsName);
-            const usagePercent = dsInfo.capacity > 0 ? (dsInfo.provisioned / dsInfo.capacity * 100).toFixed(1) : 0;
             const migrationTarget = dsInfo.provisioned - dsInfo.capacity;
-
-            finalMessage += `❗️ <b>Datastore Teridentifikasi Over-Provisioned:</b> <code>${dsName}</code>\n`;
-            finalMessage += `• <b>Status:</b> Provisioned ${dsInfo.provisioned.toFixed(2)} / ${dsInfo.capacity.toFixed(2)} GB (<b>${usagePercent}%</b>)\n`;
+            finalMessage += `❗️ <b>Datastore Teridentifikasi Over-Provisioned:</b> <code>${dsInfo.name}</code>\n`;
+            finalMessage += `• <b>Status:</b> Provisioned ${dsInfo.provisioned.toFixed(2)} / ${dsInfo.capacity.toFixed(2)} GB (<b>${dsInfo.utilization.toFixed(1)}%</b>)\n`;
             
-            const diagnosis = diagnoseOverprovisioningCause(dsName, config);
+            const diagnosis = diagnoseOverprovisioningCause(dsInfo.name, config);
             if (diagnosis) {
                 finalMessage += `• <b>Indikasi Penyebab:</b> ${diagnosis}\n`;
             }
-
             finalMessage += `• <b>Target Migrasi:</b> ${migrationTarget.toFixed(2)} GB\n`;
 
-            const vmCandidates = allVmData
-                .filter(row => row[vmHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER])] === dsName)
+            let datastoresInCluster = JSON.parse(JSON.stringify(allDatastores.filter(ds => ds.cluster === dsInfo.cluster)));
+
+            let candidatePool = allVmData
+                .filter(row => row[vmHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER])] === dsInfo.name)
                 .map(row => ({
                     name: row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.VM_NAME)],
-                    provisionedGb: parseFloat(row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.PROV_GB)]) || 0,
+                    provisionedGb: parseLocaleNumber(row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.PROV_GB)]),
                     state: row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.STATE)],
-                    criticality: row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS)]
-                }))
-                .sort(sortVmForMigration);
-            
-            // --- AWAL PEROMBAKAN LOGIKA SIMULASI ---
-            const simulatedDatastoreMap = new Map(JSON.parse(JSON.stringify(Array.from(originalDatastoreMap))));
+                    criticality: row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS)],
+                }));
+
             const migrationPlan = new Map();
             let totalMigrated = 0;
-            let candidatePool = [...vmCandidates]; // Membuat kolam kandidat yang bisa dimodifikasi
+            const MAX_MIGRATION_LOOPS = 50;
+            let loopCount = 0;
+            
+            while (totalMigrated < migrationTarget && candidatePool.length > 0 && loopCount < MAX_MIGRATION_LOOPS) {
+                loopCount++;
+                let bestMove = {
+                    vmIndex: -1,
+                    destDsName: null,
+                    efficiencyScore: -Infinity
+                };
 
-            while (totalMigrated < migrationTarget && candidatePool.length > 0) {
-                let foundVmToMigrateThisRound = false;
-                let bestVmIndex = -1;
-
-                // Cari kandidat pertama yang paling pas di dalam kolam
                 for (let i = 0; i < candidatePool.length; i++) {
                     const vm = candidatePool[i];
-                    const availableDests = Array.from(simulatedDatastoreMap.values());
-                    const bestDest = findBestDestination(dsInfo, vm.provisionedGb, availableDests, migrationConfig, config);
+                    const sourceDs = datastoresInCluster.find(ds => ds.name === dsInfo.name);
+                    const recipients = datastoresInCluster.filter(ds => ds.name !== sourceDs.name && vm.provisionedGb <= ds.freeSpace);
 
-                    if (bestDest && !bestDest.error) {
-                        // Jika ditemukan, catat indeksnya dan hentikan pencarian di putaran ini
-                        bestVmIndex = i;
-                        foundVmToMigrateThisRound = true;
-                        break;
+                    if (recipients.length === 0) continue;
+                    
+                    for (const destDs of recipients) {
+                        const isValidMove = findBestDestination(sourceDs, vm.provisionedGb, [destDs], migrationConfig, config);
+                        if (!isValidMove || isValidMove.error) continue;
+
+                        let benefitScore = 1;
+                        if (String(vm.state || '').toLowerCase().includes('off')) benefitScore += 10000;
+                        if (String(vm.name || '').toLowerCase().includes('unused')) benefitScore += 5000;
+                        const critScore = skorKritikalitas[String(vm.criticality || '').toUpperCase().trim()] || 0;
+                        benefitScore += (10 - critScore) * 100;
+
+                        const sizeDifference = Math.abs(vm.provisionedGb - (migrationTarget - totalMigrated));
+                        const cost = 1 + sizeDifference;
+                        
+                        const efficiencyScore = benefitScore / cost;
+                        
+                        if (efficiencyScore > bestMove.efficiencyScore) {
+                            bestMove = { vmIndex: i, destDsName: destDs.name, efficiencyScore: efficiencyScore };
+                        }
                     }
                 }
 
-                if (foundVmToMigrateThisRound) {
-                    // Proses VM yang ditemukan
-                    const vmToMove = candidatePool[bestVmIndex];
-                    const availableDests = Array.from(simulatedDatastoreMap.values());
-                    const bestDest = findBestDestination(dsInfo, vmToMove.provisionedGb, availableDests, migrationConfig, config);
-                    
-                    if (!migrationPlan.has(bestDest.name)) {
-                        migrationPlan.set(bestDest.name, []);
+                if (bestMove.vmIndex !== -1) {
+                    const vmToMove = candidatePool[bestMove.vmIndex];
+                    if (!migrationPlan.has(bestMove.destDsName)) {
+                        migrationPlan.set(bestMove.destDsName, []);
                     }
-                    migrationPlan.get(bestDest.name).push(vmToMove);
-                    totalMigrated += vmToMove.provisionedGb;
+                    migrationPlan.get(bestMove.destDsName).push(vmToMove);
 
-                    // Update peta virtual
-                    const destInSimMap = simulatedDatastoreMap.get(bestDest.name);
-                    destInSimMap.freeSpace -= vmToMove.provisionedGb;
+                    totalMigrated += vmToMove.provisionedGb;
                     
-                    // Hapus VM dari kolam kandidat
-                    candidatePool.splice(bestVmIndex, 1);
+                    const destDs = datastoresInCluster.find(ds => ds.name === bestMove.destDsName);
+                    destDs.freeSpace -= vmToMove.provisionedGb;
+                    
+                    candidatePool.splice(bestMove.vmIndex, 1);
                 } else {
-                    // Jika setelah memeriksa seluruh kolam tidak ada yang bisa dipindah, hentikan loop
                     break;
                 }
             }
-            // --- AKHIR PEROMBAKAN LOGIKA SIMULASI ---
 
-            // --- TAHAP 4: Format Tampilan Laporan ---
             finalMessage += `\n✅ <b>Rencana Tindak Lanjut:</b>\n`;
             if (migrationPlan.size > 0) {
                 migrationPlan.forEach((vms, destDsName) => {
@@ -906,32 +954,14 @@ function jalankanRekomendasiMigrasi(config) {
                     });
                 });
             } else {
-                finalMessage += "<i>Tidak ada rencana migrasi yang dapat dibuat dengan kondisi saat ini.</i>\n";
-            }
-
-            // VM yang gagal adalah yang masih tersisa di dalam candidatePool
-            const failedMigrations = candidatePool;
-            if (failedMigrations.length > 0) {
-                finalMessage += `\n⭕️  <b>Memerlukan Perhatian Khusus:</b>\n`;
-                finalMessage += `Rekomendasi migrasi tidak dapat diterapkan untuk VM berikut karena keterbatasan kapasitas pada cluster <b>${escapeHtml(dsInfo.cluster)}</b>.\n\n`;
-                
-                failedMigrations.forEach(vm => {
-                    finalMessage += `- <code>${escapeHtml(vm.name)}</code> (${vm.provisionedGb.toFixed(2)} GB) | ${escapeHtml(vm.state)} | ${escapeHtml(vm.criticality)} \n`;
-                    const lastAttemptReason = "Tidak ada datastore tujuan yang tersedia dengan kapasitas yang cukup atau memenuhi syarat migrasi.";
-                    finalMessage += `  └ <i>Penyebab: ${lastAttemptReason}</i>\n`;
-                });
-
-                finalMessage += `\n<b>Rekomendasi Strategis:</b>\n`;
-                finalMessage += `•  <b>Opsi 1:</b> Alokasikan datastore baru untuk menambah kapasitas lokal.\n`;
-                finalMessage += `•  <b>Opsi 2:</b> Lakukan migrasi VM ini ke cluster lain yang memiliki sumber daya memadai.\n`;
+                finalMessage += "<i>Tidak ditemukan rencana migrasi yang efisien.</i>\n";
             }
         });
-
+        
         return finalMessage;
-  
     } catch (e) {
-      console.error(`Gagal menjalankan rekomendasi migrasi: ${e.message}\nStack: ${e.stack}`);
-      throw new Error(`Gagal Menjalankan Analisis Migrasi Datastore. Penyebab: ${e.message}`);
+      console.error(`Gagal menjalankan analisis migrasi: ${e.message}\nStack: ${e.stack}`);
+      throw new Error(`Gagal Menjalankan Analisis Migrasi. Penyebab: ${e.message}`);
     }
 }
 
@@ -1264,39 +1294,21 @@ function cekDanArsipkanLogJikaPenuh(config = null) { // [DIUBAH] Tambahkan param
 }
 
 /**
- * [FUNGSI OPTIMALISASI BARU - VERSI FINAL DIPERBARUI]
- * Fungsi generik untuk mendeteksi perubahan antara data lama (arsip) dan data baru (sheet),
- * kemudian mencatat perbedaan ke dalam Log Perubahan.
- * Fungsi ini sekarang menggunakan Primary Key yang sudah dinormalisasi untuk perbandingan.
- *
- * @param {object} config - Objek konfigurasi utama.
- * @param {string} sheetName - Nama sheet sumber data baru.
- * @param {string} archiveFileName - Nama file arsip .json di Google Drive.
- * @param {string} primaryKeyHeader - Nama kolom yang menjadi kunci unik (e.g., 'Primary Key').
- * @param {Array<object>} columnsToTrack - Array objek kolom yg dipantau, format: [{nama: 'HeaderName', index: 0}].
- * @param {string} entityName - Nama entitas untuk pesan log (e.g., 'VM' atau 'Datastore').
- * @returns {Array<Array<any>>} Array berisi entri log yang baru ditambahkan.
+ * [MODIFIKASI v4.0] Menambahkan logika toleransi saat memeriksa perubahan
+ * pada kolom 'Provisioned Space (GB)'.
  */
 function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, entityName) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = spreadsheet.getSheetByName(sheetName);
-  if (!sheet) {
-    throw new Error(`Sheet "${sheetName}" tidak ditemukan.`);
-  }
-
+  if (!sheet) throw new Error(`Sheet "${sheetName}" tidak ditemukan.`);
+  
   const sheetLog = spreadsheet.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
-  if (!sheetLog) {
-    throw new Error(`Sheet Log Perubahan tidak ditemukan.`);
-  }
+  if (!sheetLog) throw new Error(`Sheet Log Perubahan tidak ditemukan.`);
 
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const pkIndex = headers.indexOf(primaryKeyHeader);
-  if (pkIndex === -1) {
-    throw new Error(`Kolom Primary Key "${primaryKeyHeader}" tidak ditemukan di sheet "${sheetName}".`);
-  }
+  if (pkIndex === -1) throw new Error(`Kolom Primary Key "${primaryKeyHeader}" tidak ditemukan di sheet "${sheetName}".`);
 
-  // ===== [LANGKAH 1: PERUBAHAN] =====
-  // Baca Arsip Lama dan langsung normalisasi kuncinya untuk perbandingan.
   const folderArsip = DriveApp.getFolderById(config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP]);
   const files = folderArsip.getFilesByName(archiveFileName);
   let mapDataKemarin = new Map();
@@ -1305,7 +1317,6 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
     fileArsip = files.next();
     try {
       const archivedData = JSON.parse(fileArsip.getBlob().getDataAsString());
-      // Normalisasi kunci dari data arsip lama untuk kompatibilitas mundur.
       const normalizedArchivedData = archivedData.map(([pk, data]) => [normalizePrimaryKey(pk), data]);
       mapDataKemarin = new Map(normalizedArchivedData);
     } catch (e) {
@@ -1313,8 +1324,6 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
     }
   }
 
-  // ===== [LANGKAH 2: PERUBAHAN] =====
-  // Baca Data Baru dan buat Map dengan kunci yang sudah dinormalisasi.
   const dataHariIni = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
   const mapDataHariIni = new Map();
   
@@ -1333,72 +1342,79 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
   dataHariIni.forEach(row => {
     const pk = row[pkIndex];
     if (pk) {
-      // Gunakan PK yang sudah dinormalisasi sebagai kunci Map.
       const pkNormalized = normalizePrimaryKey(pk);
       const rowData = buatObjekData(row);
-      // Penting: Simpan juga PK asli di dalam data untuk keperluan logging.
       rowData[primaryKeyHeader] = pk; 
       mapDataHariIni.set(pkNormalized, { data: rowData, hash: computeVmHash(rowData) });
     }
   });
 
-  // ===== [LANGKAH 3: PERUBAHAN] =====
-  // Bandingkan Data dan Siapkan Log menggunakan kunci yang sudah bersih.
   let logEntriesToAdd = [];
   const timestamp = new Date();
   const nameHeaderForLog = entityName === 'VM' ? KONSTANTA.HEADER_VM.VM_NAME : primaryKeyHeader;
+  
+  // Ambil nilai toleransi dari konfigurasi
+  const tolerance = parseFloat(config[KONSTANTA.KUNCI_KONFIG.LOG_TOLERANCE_PROV_GB]) || 0;
+  const provisionedGbHeader = KONSTANTA.HEADER_VM.PROV_GB;
 
-  for (const [id, dataBaru] of mapDataHariIni.entries()) { // `id` di sini sudah dinormalisasi
-    const dataLama = mapDataKemarin.get(id); // Cari di data lama menggunakan `id` yang sudah dinormalisasi
+  for (const [id, dataBaru] of mapDataHariIni.entries()) {
+    const dataLama = mapDataKemarin.get(id);
     const entityDisplayName = dataBaru.data[nameHeaderForLog] || id;
-    const pkRawForLog = dataBaru.data[primaryKeyHeader]; // Ambil PK asli dari objek data untuk ditulis ke log
+    const pkRawForLog = dataBaru.data[primaryKeyHeader];
 
     if (!dataLama) {
-      // PENAMBAHAN
       const detail = `${entityName} baru dibuat/ditemukan.`;
-      // Gunakan PK asli (pkRawForLog) saat mencatat ke log.
-      const logEntry = [timestamp, 'PENAMBAHAN', pkRawForLog, entityDisplayName, sheetName, '', '', detail];
+      const logEntry = [timestamp, 'PENAMBAHAN', pkRawForLog, entityDisplayName, sheetName, '', '', detail, entityName];
       logEntriesToAdd.push(logEntry);
     } else if (dataBaru.hash !== dataLama.hash) {
-      // MODIFIKASI
       if (dataLama && dataLama.data) {
         for (const key in dataBaru.data) {
-          // Jangan catat perubahan pada kolom PK itu sendiri sebagai modifikasi.
           if(key === primaryKeyHeader) continue; 
           
           const oldValue = dataLama.data[key] || '';
           const newValue = dataBaru.data[key] || '';
+          let hasChanged = false;
 
-          if (String(newValue) !== String(oldValue)) {
+          // --- AWAL MODIFIKASI: Logika Toleransi ---
+          if (key === provisionedGbHeader && entityName === KONSTANTA.NAMA_ENTITAS.VM) {
+            const oldNum = parseLocaleNumber(oldValue);
+            const newNum = parseLocaleNumber(newValue);
+            // Hanya anggap berubah jika selisihnya lebih besar dari toleransi
+            if (Math.abs(newNum - oldNum) > tolerance) {
+              hasChanged = true;
+            }
+          } else {
+            // Gunakan perbandingan string biasa untuk kolom lain
+            if (String(newValue) !== String(oldValue)) {
+              hasChanged = true;
+            }
+          }
+          // --- AKHIR MODIFIKASI ---
+
+          if (hasChanged) {
             const detail = `Kolom '${key}' diubah`;
-            // Gunakan PK asli (pkRawForLog) saat mencatat ke log.
-            const logEntry = [timestamp, 'MODIFIKASI', pkRawForLog, entityDisplayName, sheetName, oldValue, newValue, detail];
+            const logEntry = [timestamp, 'MODIFIKASI', pkRawForLog, entityDisplayName, sheetName, oldValue, newValue, detail, entityName];
             logEntriesToAdd.push(logEntry);
           }
         }
       }
     }
-    mapDataKemarin.delete(id); // Hapus dari map lama agar sisanya adalah data yang dihapus.
+    mapDataKemarin.delete(id);
   }
 
-  for (const [id, dataLama] of mapDataKemarin.entries()) { // `id` di sini sudah dinormalisasi
-    // PENGHAPUSAN
+  for (const [id, dataLama] of mapDataKemarin.entries()) {
     const entityDisplayName = (dataLama.data && dataLama.data[nameHeaderForLog]) || id;
-    // Ambil PK asli dari data lama untuk dicatat di log.
     const pkRawForLog = (dataLama.data && dataLama.data[primaryKeyHeader]) || id;
     const detail = `${entityName} telah dihapus.`;
-    const logEntry = [timestamp, 'PENGHAPUSAN', pkRawForLog, entityDisplayName, sheetName, '', '', detail];
+    const logEntry = [timestamp, 'PENGHAPUSAN', pkRawForLog, entityDisplayName, sheetName, '', '', detail, entityName];
     logEntriesToAdd.push(logEntry);
   }
 
-  // 4. Catat Perubahan ke Log (Tidak ada perubahan di sini)
   if (logEntriesToAdd.length > 0) {
-    sheetLog.getRange(sheetLog.getLastRow() + 1, 1, logEntriesToAdd.length, 8).setValues(logEntriesToAdd);
+    sheetLog.getRange(sheetLog.getLastRow() + 1, 1, logEntriesToAdd.length, 9).setValues(logEntriesToAdd);
     console.log(`${logEntriesToAdd.length} log perubahan untuk ${entityName} telah ditambahkan.`);
   }
 
-  // ===== [LANGKAH 5: PERUBAHAN] =====
-  // Simpan Arsip Baru dengan kunci yang sudah dinormalisasi.
   const dataUntukArsip = JSON.stringify(Array.from(mapDataHariIni.entries()));
   if (fileArsip) {
     fileArsip.setContent(dataUntukArsip);
@@ -1411,18 +1427,26 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
 }
 
 /**
- * [FUNGSI KECERDASAN BARU] Menganalisis log perubahan untuk mendiagnosa kemungkinan
- * penyebab sebuah datastore menjadi over-provisioned.
- * @param {string} dsName - Nama datastore yang akan dianalisis.
- * @param {object} config - Objek konfigurasi bot.
- * @returns {string|null} String pesan diagnosa atau null jika tidak ada aktivitas signifikan.
+ * [MODIFIKASI v3.1] Menambahkan filter untuk memastikan hanya log tipe 'VM'
+ * yang dianalisis sebagai penyebab over-provisioning.
  */
 function diagnoseOverprovisioningCause(dsName, config) {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const { headers, data: recentLogs } = getCombinedLogs(thirtyDaysAgo, config);
+    const { headers, data: allRecentLogs } = getCombinedLogs(thirtyDaysAgo, config);
+    if(allRecentLogs.length === 0) return null;
+    
+    // --- AWAL MODIFIKASI: Filter log berdasarkan Tipe Log ---
+    const typeLogIndex = headers.indexOf(KONSTANTA.HEADER_LOG.TIPE_LOG);
+    if (typeLogIndex === -1) {
+        console.warn("Kolom 'Tipe Log' tidak ditemukan, analisis penyebab mungkin tidak akurat.");
+        return null;
+    }
+    
+    const recentLogs = allRecentLogs.filter(log => log[typeLogIndex] === 'VM');
     if(recentLogs.length === 0) return null;
+    // --- AKHIR MODIFIKASI ---
 
     const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
     const actionIndex = headers.indexOf(KONSTANTA.HEADER_LOG.ACTION);
@@ -1438,7 +1462,6 @@ function diagnoseOverprovisioningCause(dsName, config) {
     const vmPkIndex = vmHeaders.indexOf(KONSTANTA.HEADER_VM.PK);
     const vmDsIndex = vmHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER]);
 
-    // Buat peta PK VM yang berada di datastore ini untuk pengecekan cepat
     const vmsOnThisDs = new Set(vmData.filter(row => row[vmDsIndex] === dsName).map(row => row[vmPkIndex]));
 
     recentLogs.forEach(log => {
