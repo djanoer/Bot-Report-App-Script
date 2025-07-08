@@ -305,3 +305,33 @@ function parseLocaleNumber(numberString) {
   // 3. Lakukan parseFloat pada string yang sudah bersih.
   return parseFloat(cleaned) || 0;
 }
+
+/**
+ * [FUNGSI BARU v3.3.0] Menyimpan status sementara untuk seorang pengguna.
+ * Digunakan untuk interaksi multi-langkah, seperti menunggu input catatan.
+ * @param {string} userId - ID unik dari pengguna Telegram.
+ * @param {object} stateObject - Objek yang berisi status, contoh: { action: 'AWAITING_NOTE_INPUT', pk: 'VM-XYZ' }
+ */
+function setUserState(userId, stateObject) {
+  const cache = CacheService.getScriptCache();
+  // Simpan status untuk pengguna ini selama 10 menit.
+  cache.put(`user_state_${userId}`, JSON.stringify(stateObject), 600); 
+}
+
+/**
+ * [FUNGSI BARU v3.3.0] Mengambil dan menghapus status sementara seorang pengguna.
+ * @param {string} userId - ID unik dari pengguna Telegram.
+ * @returns {object|null} Objek status jika ada, atau null jika tidak.
+ */
+function getUserState(userId) {
+  const cache = CacheService.getScriptCache();
+  const stateKey = `user_state_${userId}`;
+  const stateJSON = cache.get(stateKey);
+
+  if (stateJSON) {
+    // Setelah status diambil, langsung hapus agar tidak digunakan lagi.
+    cache.remove(stateKey); 
+    return JSON.parse(stateJSON);
+  }
+  return null;
+}

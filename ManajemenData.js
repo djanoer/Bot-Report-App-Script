@@ -201,14 +201,149 @@ function searchVmOnSheet(searchTerm, config) {
 }
 
 /**
- * [MODIFIKASI FITUR 2] Memformat satu baris data VM dan menambahkan keyboard kontekstual.
- * Fungsi ini sekarang bisa menerima 'origin' untuk membuat tombol kembali yang cerdas.
- *
- * @param {Array} row - Array yang berisi data untuk satu baris VM.
- * @param {Array<string>} headers - Array header dari sheet VM.
- * @param {object} config - Objek konfigurasi bot yang aktif.
- * @param {object|null} origin - Objek berisi info asal { searchTerm: '...', page: '...' }
- * @returns {object} Objek berisi { pesan: string, keyboard: object }.
+ * [FUNGSI BARU v3.3.0 - SETELAH PERBAIKAN] Mengambil satu catatan spesifik untuk sebuah VM.
+ * @param {string} vmPrimaryKey - Primary Key dari VM yang catatannya akan dicari.
+ * @param {object} config - Objek konfigurasi bot (meskipun tidak digunakan langsung di sini,
+ * baik untuk konsistensi antarmuka).
+ * @returns {object|null} Objek berisi detail catatan jika ditemukan, atau null jika tidak ada.
+ */
+function getVmNote(vmPrimaryKey, config) {
+  // --- [PERBAIKAN UTAMA DI SINI] ---
+  // Kita langsung menggunakan nama sheet dari konstanta, bukan dari objek config.
+  const sheetName = KONSTANTA.NAMA_SHEET.CATATAN_VM;
+  
+  if (!sheetName) {
+    console.warn("Fitur catatan dilewati: Konstanta untuk nama sheet catatan tidak ditemukan.");
+    return null;
+  }
+  // --- [AKHIR PERBAIKAN UTAMA] ---
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    console.warn(`Fitur catatan dilewati: Sheet "${sheetName}" tidak ditemukan.`);
+    return null;
+  }
+
+  if (sheet.getLastRow() <= 1) {
+    return null; // Sheet ada tapi kosong
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data.shift();
+
+  const pkIndex = headers.indexOf('VM Primary Key');
+  if (pkIndex === -1) {
+    console.error("Struktur sheet Catatan VM tidak valid: Header 'VM Primary Key' tidak ditemukan.");
+    return null;
+  }
+
+  const noteRow = data.find(row => row[pkIndex] === vmPrimaryKey);
+
+  if (noteRow) {
+    const noteData = {};
+    headers.forEach((header, index) => {
+      noteData[header] = noteRow[index];
+    });
+    return noteData;
+  }
+
+  return null;
+}
+
+/**
+ * [FUNGSI BARU v3.3.0] Menyimpan (Create) atau memperbarui (Update) catatan untuk sebuah VM.
+ * @param {string} vmPrimaryKey - Primary Key dari VM.
+ * @param {string} noteText - Teks catatan yang baru.
+ * @param {object} userData - Objek data pengguna yang sedang berinteraksi.
+ * @returns {boolean} True jika berhasil, false jika gagal.
+ */
+function saveOrUpdateVmNote(vmPrimaryKey, noteText, userData) {
+  const sheetName = KONSTANTA.NAMA_SHEET.CATATAN_VM;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    console.error(`Sheet "${sheetName}" tidak ditemukan saat akan menyimpan catatan.`);
+    return false;
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const pkIndex = headers.indexOf('VM Primary Key');
+
+  // Cari baris yang ada untuk di-update
+  let rowIndexToUpdate = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][pkIndex] === vmPrimaryKey) {
+      rowIndexToUpdate = i + 1; // getRange menggunakan indeks berbasis 1
+      break;
+    }
+  }
+
+  const timestamp = new Date();
+  const userName = userData.firstName || 'Pengguna';
+
+  try {
+    if (rowIndexToUpdate > -1) {
+      // --- UPDATE ---
+      // Urutan kolom: Isi Catatan, Timestamp Update, Nama User Update
+      sheet.getRange(rowIndexToUpdate, pkIndex + 2, 1, 3).setValues([[noteText, timestamp, userName]]);
+      console.log(`Catatan untuk VM ${vmPrimaryKey} berhasil diperbarui oleh ${userName}.`);
+    } else {
+      // --- CREATE ---
+      // Urutan kolom: VM Primary Key, Isi Catatan, Timestamp Update, Nama User Update
+      sheet.appendRow([vmPrimaryKey, noteText, timestamp, userName]);
+      console.log(`Catatan baru untuk VM ${vmPrimaryKey} berhasil dibuat oleh ${userName}.`);
+    }
+    return true;
+  } catch (e) {
+    console.error(`Gagal menyimpan catatan untuk VM ${vmPrimaryKey}. Error: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * [FUNGSI BARU v3.3.0] Menghapus (hard delete) catatan untuk sebuah VM.
+ * @param {string} vmPrimaryKey - Primary Key dari VM yang catatannya akan dihapus.
+ * @returns {boolean} True jika berhasil, false jika gagal.
+ */
+function deleteVmNote(vmPrimaryKey) {
+  const sheetName = KONSTANTA.NAMA_SHEET.CATATAN_VM;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet || sheet.getLastRow() <= 1) {
+    console.warn(`Proses hapus dibatalkan: Sheet "${sheetName}" tidak ada atau kosong.`);
+    return false;
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const pkIndex = headers.indexOf('VM Primary Key');
+
+  // Cari nomor baris yang akan dihapus
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][pkIndex] === vmPrimaryKey) {
+      const rowIndexToDelete = i + 1; // getRange menggunakan indeks berbasis 1
+      try {
+        sheet.deleteRow(rowIndexToDelete);
+        console.log(`Catatan untuk VM ${vmPrimaryKey} berhasil dihapus.`);
+        return true;
+      } catch (e) {
+        console.error(`Gagal menghapus baris ${rowIndexToDelete} untuk VM ${vmPrimaryKey}. Error: ${e.message}`);
+        return false;
+      }
+    }
+  }
+
+  console.warn(`Proses hapus gagal: Catatan untuk VM ${vmPrimaryKey} tidak ditemukan.`);
+  return false; // Catatan tidak ditemukan
+}
+
+/**
+ * [MODIFIKASI v3.3.0] Memformat satu baris data VM dan menambahkan bagian catatan serta keyboard kontekstual.
  */
 function formatVmDetail(row, headers, config) {
   const indices = {
@@ -269,7 +404,33 @@ function formatVmDetail(row, headers, config) {
   pesan += addDetail(row[indices.guestOs], '🐧', 'Guest OS');
   pesan += addDetail(row[indices.vcenter], '🏢', 'vCenter');
 
+  // --- [AWAL PERUBAHAN UTAMA v3.3.0] ---
+  const vmNote = getVmNote(normalizedPk, config);
+  pesan += `\n--------------------------------------------------\n`;
+  pesan += `📝  <b>Catatan untuk VM ini:</b>\n`;
+  if (vmNote) {
+    const noteText = vmNote['Isi Catatan'] || '<i>(Catatan kosong)</i>';
+    const updatedBy = vmNote['Nama User Update'] || 'tidak diketahui';
+    const updatedAt = vmNote['Timestamp Update'] ? new Date(vmNote['Timestamp Update']).toLocaleString('id-ID') : 'tidak diketahui';
+    pesan += `<i>${escapeHtml(noteText)}</i>\n`;
+    pesan += `_Terakhir diperbarui oleh: ${escapeHtml(updatedBy)} pada ${updatedAt}_\n`;
+  } else {
+    pesan += `_Tidak ada catatan untuk VM ini._\n`;
+  }
+  pesan += `--------------------------------------------------\n`;
+
   const keyboardRows = [];
+  const noteButtons = [];
+  
+  // Tombol Cerdas: 'Edit' jika ada catatan, 'Tambah' jika tidak ada
+  noteButtons.push({ text: `✏️ ${vmNote ? 'Edit' : 'Tambah'} Catatan`, callback_data: `${KONSTANTA.CALLBACK_CATATAN.EDIT_ADD}${normalizedPk}` });
+
+  // Hanya tampilkan tombol Hapus jika ada catatan
+  if (vmNote) {
+    noteButtons.push({ text: '🗑️ Hapus Catatan', callback_data: `${KONSTANTA.CALLBACK_CATATAN.DELETE}${normalizedPk}` });
+  }
+  keyboardRows.push(noteButtons);
+  // --- [AKHIR PERUBAHAN UTAMA v3.3.0] ---
 
   if (normalizedPk) {
     keyboardRows.push([{ text: `📜 Lihat Riwayat VM (${normalizedPk})`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX}${normalizedPk}` }]);
@@ -1009,8 +1170,9 @@ function processUptimeExport(exportType, config) {
 }
 
 /**
- * [FUNGSI HELPER BARU]
- * Mengumpulkan entri log dari sheet aktif DAN semua file arsip JSON berdasarkan rentang tanggal.
+ * [FUNGSI HELPER BARU - DIOPTIMALKAN DENGAN INDEKS]
+ * Mengumpulkan entri log dari sheet aktif DAN arsip JSON yang relevan (berdasarkan file indeks)
+ * sesuai rentang tanggal.
  * @param {Date} startDate - Tanggal mulai untuk filter log.
  * @param {object} config - Objek konfigurasi bot.
  * @returns {{headers: Array<string>, data: Array<Array<any>>}} Objek berisi header dan data log gabungan.
@@ -1026,43 +1188,57 @@ function getCombinedLogs(startDate, config) {
     const allLogData = sheetLog.getDataRange().getValues();
     logHeaders = allLogData.shift(); // Ambil header
     
+    const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+    if (timestampIndex === -1) {
+        throw new Error("Gagal memproses log: Kolom 'Timestamp' tidak ditemukan di header sheet 'Log Perubahan'.");
+    }
+
     const activeLogs = allLogData.filter(row => {
-      // Pastikan baris memiliki data dan kolom timestamp valid
-      return row.length > 0 && row[0] && new Date(row[0]) >= startDate;
+      return row.length > 0 && row[timestampIndex] && new Date(row[timestampIndex]) >= startDate;
     });
     combinedLogEntries.push(...activeLogs);
   } else if (sheetLog) {
-    // Jika sheet ada tapi kosong, tetap ambil headernya
     logHeaders = sheetLog.getRange(1, 1, 1, sheetLog.getLastColumn()).getValues()[0];
   }
 
-  // --- 2. Ambil Log dari Arsip JSON ---
+  // --- 2. Ambil Log dari Arsip JSON (Menggunakan Indeks) ---
   const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP_LOG];
   if (FOLDER_ARSIP_ID && logHeaders.length > 0) {
     try {
       const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
-      const arsipFiles = folderArsip.getFilesByType(MimeType.PLAIN_TEXT); // Lebih spesifik
+      const indexFiles = folderArsip.getFilesByName('archive_log_index.json');
 
-      while (arsipFiles.hasNext()) {
-        const file = arsipFiles.next();
-        if (file.getName().startsWith('Arsip Log -') && file.getName().endsWith('.json')) {
-          console.log(`Membaca file arsip untuk ekspor: ${file.getName()}`);
-          const jsonContent = file.getBlob().getDataAsString();
-          const archivedLogs = JSON.parse(jsonContent);
+      if (indexFiles.hasNext()) {
+        const indexFile = indexFiles.next();
+        const indexData = JSON.parse(indexFile.getBlob().getDataAsString());
+        
+        // Loop melalui INDEKS, bukan file
+        for (const indexEntry of indexData) {
+          const archiveEndDate = new Date(indexEntry.endDate);
+          
+          // Jika tanggal akhir arsip lebih baru dari tanggal mulai yang kita cari,
+          // maka arsip ini mungkin berisi data yang relevan.
+          if (archiveEndDate >= startDate) {
+            console.log(`Indeks menunjukkan arsip "${indexEntry.fileName}" relevan. Membaca file...`);
+            const archiveFiles = folderArsip.getFilesByName(indexEntry.fileName);
+            if (archiveFiles.hasNext()) {
+              const file = archiveFiles.next();
+              const jsonContent = file.getBlob().getDataAsString();
+              const archivedLogs = JSON.parse(jsonContent);
 
-          // Filter log dari arsip berdasarkan tanggal
-          const relevantLogs = archivedLogs.filter(logObject => 
-            logObject[KONSTANTA.HEADER_LOG.TIMESTAMP] && new Date(logObject[KONSTANTA.HEADER_LOG.TIMESTAMP]) >= startDate
-          );
+              const timestampHeader = KONSTANTA.HEADER_LOG.TIMESTAMP;
+              const relevantLogs = archivedLogs.filter(logObject => 
+                logObject[timestampHeader] && new Date(logObject[timestampHeader]) >= startDate
+              );
 
-          // Ubah kembali dari objek ke array agar formatnya sama
-          const relevantLogsAsArray = relevantLogs.map(logObject => logHeaders.map(header => logObject[header] || ''));
-          combinedLogEntries.push(...relevantLogsAsArray);
+              const relevantLogsAsArray = relevantLogs.map(logObject => logHeaders.map(header => logObject[header] || ''));
+              combinedLogEntries.push(...relevantLogsAsArray);
+            }
+          }
         }
       }
     } catch(e) {
-      console.error(`Gagal membaca file arsip log: ${e.message}`);
-      // Proses tetap lanjut dengan data yang sudah ada
+      console.error(`Gagal membaca file arsip log menggunakan indeks: ${e.message}`);
     }
   }
 
@@ -1078,19 +1254,37 @@ function getCombinedLogs(startDate, config) {
 }
 
 /**
- * [FUNGSI PUSAT] Mengendalikan semua permintaan ekspor dari menu interaktif.
- * Versi ini telah diperbarui untuk mengambil data dari log aktif dan arsip.
+ * [FUNGSI PUSAT - ALUR INTERAKTIF FINAL] Mengendalikan semua permintaan ekspor dari menu interaktif.
+ * Fungsi ini mengirim pesan status sementara, menjalankan ekspor, lalu mengedit pesan status menjadi pesan sukses.
+ * @param {object} update - Objek update lengkap dari Telegram, khususnya callback_query.
+ * @param {object} config - Objek konfigurasi bot.
+ * @param {object} userData - Objek data pengguna yang terautentikasi.
  */
-function handleExportRequest(exportType, config, userData) {
-  try {
-    kirimPesanTelegram(`⚙️ Permintaan ekspor diterima. Mengumpulkan data dari log aktif dan arsip...`, config, 'HTML');
+function handleExportRequest(update, config, userData) {
+  const callbackQuery = update.callback_query;
+  const chatId = callbackQuery.message.chat.id;
+  const exportType = callbackQuery.data;
 
+  let statusMessageId = null;
+
+  // Langkah 1: Kirim pesan status awal dan simpan ID-nya
+  try {
+    const titleForStatus = exportType.replace(/export_|run_export_/, '').replace(/_/g, ' ').toUpperCase();
+    const sentMessage = kirimPesanTelegram(`⏳ Memulai proses ekspor untuk <b>${titleForStatus}</b>... Harap tunggu.`, config, 'HTML', null, chatId);
+    if (sentMessage && sentMessage.ok) {
+        statusMessageId = sentMessage.result.message_id;
+    }
+  } catch (e) {
+    console.warn(`Gagal mengirim pesan status awal untuk ekspor: ${e.message}`);
+    // Proses tetap lanjut meskipun pesan status awal gagal dikirim
+  }
+
+  try {
     let headers, data, title, highlightColumn = null;
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    // Menggunakan switch-case untuk mencocokkan nilai callback yang pasti
+    // Langkah 2: Kumpulkan data (logika switch-case tidak berubah)
     switch (exportType) {
-      // --- Kasus untuk Log ---
       case KONSTANTA.CALLBACK.EXPORT_LOG_TODAY:
       case KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS:
       case KONSTANTA.CALLBACK.EXPORT_LOG_30_DAYS: {
@@ -1103,12 +1297,11 @@ function handleExportRequest(exportType, config, userData) {
         } else if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS) {
             startDate.setDate(now.getDate() - 7);
             title = "Log Perubahan 7 Hari Terakhir (Termasuk Arsip)";
-        } else { // 30 hari
+        } else {
             startDate.setDate(now.getDate() - 30);
             title = "Log Perubahan 30 Hari Terakhir (Termasuk Arsip)";
         }
 
-        // Panggil fungsi baru untuk mendapatkan data gabungan
         const combinedLogResult = getCombinedLogs(startDate, config);
         headers = combinedLogResult.headers;
         data = combinedLogResult.data;
@@ -1117,7 +1310,6 @@ function handleExportRequest(exportType, config, userData) {
         break;
       }
         
-      // --- Kasus untuk VM ---
       case KONSTANTA.CALLBACK.EXPORT_ALL_VMS:
       case KONSTANTA.CALLBACK.EXPORT_VC01_VMS:
       case KONSTANTA.CALLBACK.EXPORT_VC02_VMS: {
@@ -1141,7 +1333,6 @@ function handleExportRequest(exportType, config, userData) {
         break;
       }
 
-      // --- Kasus untuk Uptime ---
       case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_1:
       case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_2:
       case KONSTANTA.CALLBACK.EXPORT_UPTIME_CAT_3:
@@ -1158,44 +1349,58 @@ function handleExportRequest(exportType, config, userData) {
       }
     }
 
-    // --- Logika Pengiriman Hasil ---
+    // Langkah 3: Proses hasil dan edit pesan status
     if (data && headers && headers.length > 0) {
         if (data.length > 0) {
-            // Fungsi exportResultsToSheet akan menangani pembuatan file dan pengiriman notifikasi
+            // Fungsi ini akan mengirim pesan baru berisi link file
             exportResultsToSheet(headers, data, title, config, userData, highlightColumn);
+            // Edit pesan status awal menjadi pesan sukses
+            if (statusMessageId) {
+                editMessageText(`✅ Proses ekspor untuk <b>${title}</b> telah selesai. Hasilnya telah dikirimkan dalam pesan terpisah.`, null, chatId, statusMessageId, config);
+            }
         } else {
-            kirimPesanTelegram(`ℹ️ Tidak ada data yang dapat diekspor untuk kategori "<b>${title}</b>".`, config, 'HTML');
+            // Edit pesan status awal menjadi pesan "tidak ada data"
+            const noDataMessage = `ℹ️ Tidak ada data yang dapat diekspor untuk kategori "<b>${title}</b>".`;
+            if (statusMessageId) {
+                editMessageText(noDataMessage, null, chatId, statusMessageId, config);
+            } else {
+                kirimPesanTelegram(noDataMessage, config, 'HTML', null, chatId);
+            }
         }
-    } else if (exportType.includes('LOG')) {
-        // Kondisi khusus jika header log tidak ditemukan
-        console.warn(`Tidak ada header yang dihasilkan untuk tipe ekspor: ${exportType}`);
-        kirimPesanTelegram(`⚠️ Gagal memproses permintaan: Tidak dapat menemukan header log. Pastikan sheet 'Log Perubahan' memiliki header.`, config);
     } else {
-        console.warn(`Tidak ada data atau header yang dihasilkan untuk tipe ekspor: ${exportType}`);
+        const failMessage = `⚠️ Gagal memproses permintaan: Tidak dapat menemukan data atau header yang diperlukan untuk ekspor ini.`;
+        if (statusMessageId) {
+            editMessageText(failMessage, null, chatId, statusMessageId, config);
+        } else {
+            kirimPesanTelegram(failMessage, config, 'HTML', null, chatId);
+        }
     }
 
   } catch (e) {
       console.error(`Gagal menangani permintaan ekspor: ${e.message}\nStack: ${e.stack}`);
-      kirimPesanTelegram(`⚠️ Terjadi kesalahan saat memproses permintaan ekspor Anda.\n<code>${escapeHtml(e.message)}</code>`, config, 'HTML');
+      const errorMessage = `⚠️ Terjadi kesalahan saat memproses permintaan ekspor Anda.\n<code>${escapeHtml(e.message)}</code>`;
+      // Edit pesan status awal untuk menunjukkan pesan error
+      if (statusMessageId) {
+          editMessageText(errorMessage, null, chatId, statusMessageId, config);
+      } else {
+          kirimPesanTelegram(errorMessage, config, 'HTML', null, chatId);
+      }
   }
 }
 
 /**
- * FUNGSI UTAMA PENGARSIPAN
- * Tugasnya adalah memindahkan log lama ke file JSON dan membersihkan sheet.
- * Fungsi ini dipanggil oleh fungsi cekDanArsipkanLogJikaPenuh().
+ * FUNGSI UTAMA PENGARSIPAN (DENGAN LOGIKA INDEKS & RETURN VALUE FINAL)
+ * Tugasnya adalah memindahkan log lama ke file JSON, membersihkan sheet,
+ * dan HANYA mengembalikan pesan hasilnya.
  */
-function jalankanPengarsipanLogKeJson(config) { // [DIUBAH] Tambahkan parameter
-  // [DIUBAH] activeConfig sekarang diambil dari parameter
-  const activeConfig = config || bacaKonfigurasi();
+function jalankanPengarsipanLogKeJson(config) {
+  const activeConfig = config;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
 
   if (!sheetLog || sheetLog.getLastRow() <= 1) {
     console.log("Tidak ada log untuk diarsipkan.");
-    // Kirim pesan juga ke Telegram jika ada config (dipanggil manual)
-    if (config) kirimPesanTelegram("ℹ️ Tidak ada data log yang bisa diarsipkan saat ini.", activeConfig);
-    return;
+    return "ℹ️ Tidak ada data log yang bisa diarsipkan saat ini.";
   }
 
   const FOLDER_ARSIP_ID = activeConfig[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP_LOG];
@@ -1206,9 +1411,22 @@ function jalankanPengarsipanLogKeJson(config) { // [DIUBAH] Tambahkan parameter
 
   const dataRange = sheetLog.getDataRange();
   const allLogData = dataRange.getValues();
-  const headers = allLogData.shift(); // Ambil header
+  const headers = allLogData.shift();
   
-  // Ubah data array menjadi format JSON
+  if (allLogData.length === 0) {
+    console.log("Tidak ada baris data log setelah header. Pengarsipan dibatalkan.");
+    return "ℹ️ Tidak ada baris data log setelah header. Pengarsipan dibatalkan.";
+  }
+
+  const timestampIndex = headers.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+  if (timestampIndex === -1) {
+    throw new Error("Kolom 'Timestamp' tidak ditemukan di header log. Tidak dapat melanjutkan pengarsipan.");
+  }
+
+  const timestamps = allLogData.map(row => new Date(row[timestampIndex])).filter(d => !isNaN(d.getTime()));
+  const logStartDate = new Date(Math.min.apply(null, timestamps));
+  const logEndDate = new Date(Math.max.apply(null, timestamps));
+  
   const jsonData = allLogData.map(row => {
     const obj = {};
     headers.forEach((header, index) => {
@@ -1218,47 +1436,58 @@ function jalankanPengarsipanLogKeJson(config) { // [DIUBAH] Tambahkan parameter
   });
 
   try {
-    // [PERBAIKAN] Ganti "GMT+7" dengan zona waktu dari Spreadsheet
     const timezone = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
     const timestamp = Utilities.formatDate(new Date(), timezone, "yyyy-MM-dd_HH-mm-ss");
     const namaFileArsip = `Arsip Log - ${timestamp}.json`;
-    
-    // Stringify dengan spasi agar mudah dibaca manusia
     const jsonString = JSON.stringify(jsonData, null, 2); 
     
-    // Simpan file JSON ke Google Drive
     folderArsip.createFile(namaFileArsip, jsonString, MimeType.PLAIN_TEXT);
     console.log(`${allLogData.length} baris log telah ditulis ke file JSON: ${namaFileArsip}`);
 
-    // Bersihkan sheet log utama, sisakan hanya header
+    const indexFileName = 'archive_log_index.json';
+    let indexData = [];
+    const indexFiles = folderArsip.getFilesByName(indexFileName);
+
+    if (indexFiles.hasNext()) {
+      const indexFile = indexFiles.next();
+      try {
+        indexData = JSON.parse(indexFile.getBlob().getDataAsString());
+      } catch (e) {
+        console.warn(`Gagal parse file indeks, akan membuat yang baru. Error: ${e.message}`);
+        indexData = [];
+      }
+      indexFile.setTrashed(true);
+    }
+    
+    indexData.push({
+      fileName: namaFileArsip,
+      startDate: logStartDate.toISOString(),
+      endDate: logEndDate.toISOString()
+    });
+    
+    folderArsip.createFile(indexFileName, JSON.stringify(indexData, null, 2), MimeType.PLAIN_TEXT);
+    console.log(`File indeks "${indexFileName}" telah diperbarui.`);
+
     sheetLog.getRange(2, 1, sheetLog.getLastRow(), sheetLog.getLastColumn()).clearContent();
 
-    // [PERBAIKAN] Pesan dibuat lebih generik agar cocok untuk manual & otomatis
     const pesanSukses = `✅ Pengarsipan log berhasil.\n\nSebanyak ${allLogData.length} baris log telah dipindahkan ke file "${namaFileArsip}".`;
-    kirimPesanTelegram(pesanSukses, activeConfig);
     console.log(pesanSukses);
-
-    // Bersihkan sheet log utama, sisakan hanya header
-    sheetLog.getRange(2, 1, sheetLog.getLastRow(), sheetLog.getLastColumn()).clearContent();
+    return pesanSukses;
 
   } catch (e) {
     const pesanGagal = `❌ Gagal melakukan pengarsipan log. Error: ${e.message}\nStack: ${e.stack}`;
-    kirimPesanTelegram(pesanGagal, activeConfig);
     console.error(pesanGagal);
+    return pesanGagal;
   }
 }
 
 /**
- * FUNGSI PENGECЕK
- * Fungsi ini akan dijalankan oleh pemicu harian atau perintah manual.
- * Tugasnya adalah memeriksa jumlah baris dan memanggil fungsi pengarsipan jika perlu.
- * [PERBAIKAN] Menambahkan parameter 'config' dan logika feedback ke Telegram.
+ * FUNGSI PENGECЕK (Setelah Perbaikan Logika Threshold & Return Value)
+ * Tugasnya adalah memeriksa jumlah baris dan mengembalikan pesan hasilnya.
  */
-function cekDanArsipkanLogJikaPenuh(config = null) { // [DIUBAH] Tambahkan parameter
-  const BATAS_BARIS = KONSTANTA.LIMIT.LOG_ARCHIVE_THRESHOLD;
-
-  // Jika dipanggil dari trigger, config null. Jika dari perintah, config ada.
+function cekDanArsipkanLogJikaPenuh(config = null) {
   const activeConfig = config || bacaKonfigurasi();
+  const BATAS_BARIS = activeConfig.LOG_ARCHIVE_THRESHOLD || KONSTANTA.LIMIT.LOG_ARCHIVE_THRESHOLD;
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1267,8 +1496,7 @@ function cekDanArsipkanLogJikaPenuh(config = null) { // [DIUBAH] Tambahkan param
     if (!sheetLog) {
       const errorMsg = "Sheet 'Log Perubahan' tidak ditemukan. Pengecekan dibatalkan.";
       console.error(errorMsg);
-      if (config) kirimPesanTelegram(`❌ Gagal: ${errorMsg}`, activeConfig);
-      return;
+      return `❌ Gagal: ${errorMsg}`; // Mengembalikan pesan error
     }
 
     const jumlahBaris = sheetLog.getLastRow();
@@ -1276,20 +1504,17 @@ function cekDanArsipkanLogJikaPenuh(config = null) { // [DIUBAH] Tambahkan param
 
     if (jumlahBaris > BATAS_BARIS) {
       console.log(`Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan...`);
-      // Teruskan config ke fungsi pengarsipan
-      jalankanPengarsipanLogKeJson(activeConfig);
+      // Jalankan pengarsipan dan kembalikan pesannya
+      return jalankanPengarsipanLogKeJson(activeConfig);
     } else {
       const feedbackMsg = `ℹ️ Pengarsipan belum diperlukan. Jumlah baris log saat ini adalah ${jumlahBaris}, masih di bawah ambang batas ${BATAS_BARIS} baris.`;
       console.log(feedbackMsg);
-      // [LOGIKA BARU] Kirim feedback ke Telegram jika dipanggil manual
-      if (config) {
-        kirimPesanTelegram(feedbackMsg, activeConfig);
-      }
+      return feedbackMsg; // Mengembalikan pesan info
     }
   } catch(e) {
       const errorMsg = `❌ Gagal saat memeriksa log untuk pengarsipan: ${e.message}`;
       console.error(errorMsg);
-      if (config) kirimPesanTelegram(errorMsg, activeConfig, 'HTML');
+      return errorMsg; // Mengembalikan pesan error
   }
 }
 

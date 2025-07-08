@@ -6,7 +6,8 @@ const KONSTANTA = {
     KONFIGURASI: 'Konfigurasi',
     HAK_AKSES: 'Hak Akses',
     LOG_PERUBAHAN: 'Log Perubahan',
-    LOGIKA_MIGRASI: 'Logika Migrasi'
+    LOGIKA_MIGRASI: 'Logika Migrasi',
+    CATATAN_VM: 'Catatan VM',
   },
   
   // Callback data untuk tombol
@@ -33,7 +34,13 @@ const KONSTANTA = {
     BACK_TO_SUMMARY: 'ticket_back_summary',
     BACK_TO_LIST: 'ticket_back_list_',
   },
-
+  // Callback data catatan
+  CALLBACK_CATATAN: {
+    PREFIX: 'note_',
+    EDIT_ADD: 'note_edit_add_',
+    DELETE: 'note_delete_',
+    DELETE_CONFIRM: 'note_delete_confirm_'
+  },
   // Callback data histori
   CALLBACK_HISTORY: {
     PREFIX: 'history_',
@@ -155,7 +162,7 @@ const KONSTANTA = {
   // Batas dan nilai default
   LIMIT: {
     PAGINATION_ENTRIES: 15,
-    LOG_ARCHIVE_THRESHOLD: 5000,
+    LOG_ARCHIVE_THRESHOLD: 1000,
     LOCK_TIMEOUT_MS: 10000, // Timeout untuk script lock
     // Ambang batas untuk deteksi aktivitas tinggi/anomali dalam satu periode laporan
     HIGH_ACTIVITY_THRESHOLD: 50
