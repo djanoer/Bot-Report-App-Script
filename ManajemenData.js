@@ -1,8 +1,8 @@
 // ===== FILE: ManajemenData.gs =====
 
 /**
- * [MODIFIKASI FINAL] Menghapus pemanggilan ke jalankanPemeriksaanAmbangBatas.
- * Fungsi ini kini hanya bertanggung jawab untuk sinkronisasi dan laporan operasional.
+ * [MODIFIKASI FINAL v3.4.0] Menjadi pusat untuk semua pekerjaan harian.
+ * Kini terintegrasi dengan sistem caching (invalidasi dan cache warming).
  */
 function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI", config = null) {
   const activeConfig = config || bacaKonfigurasi();
@@ -30,14 +30,29 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
     const sheetVmName = activeConfig[KUNCI.SHEET_VM];
     const sheetDsName = activeConfig[KUNCI.SHEET_DS];
 
-    // --- Proses Sinkronisasi dan Log ---
     console.log("Memulai sinkronisasi dan pemeriksaan perubahan VM...");
     salinDataSheet(sheetVmName, sumberId, activeConfig);
+
+    try {
+      console.log("Memulai proses Cache Warming untuk data VM...");
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const sheet = ss.getSheetByName(sheetVmName);
+      if (sheet && sheet.getLastRow() > 1) {
+        const vmDataWithHeaders = sheet.getDataRange().getValues(); 
+        saveLargeDataToCache('vm_data', vmDataWithHeaders, 21600);
+      } else {
+        console.warn("Cache Warming dilewati: Sheet VM tidak ditemukan atau kosong.");
+      }
+    } catch(e) {
+      console.error(`Gagal melakukan cache warming untuk data VM. Error: ${e.message}`);
+    }
+
     try {
       const kolomVmUntukDipantau = activeConfig[KUNCI.KOLOM_PANTAU] || [];
       const columnsToTrackVm = kolomVmUntukDipantau.map(namaKolom => ({ nama: namaKolom }));
       if (columnsToTrackVm.length > 0) {
-        processDataChanges(activeConfig, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, KONSTANTA.HEADER_VM.PK, columnsToTrackVm, KONSTANTA.NAMA_ENTITAS.VM);
+        const primaryKeyHeader = activeConfig[KUNCI.HEADER_VM_PK];
+        processDataChanges(activeConfig, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, primaryKeyHeader, columnsToTrackVm, KONSTANTA.NAMA_ENTITAS.VM);
       }
     } catch(e) {
       console.error(`Gagal Menjalankan Pemeriksaan Perubahan VM. Penyebab: ${e.message}`);
@@ -50,21 +65,16 @@ function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIK
         const kolomDsUntukDipantau = activeConfig[KUNCI.KOLOM_PANTAU_DS] || [];
         const columnsToTrackDs = kolomDsUntukDipantau.map(namaKolom => ({ nama: namaKolom }));
         if (columnsToTrackDs.length > 0) {
-          processDataChanges(activeConfig, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, activeConfig['HEADER_DATASTORE_NAME'], columnsToTrackDs, KONSTANTA.NAMA_ENTITAS.DATASTORE);
+          processDataChanges(activeConfig, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, activeConfig[KUNCI.DS_NAME_HEADER], columnsToTrackDs, KONSTANTA.NAMA_ENTITAS.DATASTORE);
         }
       } catch(e) {
         console.error(`Gagal Menjalankan Pemeriksaan Perubahan Datastore. Penyebab: ${e.message}`);
       }
     }
     
-    // --- Langkah Pembuatan Laporan ---
     const pesanLaporanOperasional = buatLaporanHarianVM(activeConfig);
     kirimPesanTelegram(pesanLaporanOperasional, activeConfig, 'HTML');
     
-    // --- AWAL MODIFIKASI: Pemanggilan ke jalankanPemeriksaanAmbangBatas dihapus dari sini ---
-    // jalankanPemeriksaanAmbangBatas(activeConfig); // Baris ini telah dihapus.
-    // --- AKHIR MODIFIKASI ---
-
     const pesanKonfirmasi = `<b>✅ Proses Selesai</b>\n\nLaporan operasional telah dikirimkan.`;
     if (statusMessageId) {
         editMessageText(pesanKonfirmasi, null, activeConfig.TELEGRAM_CHAT_ID, statusMessageId, activeConfig);
@@ -148,42 +158,48 @@ function salinDataSheet(namaSheet, sumberId) {
 }
 
 /**
- * [FINAL & MULTI-PK SUPPORT] Mencari VM di sheet.
- * Fungsi ini sekarang dapat mencari satu istilah (untuk pencarian awal)
- * atau banyak Primary Key yang dipisahkan oleh '|' (untuk menampilkan halaman dari cache).
+ * [FINAL & OPTIMIZED v3.4.0] Mencari VM dengan strategi Cache-First menggunakan chunking.
+ * Fungsi ini secara otomatis melakukan fallback ke Spreadsheet jika cache tidak ada atau rusak,
+ * dan langsung memanaskan kembali cache tersebut.
  */
 function searchVmOnSheet(searchTerm, config) {
-  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet || sheet.getLastRow() < 2) {
-    throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
+  let allDataWithHeaders = readLargeDataFromCache('vm_data');
+  
+  if (!allDataWithHeaders) {
+    console.log("Cache miss atau rusak. Membaca data langsung dari Spreadsheet...");
+    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(sheetName);
+    
+    if (!sheet || sheet.getLastRow() < 2) {
+      throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
+    }
+    allDataWithHeaders = sheet.getDataRange().getValues();
+    console.log("Melakukan cache warming ulang setelah cache miss...");
+    saveLargeDataToCache('vm_data', allDataWithHeaders, 21600); 
   }
+  
+  const headers = allDataWithHeaders.shift();
+  const allData = allDataWithHeaders;
 
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-  const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
+  const KUNCI = KONSTANTA.KUNCI_KONFIG;
+  const pkIndex = headers.indexOf(config[KUNCI.HEADER_VM_PK]);
+  const nameIndex = headers.indexOf(config[KUNCI.HEADER_VM_NAME]);
+  const ipIndex = headers.indexOf(config[KUNCI.HEADER_VM_IP]);
 
   if (pkIndex === -1 || nameIndex === -1 || ipIndex === -1) {
-    throw new Error(`Satu atau lebih kolom header penting (PK, Nama, IP) tidak ditemukan di sheet "${sheetName}".`);
+    throw new Error(`Satu atau lebih kolom header penting (PK, Nama, IP) tidak ditemukan atau salah dikonfigurasi.`);
   }
 
-  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
   let results = [];
 
-  // --- [MODIFIKASI UTAMA DIMULAI DI SINI] ---
-  // Cek apakah searchTerm adalah untuk multi-PK atau pencarian biasa
   if (searchTerm.includes('|')) {
-    // Mode Multi-PK: Buat Set untuk pencarian yang sangat cepat
     const searchPks = new Set(searchTerm.split('|').map(pk => normalizePrimaryKey(pk.trim())));
     results = allData.filter(row => {
       const vmPk = normalizePrimaryKey(String(row[pkIndex] || '').trim());
       return searchPks.has(vmPk);
     });
   } else {
-    // Mode Pencarian Biasa (logika yang sudah ada)
     const searchLower = searchTerm.toLowerCase().trim();
     const normalizedSearchTerm = normalizePrimaryKey(searchLower);
     
@@ -195,7 +211,6 @@ function searchVmOnSheet(searchTerm, config) {
       return vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower);
     });
   }
-  // --- [AKHIR MODIFIKASI] ---
 
   return { headers, results };
 }
@@ -343,26 +358,32 @@ function deleteVmNote(vmPrimaryKey) {
 }
 
 /**
- * [MODIFIKASI v3.3.0] Memformat satu baris data VM dan menambahkan bagian catatan serta keyboard kontekstual.
+ * [REFACTORED v3.5.0 - FINAL & ROBUST] Memformat detail VM dengan validasi header proaktif.
+ * Fungsi ini tidak akan gagal secara senyap dan akan melaporkan kesalahan konfigurasi header.
  */
 function formatVmDetail(row, headers, config) {
-  const indices = {
-    vmName: headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME),
-    pk: headers.indexOf(KONSTANTA.HEADER_VM.PK),
-    ip: headers.indexOf(KONSTANTA.HEADER_VM.IP),
-    state: headers.indexOf(KONSTANTA.HEADER_VM.STATE),
-    uptime: headers.indexOf(KONSTANTA.HEADER_VM.UPTIME),
-    cpu: headers.indexOf(KONSTANTA.HEADER_VM.CPU),
-    memory: headers.indexOf(KONSTANTA.HEADER_VM.MEMORY),
-    provGb: headers.indexOf(KONSTANTA.HEADER_VM.PROV_GB),
-    cluster: headers.indexOf(KONSTANTA.HEADER_VM.CLUSTER),
-    datastore: headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER]),
-    kritikalitas: headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS),
-    kelompokApp: headers.indexOf(KONSTANTA.HEADER_VM.KELOMPOK_APP),
-    devOps: headers.indexOf(KONSTANTA.HEADER_VM.DEV_OPS),
-    guestOs: headers.indexOf(KONSTANTA.HEADER_VM.GUEST_OS),
-    vcenter: headers.indexOf(KONSTANTA.HEADER_VM.VCENTER)
-  };
+  const K = KONSTANTA.KUNCI_KONFIG;
+
+  // --- [PERBAIKAN UTAMA] Validasi Header yang Jelas dan Aman ---
+  const requiredHeaderKeys = [
+    K.HEADER_VM_NAME, K.HEADER_VM_PK, K.HEADER_VM_IP, K.HEADER_VM_STATE,
+    K.HEADER_VM_UPTIME, K.HEADER_VM_CPU, K.HEADER_VM_MEMORY, K.HEADER_VM_PROV_GB,
+    K.HEADER_VM_CLUSTER, K.VM_DS_COLUMN_HEADER, K.HEADER_VM_KRITIKALITAS,
+    K.HEADER_VM_KELOMPOK_APP, K.HEADER_VM_DEV_OPS, K.HEADER_VM_GUEST_OS, K.HEADER_VM_VCENTER
+  ];
+
+  const indices = {};
+  for (const key of requiredHeaderKeys) {
+    const headerName = config[key];
+    if (!headerName) {
+      throw new Error(`Kunci konfigurasi '${key}' tidak ditemukan di sheet Konfigurasi.`);
+    }
+    indices[key] = headers.indexOf(headerName);
+    if (indices[key] === -1) {
+      throw new Error(`Header '${headerName}' (dari kunci '${key}') tidak ditemukan di sheet Data Utama.`);
+    }
+  }
+  // --- [AKHIR VALIDASI] ---
 
   const addDetail = (value, icon, label, isCode = false) => {
     if (value !== undefined && value !== null && String(value).trim() !== '') {
@@ -374,37 +395,36 @@ function formatVmDetail(row, headers, config) {
   
   let pesan = "🖥️  <b>Detail Virtual Machine</b>\n\n";
   pesan += "<b>Informasi Umum</b>\n";
-  pesan += addDetail(row[indices.vmName], '🏷️', 'Nama VM', true);
-  const rawPk = row[indices.pk];
+  pesan += addDetail(row[indices[K.HEADER_VM_NAME]], '🏷️', 'Nama VM', true);
+  const rawPk = row[indices[K.HEADER_VM_PK]];
   const normalizedPk = normalizePrimaryKey(rawPk);
   pesan += addDetail(normalizedPk, '🔑', 'Primary Key', true);
-  pesan += addDetail(row[indices.ip], '🌐', 'IP Address', true);
-  const stateValue = row[indices.state] || '';
+  pesan += addDetail(row[indices[K.HEADER_VM_IP]], '🌐', 'IP Address', true);
+  const stateValue = row[indices[K.HEADER_VM_STATE]] || '';
   const stateIcon = stateValue.toLowerCase().includes('on') ? '🟢' : '🔴';
   pesan += addDetail(stateValue, stateIcon, 'Status');
-  pesan += addDetail(`${row[indices.uptime]} hari`, '⏳', 'Uptime');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_UPTIME]]} hari`, '⏳', 'Uptime');
 
   pesan += "\n<b>Sumber Daya & Kapasitas</b>\n";
-  pesan += addDetail(`${row[indices.cpu]} vCPU`, '⚙️', 'CPU');
-  pesan += addDetail(`${row[indices.memory]} GB`, '🧠', 'Memory');
-  pesan += addDetail(`${row[indices.provGb]} GB`, '💽', 'Provisioned');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_CPU]]} vCPU`, '⚙️', 'CPU');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_MEMORY]]} GB`, '🧠', 'Memory');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_PROV_GB]]} GB`, '💽', 'Provisioned');
   
-  const clusterName = row[indices.cluster];
-  const datastoreName = row[indices.datastore];
+  const clusterName = row[indices[K.HEADER_VM_CLUSTER]];
+  const datastoreName = row[indices[K.VM_DS_COLUMN_HEADER]];
   pesan += addDetail(clusterName, '☁️', 'Cluster');
   pesan += addDetail(datastoreName, '🗄️', 'Datastore');
 
-  const environment = getEnvironmentFromDsName(datastoreName || '', config[KONSTANTA.KUNCI_KONFIG.MAP_ENV]) || 'N/A';
+  const environment = getEnvironmentFromDsName(datastoreName || '', config[K.MAP_ENV]) || 'N/A';
   
   pesan += "\n<b>Konfigurasi & Manajemen</b>\n";
   pesan += addDetail(environment, '🌍', 'Environment');
-  pesan += addDetail(row[indices.kritikalitas], '🔥', 'Kritikalitas BIA');
-  pesan += addDetail(row[indices.kelompokApp], '📦', 'Aplikasi BIA');
-  pesan += addDetail(row[indices.devOps], '👥', 'DEV/OPS');
-  pesan += addDetail(row[indices.guestOs], '🐧', 'Guest OS');
-  pesan += addDetail(row[indices.vcenter], '🏢', 'vCenter');
+  pesan += addDetail(row[indices[K.HEADER_VM_KRITIKALITAS]], '🔥', 'Kritikalitas BIA');
+  pesan += addDetail(row[indices[K.HEADER_VM_KELOMPOK_APP]], '📦', 'Aplikasi BIA');
+  pesan += addDetail(row[indices[K.HEADER_VM_DEV_OPS]], '👥', 'DEV/OPS');
+  pesan += addDetail(row[indices[K.HEADER_VM_GUEST_OS]], '🐧', 'Guest OS');
+  pesan += addDetail(row[indices[K.HEADER_VM_VCENTER]], '🏢', 'vCenter');
 
-  // --- [AWAL PERUBAHAN UTAMA v3.3.0] ---
   const vmNote = getVmNote(normalizedPk, config);
   pesan += `\n--------------------------------------------------\n`;
   pesan += `📝  <b>Catatan untuk VM ini:</b>\n`;
@@ -422,15 +442,12 @@ function formatVmDetail(row, headers, config) {
   const keyboardRows = [];
   const noteButtons = [];
   
-  // Tombol Cerdas: 'Edit' jika ada catatan, 'Tambah' jika tidak ada
   noteButtons.push({ text: `✏️ ${vmNote ? 'Edit' : 'Tambah'} Catatan`, callback_data: `${KONSTANTA.CALLBACK_CATATAN.EDIT_ADD}${normalizedPk}` });
 
-  // Hanya tampilkan tombol Hapus jika ada catatan
   if (vmNote) {
     noteButtons.push({ text: '🗑️ Hapus Catatan', callback_data: `${KONSTANTA.CALLBACK_CATATAN.DELETE}${normalizedPk}` });
   }
   keyboardRows.push(noteButtons);
-  // --- [AKHIR PERUBAHAN UTAMA v3.3.0] ---
 
   if (normalizedPk) {
     keyboardRows.push([{ text: `📜 Lihat Riwayat VM (${normalizedPk})`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX}${normalizedPk}` }]);
@@ -438,10 +455,14 @@ function formatVmDetail(row, headers, config) {
 
   const secondRowButtons = [];
   if (clusterName) {
-    secondRowButtons.push({ text: `⚙️ VM di Cluster ${clusterName}`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX}${clusterName}` });
+    const sessionId = createCallbackSession({ type: 'cluster', itemName: clusterName, originPk: normalizedPk });
+    const clusterCallback = `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX}${sessionId}`;
+    secondRowButtons.push({ text: `⚙️ VM di Cluster ${clusterName}`, callback_data: clusterCallback });
   }
   if (datastoreName) {
-    secondRowButtons.push({ text: `🗄️ Detail DS ${datastoreName}`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX}${datastoreName}` });
+    const sessionId = createCallbackSession({ type: 'datastore', itemName: datastoreName, originPk: normalizedPk });
+    const datastoreCallback = `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX}${sessionId}`;
+    secondRowButtons.push({ text: `🗄️ Detail DS ${datastoreName}`, callback_data: datastoreCallback });
   }
 
   if (secondRowButtons.length > 0) {
@@ -503,8 +524,8 @@ function formatDatastoreDetail(details, originPk = null) {
 }
 
 /**
- * [v1.1-stabil] Handler /cekvm yang sudah di-harden.
- * Versi ini menangani error dari fungsi pencarian dan memberikan feedback yang jelas.
+ * [REFACTORED v3.8.2 - "Pramusaji"] Menangani pencarian VM.
+ * Kini menambahkan pekerjaan ke dalam antrean dengan konteks yang lengkap.
  */
 function handleVmSearchInteraction(update, config, userData) {
   const isCallback = !!update.callback_query;
@@ -526,14 +547,26 @@ function handleVmSearchInteraction(update, config, userData) {
       searchTerm = decodeURIComponent(parts.slice(2).join('_'));
       
       if (parts[1] === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
-        try {
-          const { headers, results } = searchVmOnSheet(searchTerm, config);
-          exportResultsToSheet(headers, results, `Pencarian VM '${searchTerm}'`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-          answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
-        } catch (exportError) {
-          kirimPesanTelegram(`⚠️ Gagal membuat file ekspor.\n<b>Detail:</b> ${escapeHtml(exportError.message)}`, config, 'HTML');
-        }
-        return;
+        answerCallbackQuery(userEvent.id, config);
+        
+        const properties = PropertiesService.getUserProperties();
+        const jobKey = `export_job_${userEvent.from.id}_${Date.now()}`;
+        
+        // --- [PERBAIKAN UTAMA DI SINI] ---
+        // Simpan semua data yang dibutuhkan, termasuk chatId untuk pengiriman pesan.
+        const jobData = { 
+          searchTerm: searchTerm, 
+          config: config, 
+          userData: userData, 
+          chatId: userEvent.message.chat.id 
+        };
+        properties.setProperty(jobKey, JSON.stringify(jobData));
+
+        kirimPesanTelegram(
+          `✅ Permintaan ekspor Anda untuk pencarian "<b>${escapeHtml(searchTerm)}</b>" telah ditambahkan ke antrean.\n\nFile akan dikirimkan dalam beberapa saat (biasanya dalam 1-2 menit).`, 
+          config, 'HTML', null, userEvent.message.chat.id
+        );
+        return; 
       }
     } else {
       searchTerm = userEvent.text.split(' ').slice(1).join(' ');
@@ -543,13 +576,12 @@ function handleVmSearchInteraction(update, config, userData) {
       }
     }
 
+    // Sisa dari logika untuk menampilkan hasil pencarian tidak berubah
     const { headers, results } = searchVmOnSheet(searchTerm, config);
-
     if (results.length === 0) {
       kirimPesanTelegram(`❌ VM dengan kriteria "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
       return;
     }
-
     if (results.length === 1 && !isCallback) {
         const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
         let fullMessage = `✅ Ditemukan 1 hasil untuk "<b>${escapeHtml(searchTerm)}</b>":\n\n`;
@@ -557,14 +589,13 @@ function handleVmSearchInteraction(update, config, userData) {
         kirimPesanTelegram(fullMessage, config, 'HTML', keyboard);
         return;
     }
-
     const formatVmEntry = (row) => {
-      const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-      const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-      const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+      const K = KONSTANTA.KUNCI_KONFIG;
+      const nameIndex = headers.indexOf(config[K.HEADER_VM_NAME]);
+      const ipIndex = headers.indexOf(config[K.HEADER_VM_IP]);
+      const pkIndex = headers.indexOf(config[K.HEADER_VM_PK]);
       return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
     };
-    
     const safeSearchTerm = encodeURIComponent(searchTerm);
     const { text, keyboard } = createPaginatedView({
       allItems: results,
@@ -574,7 +605,6 @@ function handleVmSearchInteraction(update, config, userData) {
       navCallbackPrefix: `cekvm_${KONSTANTA.PAGINATION_ACTIONS.NAVIGATE}_${safeSearchTerm}`,
       exportCallbackData: `cekvm_${KONSTANTA.PAGINATION_ACTIONS.EXPORT}_${safeSearchTerm}`
     });
-    
     if (isCallback) {
       if(userEvent.message.text !== text) {
         editMessageText(text, keyboard, userEvent.message.chat.id, userEvent.message.message_id, config);
@@ -625,7 +655,7 @@ function handleHistoryInteraction(update, config, userData) {
   const { headers: logHeaders, data: logsToShow } = getCombinedLogs(todayStartDate, config);
   const title = "Log Perubahan Hari Ini";
   const formatLogEntry = (row) => {
-      return formatHistoryEntry(row, logHeaders);
+      return formatHistoryEntry(row, logHeaders, config); 
   };
   const { text, keyboard } = createPaginatedView({
       allItems: logsToShow,
@@ -662,7 +692,7 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
   }
 
   try {
-    const critHeaderName = KONSTANTA.HEADER_VM.KRITIKALITAS;
+    const critHeaderName = config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_KRITIKALITAS];
     const critIndex = headers.indexOf(critHeaderName);
     
     if (critIndex !== -1 && dataRows.length > 0) {
@@ -737,72 +767,64 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
 }
 
 /**
- * [REVISI UX KONSISTEN] Mencari riwayat lengkap sebuah VM dan MENGEMBALIKAN hasilnya dalam bentuk objek.
- * Fungsi ini tidak lagi mengirim pesan langsung ke Telegram, memungkinkan kontrol UX terpusat.
- * @param {string} pk - Primary Key dari VM yang akan dicari.
- * @param {object} config - Objek konfigurasi bot.
- * @returns {object} Objek yang berisi hasil pencarian dengan format: 
- * { success: boolean, message: string, data: Array|null, headers: Array|null }
+ * [REFACTORED v3.5.0] Mencari riwayat lengkap sebuah VM dengan header dinamis.
  */
 function getVmHistory(pk, config) {
-  // Validasi input awal
   if (!pk) {
     return { success: false, message: "❌ Terjadi kesalahan: Primary Key untuk melihat riwayat tidak valid." };
   }
 
   try {
+    const K = KONSTANTA.KUNCI_KONFIG;
     const pkToDisplay = normalizePrimaryKey(pk);
-    const allTimeStartDate = new Date('2020-01-01'); // Tanggal lampau untuk memastikan semua arsip terbaca
+    const allTimeStartDate = new Date('2020-01-01');
     const { headers: logHeaders, data: allLogs } = getCombinedLogs(allTimeStartDate, config);
 
-    // Validasi data log
     if (logHeaders.length === 0) {
       return { success: false, message: "❌ Gagal memproses: Tidak dapat menemukan header di sheet 'Log Perubahan'." };
     }
 
-    const pkIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.PK);
+    const pkHeader = config[K.HEADER_VM_PK];
+    const pkIndex = logHeaders.indexOf(pkHeader);
     if (pkIndex === -1) {
-      return { success: false, message: `❌ Gagal memproses: Kolom krusial '${KONSTANTA.HEADER_VM.PK}' tidak ditemukan di dalam log.` };
+      return { success: false, message: `❌ Gagal memproses: Kolom krusial '${pkHeader}' tidak ditemukan di dalam log.` };
     }
 
-    // Proses pencarian
     const pkTrimmed = normalizePrimaryKey(pk.trim()).toLowerCase();
     const historyEntries = allLogs.filter(row => 
       row[pkIndex] && normalizePrimaryKey(String(row[pkIndex])).toLowerCase() === pkTrimmed
     );
 
-    // Jika tidak ada hasil
     if (historyEntries.length === 0) {
       return { success: true, message: `ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(pkToDisplay)}</code>.`, data: null, headers: null };
     }
 
-    // Urutkan hasil dan siapkan pesan
-    const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+    const timestampHeader = config[K.HEADER_LOG_TIMESTAMP];
+    const timestampIndex = logHeaders.indexOf(timestampHeader);
     historyEntries.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
-    const vmNameIndex = logHeaders.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
+    
+    const vmNameHeader = config[K.HEADER_VM_NAME];
+    const vmNameIndex = logHeaders.indexOf(vmNameHeader);
     const currentVmName = historyEntries[0][vmNameIndex] || pk;
     
     let message = `<b>📜 Riwayat Lengkap untuk VM</b>\n`;
-    message += `<b>${KONSTANTA.HEADER_VM.VM_NAME}:</b> ${escapeHtml(currentVmName)}\n`;
-    message += `<b>${KONSTANTA.HEADER_VM.PK}:</b> <code>${escapeHtml(pkToDisplay)}</code>\n`;
+    message += `<b>${vmNameHeader}:</b> ${escapeHtml(currentVmName)}\n`;
+    message += `<b>${pkHeader}:</b> <code>${escapeHtml(pkToDisplay)}</code>\n`;
     message += `<i>Total ditemukan ${historyEntries.length} entri riwayat.</i>`;
     message += KONSTANTA.UI_STRINGS.SEPARATOR;
     message += `\n`;
 
-    // Logika untuk menampilkan ringkasan atau laporan lengkap
     if (historyEntries.length > 8) {
-      // Jika hasil terlalu banyak, tampilkan ringkasan dan siapkan data untuk ekspor
       message += `Menampilkan 5 dari ${historyEntries.length} perubahan terakhir:\n\n`;
       historyEntries.slice(0, 5).forEach(entry => {
-        message += formatHistoryEntry(entry, logHeaders);
+        message += formatHistoryEntry(entry, logHeaders, config);
       });
       message += KONSTANTA.UI_STRINGS.SEPARATOR;
       message += `<i>Riwayat terlalu panjang. Laporan lengkap sedang dibuat dalam file Google Sheet...</i>`;
       return { success: true, message: message, data: historyEntries, headers: logHeaders };
     } else {
-      // Jika hasil cukup singkat, tampilkan semuanya
       historyEntries.forEach(entry => {
-        message += formatHistoryEntry(entry, logHeaders);
+        message += formatHistoryEntry(entry, logHeaders, config);
       });
       return { success: true, message: message, data: null, headers: null };
     }
@@ -814,20 +836,21 @@ function getVmHistory(pk, config) {
 }
 
 /**
- * [HELPER/PEMBANTU]
- * Memformat satu baris entri log menjadi teks yang rapi.
- * Pastikan fungsi ini ada di ManajemenData.js atau Utilitas.js
+ * [REFACTORED v3.5.0] Memformat satu baris entri log menjadi teks yang rapi.
+ * Kini membaca nama header dari Konfigurasi.
  */
-function formatHistoryEntry(entry, headers) {
+function formatHistoryEntry(entry, headers, config) {
+  const K = KONSTANTA.KUNCI_KONFIG;
   let formattedText = "";
-  const timestamp = new Date(entry[headers.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP)]).toLocaleString('id-ID', { 
+  
+  const timestamp = new Date(entry[headers.indexOf(config[K.HEADER_LOG_TIMESTAMP])]).toLocaleString('id-ID', { 
     day: 'numeric', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit' 
   });
-  const action = entry[headers.indexOf(KONSTANTA.HEADER_LOG.ACTION)];
-  const oldValue = entry[headers.indexOf(KONSTANTA.HEADER_LOG.OLD_VAL)];
-  const newValue = entry[headers.indexOf(KONSTANTA.HEADER_LOG.NEW_VAL)];
-  const detail = entry[headers.indexOf(KONSTANTA.HEADER_LOG.DETAIL)];
+  const action = entry[headers.indexOf(config[K.HEADER_LOG_ACTION])];
+  const oldValue = entry[headers.indexOf(config[K.HEADER_LOG_OLD_VAL])];
+  const newValue = entry[headers.indexOf(config[K.HEADER_LOG_NEW_VAL])];
+  const detail = entry[headers.indexOf(config[K.HEADER_LOG_DETAIL])];
 
   formattedText += `<b>🗓️ ${escapeHtml(timestamp)}</b>\n`;
   formattedText += `<b>Aksi:</b> ${escapeHtml(action)}\n`;
@@ -836,7 +859,6 @@ function formatHistoryEntry(entry, headers) {
     formattedText += `<b>Detail:</b> Kolom '${escapeHtml(columnName)}' diubah\n`;
     formattedText += `   - <code>${escapeHtml(oldValue || 'Kosong')}</code> ➔ <code>${escapeHtml(newValue || 'Kosong')}</code>\n\n`;
   } else {
-    // Untuk aksi lain (PENAMBAHAN/PENGHAPUSAN), cukup tampilkan detailnya
     formattedText += `<b>Detail:</b> ${escapeHtml(detail)}\n\n`;
   }
   return formattedText;
@@ -973,29 +995,29 @@ function getClusterEquilibriumStatus(datastoresInCluster) {
 }
 
 /**
- * [MODIFIKASI v3.2 - FINAL & HOLISTIC] Mengimplementasikan "Algoritma Rekomendasi Cerdas Holistik".
- * Fungsi ini secara terintegrasi mencari paket VM dan datastore tujuan terbaik
- * untuk menghasilkan satu rencana migrasi yang paling efisien.
+ * [REFACTORED v3.5.0 - FINAL & HOLISTIC] Mengimplementasikan "Algoritma Rekomendasi Cerdas Holistik".
+ * Kini memberikan rekomendasi pembuatan Datastore baru jika tidak ada tujuan yang cocok.
  */
 function jalankanRekomendasiMigrasi() {
     const config = bacaKonfigurasi();
     console.log("Memulai analisis penyeimbangan cluster...");
     try {
-        // --- Tahap 1: Pengumpulan Data ---
-        const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
-        if (!dsSheet) throw new Error(`Sheet datastore '${config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]}' tidak ditemukan.`);
+        const K = KONSTANTA.KUNCI_KONFIG;
+        const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_DS]);
+        if (!dsSheet) throw new Error(`Sheet datastore '${config[K.SHEET_DS]}' tidak ditemukan.`);
         
         const dsHeaders = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-        const dsNameIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-        const dsCapGbIndex = dsHeaders.indexOf(KONSTANTA.HEADER_DS.CAPACITY_GB);
-        const dsProvGbIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_PROV_GB_HEADER]);
+        
+        const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
+        const dsCapGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
+        const dsProvGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
 
         if ([dsNameIndex, dsCapGbIndex, dsProvGbIndex].includes(-1)) {
-            throw new Error("Header penting (Name, Capacity, Provisioned) tidak ditemukan di sheet Datastore.");
+            throw new Error("Header penting (Name, Capacity, Provisioned) tidak ditemukan di sheet Datastore atau salah dikonfigurasi.");
         }
-
+        
         const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
-        const migrationConfig = getMigrationConfig(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_LOGIKA_MIGRASI]));
+        const migrationConfig = getMigrationConfig(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_LOGIKA_MIGRASI]));
         const allDatastores = dsData.map(row => {
             const dsName = row[dsNameIndex];
             const capacity = parseLocaleNumber(row[dsCapGbIndex]);
@@ -1004,7 +1026,7 @@ function jalankanRekomendasiMigrasi() {
             return {
                 name: dsName, capacity: capacity, provisioned: provisioned, freeSpace: capacity - provisioned,
                 utilization: capacity > 0 ? (provisioned / capacity * 100) : 0, cluster: dsInfo.cluster,
-                type: dsInfo.type, environment: getEnvironmentFromDsName(dsName, config[KONSTANTA.KUNCI_KONFIG.MAP_ENV])
+                type: dsInfo.type, environment: getEnvironmentFromDsName(dsName, config[K.MAP_ENV])
             };
         });
 
@@ -1013,16 +1035,22 @@ function jalankanRekomendasiMigrasi() {
             return "✅ Semua datastore dalam kondisi provisioning yang aman (1:1).";
         }
 
-        const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-        if (!vmSheet) throw new Error(`Sheet VM '${config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]}' tidak ditemukan.`);
+        const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_VM]);
+        if (!vmSheet) throw new Error(`Sheet VM '${config[K.SHEET_VM]}' tidak ditemukan.`);
         const vmHeaders = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
+        
+        const vmNameIndex = vmHeaders.indexOf(config[K.HEADER_VM_NAME]);
+        const vmProvGbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_GB]);
+        const vmStateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
+        const vmCritIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
+        const vmDsColumnIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
+        
         const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
-        const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+        const skorKritikalitas = config[K.SKOR_KRITIKALITAS] || {};
 
         let finalMessage = `⚖️ <b>Analisis & Rekomendasi Migrasi Datastore</b>\n`;
         finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>`;
 
-        // --- AWAL PEROMBAKAN LOGIKA ---
         overProvisionedDsList.forEach(dsInfo => {
             finalMessage += KONSTANTA.UI_STRINGS.SEPARATOR;
             const migrationTarget = dsInfo.provisioned - dsInfo.capacity;
@@ -1038,14 +1066,14 @@ function jalankanRekomendasiMigrasi() {
             let datastoresInCluster = JSON.parse(JSON.stringify(allDatastores.filter(ds => ds.cluster === dsInfo.cluster)));
 
             let candidatePool = allVmData
-                .filter(row => row[vmHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER])] === dsInfo.name)
+                .filter(row => row[vmDsColumnIndex] === dsInfo.name)
                 .map(row => ({
-                    name: row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.VM_NAME)],
-                    provisionedGb: parseLocaleNumber(row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.PROV_GB)]),
-                    state: row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.STATE)],
-                    criticality: row[vmHeaders.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS)],
+                    name: row[vmNameIndex],
+                    provisionedGb: parseLocaleNumber(row[vmProvGbIndex]),
+                    state: row[vmStateIndex],
+                    criticality: row[vmCritIndex],
                 }));
-
+            
             const migrationPlan = new Map();
             let totalMigrated = 0;
             const MAX_MIGRATION_LOOPS = 50;
@@ -1053,34 +1081,24 @@ function jalankanRekomendasiMigrasi() {
             
             while (totalMigrated < migrationTarget && candidatePool.length > 0 && loopCount < MAX_MIGRATION_LOOPS) {
                 loopCount++;
-                let bestMove = {
-                    vmIndex: -1,
-                    destDsName: null,
-                    efficiencyScore: -Infinity
-                };
+                let bestMove = { vmIndex: -1, destDsName: null, efficiencyScore: -Infinity };
 
                 for (let i = 0; i < candidatePool.length; i++) {
                     const vm = candidatePool[i];
                     const sourceDs = datastoresInCluster.find(ds => ds.name === dsInfo.name);
                     const recipients = datastoresInCluster.filter(ds => ds.name !== sourceDs.name && vm.provisionedGb <= ds.freeSpace);
-
                     if (recipients.length === 0) continue;
-                    
                     for (const destDs of recipients) {
                         const isValidMove = findBestDestination(sourceDs, vm.provisionedGb, [destDs], migrationConfig, config);
                         if (!isValidMove || isValidMove.error) continue;
-
                         let benefitScore = 1;
                         if (String(vm.state || '').toLowerCase().includes('off')) benefitScore += 10000;
                         if (String(vm.name || '').toLowerCase().includes('unused')) benefitScore += 5000;
                         const critScore = skorKritikalitas[String(vm.criticality || '').toUpperCase().trim()] || 0;
                         benefitScore += (10 - critScore) * 100;
-
                         const sizeDifference = Math.abs(vm.provisionedGb - (migrationTarget - totalMigrated));
                         const cost = 1 + sizeDifference;
-                        
                         const efficiencyScore = benefitScore / cost;
-                        
                         if (efficiencyScore > bestMove.efficiencyScore) {
                             bestMove = { vmIndex: i, destDsName: destDs.name, efficiencyScore: efficiencyScore };
                         }
@@ -1093,12 +1111,9 @@ function jalankanRekomendasiMigrasi() {
                         migrationPlan.set(bestMove.destDsName, []);
                     }
                     migrationPlan.get(bestMove.destDsName).push(vmToMove);
-
                     totalMigrated += vmToMove.provisionedGb;
-                    
                     const destDs = datastoresInCluster.find(ds => ds.name === bestMove.destDsName);
                     destDs.freeSpace -= vmToMove.provisionedGb;
-                    
                     candidatePool.splice(bestMove.vmIndex, 1);
                 } else {
                     break;
@@ -1115,7 +1130,11 @@ function jalankanRekomendasiMigrasi() {
                     });
                 });
             } else {
-                finalMessage += "<i>Tidak ditemukan rencana migrasi yang efisien.</i>\n";
+                finalMessage += "<i>Tidak ditemukan datastore tujuan yang cocok di dalam cluster ini untuk menampung kandidat VM.</i>\n\n";
+                finalMessage += "💡 <b>Rekomendasi:</b>\n";
+                finalMessage += `Buat Datastore baru pada <b>Cluster ${dsInfo.cluster}</b> dengan spesifikasi minimum:\n`;
+                finalMessage += ` •  <b>Tipe:</b> <code>${dsInfo.type || 'Sesuai standar'}</code>\n`;
+                finalMessage += ` •  <b>Kapasitas Tersedia:</b> > <code>${migrationTarget.toFixed(2)} GB</code>\n`;
             }
         });
         
@@ -1127,7 +1146,8 @@ function jalankanRekomendasiMigrasi() {
 }
 
 /**
- * Fungsi spesialis untuk menangani semua permintaan ekspor kategori Uptime.
+ * [REFACTORED v3.5.0 - FINAL] Fungsi spesialis untuk menangani semua permintaan ekspor kategori Uptime.
+ * Kini membaca nama header Uptime secara dinamis dari Konfigurasi.
  */
 function processUptimeExport(exportType, config) {
     let categoryName, minDays, maxDays, isInvalidCheck = false, sortAscending = true;
@@ -1144,9 +1164,11 @@ function processUptimeExport(exportType, config) {
     if (!sheet) throw new Error("Sheet Data Utama tidak ditemukan.");
     
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
-    if (uptimeIndex === -1) throw new Error(`Kolom '${KONSTANTA.HEADER_VM.UPTIME}' tidak ditemukan.`);
-
+    
+    const uptimeHeaderName = config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_UPTIME];
+    const uptimeIndex = headers.indexOf(uptimeHeaderName);
+    if (uptimeIndex === -1) throw new Error(`Kolom '${uptimeHeaderName}' tidak ditemukan atau salah dikonfigurasi.`);
+    
     const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
     let filteredData = allData.filter(row => {
         const uptimeValue = row[uptimeIndex];
@@ -1170,27 +1192,23 @@ function processUptimeExport(exportType, config) {
 }
 
 /**
- * [FUNGSI HELPER BARU - DIOPTIMALKAN DENGAN INDEKS]
- * Mengumpulkan entri log dari sheet aktif DAN arsip JSON yang relevan (berdasarkan file indeks)
- * sesuai rentang tanggal.
- * @param {Date} startDate - Tanggal mulai untuk filter log.
- * @param {object} config - Objek konfigurasi bot.
- * @returns {{headers: Array<string>, data: Array<Array<any>>}} Objek berisi header dan data log gabungan.
+ * [REFACTORED v3.5.0] Mengumpulkan entri log dari sheet aktif DAN arsip JSON.
  */
 function getCombinedLogs(startDate, config) {
+  const K = KONSTANTA.KUNCI_KONFIG;
   let combinedLogEntries = [];
   let logHeaders = [];
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
 
-  // --- 1. Ambil Log dari Sheet Aktif ---
   if (sheetLog && sheetLog.getLastRow() > 1) {
     const allLogData = sheetLog.getDataRange().getValues();
-    logHeaders = allLogData.shift(); // Ambil header
+    logHeaders = allLogData.shift(); 
     
-    const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+    const timestampHeader = config[K.HEADER_LOG_TIMESTAMP];
+    const timestampIndex = logHeaders.indexOf(timestampHeader);
     if (timestampIndex === -1) {
-        throw new Error("Gagal memproses log: Kolom 'Timestamp' tidak ditemukan di header sheet 'Log Perubahan'.");
+        throw new Error(`Gagal memproses log: Kolom '${timestampHeader}' tidak ditemukan di header sheet 'Log Perubahan'.`);
     }
 
     const activeLogs = allLogData.filter(row => {
@@ -1201,36 +1219,28 @@ function getCombinedLogs(startDate, config) {
     logHeaders = sheetLog.getRange(1, 1, 1, sheetLog.getLastColumn()).getValues()[0];
   }
 
-  // --- 2. Ambil Log dari Arsip JSON (Menggunakan Indeks) ---
-  const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ARSIP_LOG];
+  const FOLDER_ARSIP_ID = config[K.FOLDER_ARSIP_LOG];
   if (FOLDER_ARSIP_ID && logHeaders.length > 0) {
     try {
       const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
       const indexFiles = folderArsip.getFilesByName('archive_log_index.json');
-
       if (indexFiles.hasNext()) {
         const indexFile = indexFiles.next();
         const indexData = JSON.parse(indexFile.getBlob().getDataAsString());
-        
-        // Loop melalui INDEKS, bukan file
+        const timestampHeader = config[K.HEADER_LOG_TIMESTAMP];
+
         for (const indexEntry of indexData) {
           const archiveEndDate = new Date(indexEntry.endDate);
-          
-          // Jika tanggal akhir arsip lebih baru dari tanggal mulai yang kita cari,
-          // maka arsip ini mungkin berisi data yang relevan.
           if (archiveEndDate >= startDate) {
-            console.log(`Indeks menunjukkan arsip "${indexEntry.fileName}" relevan. Membaca file...`);
             const archiveFiles = folderArsip.getFilesByName(indexEntry.fileName);
             if (archiveFiles.hasNext()) {
               const file = archiveFiles.next();
               const jsonContent = file.getBlob().getDataAsString();
               const archivedLogs = JSON.parse(jsonContent);
 
-              const timestampHeader = KONSTANTA.HEADER_LOG.TIMESTAMP;
               const relevantLogs = archivedLogs.filter(logObject => 
                 logObject[timestampHeader] && new Date(logObject[timestampHeader]) >= startDate
               );
-
               const relevantLogsAsArray = relevantLogs.map(logObject => logHeaders.map(header => logObject[header] || ''));
               combinedLogEntries.push(...relevantLogsAsArray);
             }
@@ -1242,9 +1252,9 @@ function getCombinedLogs(startDate, config) {
     }
   }
 
-  // --- 3. Urutkan semua hasil dari yang terbaru ke terlama ---
   if (combinedLogEntries.length > 0) {
-    const timestampIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+    const timestampHeader = config[K.HEADER_LOG_TIMESTAMP];
+    const timestampIndex = logHeaders.indexOf(timestampHeader);
     if (timestampIndex !== -1) {
       combinedLogEntries.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
     }
@@ -1254,20 +1264,16 @@ function getCombinedLogs(startDate, config) {
 }
 
 /**
- * [FUNGSI PUSAT - ALUR INTERAKTIF FINAL] Mengendalikan semua permintaan ekspor dari menu interaktif.
- * Fungsi ini mengirim pesan status sementara, menjalankan ekspor, lalu mengedit pesan status menjadi pesan sukses.
- * @param {object} update - Objek update lengkap dari Telegram, khususnya callback_query.
- * @param {object} config - Objek konfigurasi bot.
- * @param {object} userData - Objek data pengguna yang terautentikasi.
+ * [REFACTORED v3.5.0 - FINAL & ROBUST] Mengendalikan semua permintaan ekspor dari menu interaktif.
+ * Kini sepenuhnya menggunakan header dinamis dari Konfigurasi untuk SEMUA tipe ekspor.
  */
 function handleExportRequest(update, config, userData) {
   const callbackQuery = update.callback_query;
   const chatId = callbackQuery.message.chat.id;
+  const messageId = callbackQuery.message.message_id;
   const exportType = callbackQuery.data;
 
   let statusMessageId = null;
-
-  // Langkah 1: Kirim pesan status awal dan simpan ID-nya
   try {
     const titleForStatus = exportType.replace(/export_|run_export_/, '').replace(/_/g, ' ').toUpperCase();
     const sentMessage = kirimPesanTelegram(`⏳ Memulai proses ekspor untuk <b>${titleForStatus}</b>... Harap tunggu.`, config, 'HTML', null, chatId);
@@ -1276,21 +1282,19 @@ function handleExportRequest(update, config, userData) {
     }
   } catch (e) {
     console.warn(`Gagal mengirim pesan status awal untuk ekspor: ${e.message}`);
-    // Proses tetap lanjut meskipun pesan status awal gagal dikirim
   }
 
   try {
     let headers, data, title, highlightColumn = null;
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const K = KONSTANTA.KUNCI_KONFIG; // Alias untuk kemudahan
 
-    // Langkah 2: Kumpulkan data (logika switch-case tidak berubah)
     switch (exportType) {
       case KONSTANTA.CALLBACK.EXPORT_LOG_TODAY:
       case KONSTANTA.CALLBACK.EXPORT_LOG_7_DAYS:
       case KONSTANTA.CALLBACK.EXPORT_LOG_30_DAYS: {
         const now = new Date();
         let startDate = new Date();
-        
         if (exportType === KONSTANTA.CALLBACK.EXPORT_LOG_TODAY) {
             startDate.setHours(0, 0, 0, 0);
             title = "Log Perubahan Hari Ini (Termasuk Arsip)";
@@ -1301,20 +1305,19 @@ function handleExportRequest(update, config, userData) {
             startDate.setDate(now.getDate() - 30);
             title = "Log Perubahan 30 Hari Terakhir (Termasuk Arsip)";
         }
-
         const combinedLogResult = getCombinedLogs(startDate, config);
         headers = combinedLogResult.headers;
         data = combinedLogResult.data;
-        highlightColumn = KONSTANTA.HEADER_LOG.ACTION;
-        
+        // --- [PERBAIKAN UTAMA DI SINI] ---
+        highlightColumn = config[K.HEADER_LOG_ACTION]; // Menggunakan kunci dinamis
         break;
       }
         
       case KONSTANTA.CALLBACK.EXPORT_ALL_VMS:
       case KONSTANTA.CALLBACK.EXPORT_VC01_VMS:
       case KONSTANTA.CALLBACK.EXPORT_VC02_VMS: {
-        const vmSheet = ss.getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-        if (!vmSheet) throw new Error(`Sheet data utama '${config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]}' tidak ditemukan.`);
+        const vmSheet = ss.getSheetByName(config[K.SHEET_VM]);
+        if (!vmSheet) throw new Error(`Sheet data utama '${config[K.SHEET_VM]}' tidak ditemukan.`);
 
         headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
         const allVmData = vmSheet.getLastRow() > 1 ? vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues() : [];
@@ -1323,13 +1326,15 @@ function handleExportRequest(update, config, userData) {
             data = allVmData;
             title = "Semua Data VM";
         } else {
-            const vcenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
-            if (vcenterIndex === -1) throw new Error(`Kolom '${KONSTANTA.HEADER_VM.VCENTER}' tidak ditemukan.`);
+            const vcenterHeaderName = config[K.HEADER_VM_VCENTER];
+            const vcenterIndex = headers.indexOf(vcenterHeaderName);
+            if (vcenterIndex === -1) throw new Error(`Kolom '${vcenterHeaderName}' tidak ditemukan atau salah dikonfigurasi.`);
+            
             const vcenter = exportType.split('_').pop().toUpperCase();
             data = allVmData.filter(row => String(row[vcenterIndex]).toUpperCase() === vcenter);
             title = `Data VM di ${vcenter}`;
         }
-        highlightColumn = KONSTANTA.HEADER_VM.VCENTER;
+        highlightColumn = config[K.HEADER_VM_VCENTER];
         break;
       }
 
@@ -1343,23 +1348,19 @@ function handleExportRequest(update, config, userData) {
             headers = result.headers;
             data = result.data;
             title = result.title;
-            highlightColumn = KONSTANTA.HEADER_VM.UPTIME;
+            highlightColumn = config[K.HEADER_VM_UPTIME];
         }
         break;
       }
     }
 
-    // Langkah 3: Proses hasil dan edit pesan status
     if (data && headers && headers.length > 0) {
         if (data.length > 0) {
-            // Fungsi ini akan mengirim pesan baru berisi link file
             exportResultsToSheet(headers, data, title, config, userData, highlightColumn);
-            // Edit pesan status awal menjadi pesan sukses
             if (statusMessageId) {
                 editMessageText(`✅ Proses ekspor untuk <b>${title}</b> telah selesai. Hasilnya telah dikirimkan dalam pesan terpisah.`, null, chatId, statusMessageId, config);
             }
         } else {
-            // Edit pesan status awal menjadi pesan "tidak ada data"
             const noDataMessage = `ℹ️ Tidak ada data yang dapat diekspor untuk kategori "<b>${title}</b>".`;
             if (statusMessageId) {
                 editMessageText(noDataMessage, null, chatId, statusMessageId, config);
@@ -1379,7 +1380,6 @@ function handleExportRequest(update, config, userData) {
   } catch (e) {
       console.error(`Gagal menangani permintaan ekspor: ${e.message}\nStack: ${e.stack}`);
       const errorMessage = `⚠️ Terjadi kesalahan saat memproses permintaan ekspor Anda.\n<code>${escapeHtml(e.message)}</code>`;
-      // Edit pesan status awal untuk menunjukkan pesan error
       if (statusMessageId) {
           editMessageText(errorMessage, null, chatId, statusMessageId, config);
       } else {
@@ -1652,17 +1652,17 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
 }
 
 /**
- * [MODIFIKASI v3.1] Menambahkan filter untuk memastikan hanya log tipe 'VM'
- * yang dianalisis sebagai penyebab over-provisioning.
+ * [REFACTORED v3.5.0 - FINAL] Menganalisis log perubahan untuk mendiagnosis penyebab over-provisioning.
+ * Sepenuhnya menggunakan header dinamis dari Konfigurasi.
  */
 function diagnoseOverprovisioningCause(dsName, config) {
+    const K = KONSTANTA.KUNCI_KONFIG;
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const { headers, data: allRecentLogs } = getCombinedLogs(thirtyDaysAgo, config);
     if(allRecentLogs.length === 0) return null;
     
-    // --- AWAL MODIFIKASI: Filter log berdasarkan Tipe Log ---
     const typeLogIndex = headers.indexOf(KONSTANTA.HEADER_LOG.TIPE_LOG);
     if (typeLogIndex === -1) {
         console.warn("Kolom 'Tipe Log' tidak ditemukan, analisis penyebab mungkin tidak akurat.");
@@ -1671,21 +1671,26 @@ function diagnoseOverprovisioningCause(dsName, config) {
     
     const recentLogs = allRecentLogs.filter(log => log[typeLogIndex] === 'VM');
     if(recentLogs.length === 0) return null;
-    // --- AKHIR MODIFIKASI ---
 
-    const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
+    // --- [PERBAIKAN UTAMA DI SINI] ---
+    const pkIndex = headers.indexOf(config[K.HEADER_VM_PK]);
     const actionIndex = headers.indexOf(KONSTANTA.HEADER_LOG.ACTION);
     const detailIndex = headers.indexOf(KONSTANTA.HEADER_LOG.DETAIL);
-    const newValueIndex = headers.indexOf(KONSTANTA.HEADER_LOG.NEW_VAL);
 
     let newVmCount = 0;
     let diskModCount = 0;
 
-    const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+    const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_VM]);
     const vmData = vmSheet.getDataRange().getValues();
     const vmHeaders = vmData.shift();
-    const vmPkIndex = vmHeaders.indexOf(KONSTANTA.HEADER_VM.PK);
-    const vmDsIndex = vmHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER]);
+    const vmPkIndex = vmHeaders.indexOf(config[K.HEADER_VM_PK]);
+    const vmDsIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
+    const vmProvGbHeader = config[K.HEADER_VM_PROV_GB]; // Nama header untuk Provisioned GB
+
+    if (vmPkIndex === -1 || vmDsIndex === -1) {
+        console.warn("Header PK atau DS tidak ditemukan di sheet VM, analisis penyebab dibatalkan.");
+        return null;
+    }
 
     const vmsOnThisDs = new Set(vmData.filter(row => row[vmDsIndex] === dsName).map(row => row[vmPkIndex]));
 
@@ -1695,11 +1700,12 @@ function diagnoseOverprovisioningCause(dsName, config) {
             const action = log[actionIndex];
             if (action === 'PENAMBAHAN') {
                 newVmCount++;
-            } else if (action === 'MODIFIKASI' && log[detailIndex].includes(KONSTANTA.HEADER_VM.PROV_GB)) {
+            } else if (action === 'MODIFIKASI' && log[detailIndex].includes(vmProvGbHeader)) {
                 diskModCount++;
             }
         }
     });
+    // --- [AKHIR PERBAIKAN UTAMA] ---
 
     if (newVmCount > 0 || diskModCount > 0) {
         let diagnosis = "Kondisi ini kemungkinan disebabkan oleh ";
@@ -1714,13 +1720,11 @@ function diagnoseOverprovisioningCause(dsName, config) {
 }
 
 /**
- * [FUNGSI BARU] Mencari semua VM yang berada di dalam cluster tertentu.
- * @param {string} clusterName - Nama cluster yang akan dicari.
- * @param {object} config - Objek konfigurasi bot.
- * @returns {{headers: Array<string>, results: Array<Array<any>>}} Objek berisi header dan baris data VM yang cocok.
+ * [REFACTORED v3.5.0] Mencari semua VM yang berada di dalam cluster tertentu.
  */
 function searchVmsByCluster(clusterName, config) {
-  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const sheetName = config[K.SHEET_VM];
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
 
@@ -1729,15 +1733,15 @@ function searchVmsByCluster(clusterName, config) {
   }
 
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const clusterIndex = headers.indexOf(KONSTANTA.HEADER_VM.CLUSTER);
+  const clusterHeaderName = config[K.HEADER_VM_CLUSTER];
+  const clusterIndex = headers.indexOf(clusterHeaderName);
 
   if (clusterIndex === -1) {
-    throw new Error(`Kolom header penting "${KONSTANTA.HEADER_VM.CLUSTER}" tidak ditemukan di sheet "${sheetName}".`);
+    throw new Error(`Kolom header penting "${clusterHeaderName}" tidak ditemukan di sheet "${sheetName}".`);
   }
 
   const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
 
-  // Filter data berdasarkan nama cluster yang sama persis (case-insensitive)
   const results = allData.filter(row => 
     String(row[clusterIndex] || '').toLowerCase() === clusterName.toLowerCase()
   );
@@ -1778,69 +1782,151 @@ function searchVmsByDatastore(datastoreName, config) {
 }
 
 /**
- * @param {object} update - Objek update dari Telegram (khususnya callback_query).
+ * [REFACTORED v3.6.0 - FINAL] Mengendalikan tampilan daftar VM yang kini berfungsi sebagai dashboard mini.
+ * Mengintegrasikan hasil analisis cluster, memperkaya tampilan entri, dan menangani navigasi kembali.
+ * @param {object} update - Objek update dari Telegram.
  * @param {object} config - Objek konfigurasi bot.
  * @param {string} listType - Tipe daftar, 'cluster' atau 'datastore'.
  * @param {string} itemName - Nama spesifik dari cluster atau datastore.
- * @param {boolean} isInitialRequest - True jika ini adalah permintaan pertama, false jika ini navigasi.
-*/
-function handlePaginatedVmList(update, config, listType, itemName, isInitialRequest) {
+ * @param {boolean} isInitialRequest - True jika ini adalah permintaan pertama.
+ * @param {string|null} originPk - (Opsional) Primary Key dari VM asal untuk tombol kembali.
+ */
+function handlePaginatedVmList(update, config, listType, itemName, isInitialRequest, originPk = null) {
   try {
     const userEvent = update.callback_query;
     const chatId = userEvent.message.chat.id;
     const messageId = userEvent.message.message_id;
 
     let searchFunction, titlePrefix, navPrefix, exportPrefix;
-    const K = KONSTANTA.CALLBACK_CEKVM;
+    const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
+    const K_CONFIG = KONSTANTA.KUNCI_KONFIG;
 
     if (listType === 'cluster') {
       searchFunction = searchVmsByCluster;
       titlePrefix = 'VM di Cluster';
-      navPrefix = K.CLUSTER_NAV_PREFIX;
-      exportPrefix = K.CLUSTER_EXPORT_PREFIX;
+      navPrefix = K_CEKVM.CLUSTER_NAV_PREFIX;
+      exportPrefix = K_CEKVM.CLUSTER_EXPORT_PREFIX;
     } else if (listType === 'datastore') {
       searchFunction = searchVmsByDatastore;
       titlePrefix = 'VM di Datastore';
-      navPrefix = K.DATASTORE_NAV_PREFIX;
-      exportPrefix = K.DATASTORE_EXPORT_PREFIX;
+      navPrefix = K_CEKVM.DATASTORE_NAV_PREFIX;
+      exportPrefix = K_CEKVM.DATASTORE_EXPORT_PREFIX;
     } else {
       throw new Error("Tipe daftar tidak valid: " + listType);
     }
+    
+    // 1. Panggil "Mesin" Analisis
+    const analysis = generateClusterAnalysis(itemName, config);
+    
+    // 2. Format Dashboard Analisis
+    let analysisDashboard = `📊 <b>Analisis Cluster "${escapeHtml(itemName)}"</b>\n`;
+    analysisDashboard += `• <b>Total VM:</b> ${analysis.totalVms} (🟢 ${analysis.on} On / 🔴 ${analysis.off} Off)\n`;
+    const totalMemoryInTb = analysis.totalMemory / 1024;
+    analysisDashboard += `• <b>Alokasi Resource:</b> ${analysis.totalCpu} vCPU | ${analysis.totalMemory.toFixed(0)} GB RAM (~${totalMemoryInTb.toFixed(2)} TB)\n`;
+    
+    const diskUtilPercent = analysis.diskUtilizationPercent;
+    const barLength = 12;
+    const filledLength = Math.round((diskUtilPercent / 100) * barLength);
+    const emptyLength = barLength - filledLength;
+    const progressBar = '█'.repeat(filledLength) + '░'.repeat(emptyLength);
+    analysisDashboard += `• <b>Utilisasi Disk:</b> ${diskUtilPercent.toFixed(1)}% [<code>${progressBar}</code>] (${analysis.totalVmProvisionedTb.toFixed(2)} / ${analysis.totalDsCapacityTb.toFixed(2)} TB)\n`;
+
+    if (analysis.criticalVmOffCount > 0) {
+      analysisDashboard += `• <b>Peringatan:</b> Terdapat <b>${analysis.criticalVmOffCount} VM Kritis</b> dalam kondisi mati!\n`;
+       for (const critLevel in analysis.criticalVmOffDetails) {
+         analysisDashboard += `  • <code>${critLevel}</code>: ${analysis.criticalVmOffDetails[critLevel]}\n`;
+       }
+    }
 
     const { headers, results } = searchFunction(itemName, config);
+
+    // 3. Perkaya Format Entri VM
     const formatVmEntry = (row) => {
-      const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-      const ipIndex = headers.indexOf(KONSTANTA.HEADER_VM.IP);
-      const pkIndex = headers.indexOf(KONSTANTA.HEADER_VM.PK);
-      return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
+      const state = String(row[headers.indexOf(config[K_CONFIG.HEADER_VM_STATE])] || '').toLowerCase();
+      const statusIcon = state.includes('on') ? '🟢' : '🔴';
+      const vmName = escapeHtml(row[headers.indexOf(config[K_CONFIG.HEADER_VM_NAME])]);
+      const criticality = escapeHtml(row[headers.indexOf(config[K_CONFIG.HEADER_VM_KRITIKALITAS])] || '');
+      const criticalityLabel = criticality ? `<code>[${criticality.toUpperCase()}]</code>` : '';
+      
+      const cpu = row[headers.indexOf(config[K_CONFIG.HEADER_VM_CPU])] || 'N/A';
+      const memory = row[headers.indexOf(config[K_CONFIG.HEADER_VM_MEMORY])] || 'N/A';
+      const disk = row[headers.indexOf(config[K_CONFIG.HEADER_VM_PROV_TB])] || 'N/A';
+      
+      return `${statusIcon} <b>${vmName}</b> ${criticalityLabel}\n     <code>${cpu} vCPU | ${memory} GB RAM | ${disk} TB Disk</code>`;
     };
 
-    let page = 1;
+     let page = 1;
     if (!isInitialRequest) {
-      const parts = userEvent.data.split('_');
-      page = parseInt(parts.pop(), 10) || 1;
+      const callbackData = userEvent.data;
+      // Membaca format callback baru dengan pemisah '|'
+      const dataParts = callbackData.split('_'); // cth: ['vmcl', 'TBN-COM-LNV-CL01|pk-vm-asal', 'nav', '2']
+      const navPartIndex = dataParts.findIndex(p => p === 'nav' || p === 'export');
+      
+      // Jika ada bagian navigasi/ekspor, data utama ada sebelum itu
+      const mainDataPart = navPartIndex > -1 ? dataParts.slice(1, navPartIndex).join('_') : dataParts.slice(1).join('_');
+      
+      const [parsedItemName, parsedOriginPk] = mainDataPart.split('|');
+      
+      itemName = parsedItemName; // Pastikan itemName diperbarui
+      if (parsedOriginPk) {
+        originPk = parsedOriginPk;
+      }
+      
+      const pagePart = dataParts[dataParts.length - 1];
+      if (!isNaN(pagePart)) {
+        page = parseInt(pagePart, 10);
+      }
     }
     
-    // PERBAIKAN: Menggunakan encodeURIComponent untuk memastikan nama item tidak terpotong
     const safeItemName = encodeURIComponent(itemName);
+    const originSuffix = originPk ? `|${originPk}` : '';
     
     const paginatedView = createPaginatedView({
       allItems: results,
       page: page,
       title: `${titlePrefix} "${escapeHtml(itemName)}"`,
+      headerContent: analysisDashboard, // Sisipkan dashboard ke dalam view
       formatEntryCallback: formatVmEntry,
-      navCallbackPrefix: `${navPrefix}${safeItemName}`, // Menggunakan nama item yang aman
+      navCallbackPrefix: `${navPrefix}${safeItemName}${originSuffix}`, // Bawa info asal
       exportCallbackData: `${exportPrefix}${safeItemName}`
     });
 
+    // 4. Tambahkan Tombol Kembali jika ada originPk
+    if (originPk && paginatedView.keyboard) {
+        paginatedView.keyboard.inline_keyboard.push([{ text: `⬅️ Kembali ke Detail VM`, callback_data: `${K_CEKVM.BACK_TO_DETAIL_PREFIX}${originPk}` }]);
+    }
+    
     if (isInitialRequest) {
-      kirimPesanTelegram(paginatedView.text, config, 'HTML', paginatedView.keyboard, chatId);
+        kirimPesanTelegram(paginatedView.text, config, 'HTML', paginatedView.keyboard, chatId);
     } else {
-      if (userEvent.message.text !== paginatedView.text) {
-        editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
-      }
+        if (userEvent.message.text !== paginatedView.text) {
+            editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
+        }
     }
   } catch (err) {
     handleCentralizedError(err, `Daftar VM Paginasi (${listType}: ${itemName})`, config);
+  }
+}
+
+/**
+ * [REFACTORED v3.8.2 - "Koki"] Menjalankan tugas ekspor.
+ * Kini memiliki penanganan error yang akan memberitahu pengguna jika terjadi kegagalan.
+ */
+function executeExportJob(jobData) {
+  // --- [PERBAIKAN UTAMA DI SINI] ---
+  const { searchTerm, config, userData, chatId } = jobData; // Ambil chatId dari jobData
+  try {
+    console.log(`Menjalankan pekerjaan ekspor untuk pencarian: "${searchTerm}"`);
+
+    const { headers, results } = searchVmOnSheet(searchTerm, config);
+    const vmNameHeader = config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_NAME];
+    
+    // Panggil exportResultsToSheet yang akan mengirim pesan sukses
+    exportResultsToSheet(headers, results, `Pencarian VM '${searchTerm}'`, config, userData, vmNameHeader);
+  } catch(e) {
+    console.error(`Gagal mengeksekusi pekerjaan ekspor. Data: ${JSON.stringify(jobData)}. Error: ${e.message}`);
+    // Jika terjadi error, kirim pesan kegagalan ke pengguna di chat yang benar.
+    const failMessage = `🔴 Maaf, terjadi kesalahan saat memproses file ekspor Anda untuk pencarian "<b>${escapeHtml(searchTerm)}</b>".\n\n<code>Penyebab: ${escapeHtml(e.message)}</code>`;
+    kirimPesanTelegram(failMessage, config, 'HTML', null, chatId);
   }
 }

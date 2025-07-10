@@ -124,12 +124,18 @@ function handleCentralizedError(errorObject, context, config) {
 }
 
 /**
- * [v1.1-stabil] Membuat tampilan berhalaman (pesan teks dan keyboard) untuk data apa pun secara generik.
+ * [REFACTORED v3.6.0] Membuat tampilan berhalaman (pesan teks dan keyboard) secara generik.
+ * Kini mendukung penambahan konten header kustom di atas daftar.
  */
-function createPaginatedView({ allItems, page, title, formatEntryCallback, navCallbackPrefix, exportCallbackData = null, entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES }) {
+function createPaginatedView({ allItems, page, title, headerContent = null, formatEntryCallback, navCallbackPrefix, exportCallbackData = null, entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES }) {
   const totalEntries = allItems.length;
   if (totalEntries === 0) {
-    return { text: `ℹ️ ${title}\n\nTidak ada data yang ditemukan.`, keyboard: null };
+    let emptyText = `ℹ️ ${title}\n\n`;
+    if (headerContent) {
+        emptyText = headerContent + `\n` + emptyText;
+    }
+    emptyText += `Tidak ada data yang ditemukan.`;
+    return { text: emptyText, keyboard: null };
   }
 
   const totalPages = Math.ceil(totalEntries / entriesPerPage);
@@ -141,14 +147,19 @@ function createPaginatedView({ allItems, page, title, formatEntryCallback, navCa
 
   const listContent = pageEntries.map((item, index) => {
     return `${startIndex + index + 1}. ${formatEntryCallback(item)}`;
-  }).join('\n');
+  }).join('\n\n'); // Beri sedikit jarak antar entri
 
-  let text = `📄 <b>${title}</b>\n`;
+  let text = "";
+  // Tambahkan konten header jika ada
+  if (headerContent) {
+      text += headerContent + "\n";
+  }
+  
   text += `<i>Menampilkan <b>${startIndex + 1}-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
   text += `------------------------------------\n\n`;
   text += listContent;
   
-  text += '\u200B';
+  text += '\u200B'; // Karakter spasi tanpa lebar untuk mencegah Telegram memotong teks
 
   const keyboardRows = [];
   const navigationButtons = [];
@@ -269,7 +280,7 @@ function clearBotStateCache() {
 }
 
 /**
- * [MODIFIKASI v3.0 - FINAL & ROBUST] Fungsi pembantu yang lebih tangguh untuk mem-parse
+ * [MODIFIKASI v3.5.0 - FINAL & ROBUST] Fungsi pembantu yang lebih tangguh untuk mem-parse
  * string angka, kini dapat menangani format standar dan internasional dengan benar
  * tanpa merusak nilai desimal.
  * @param {string | number} numberString - String angka yang akan di-parse.
@@ -333,5 +344,145 @@ function getUserState(userId) {
     cache.remove(stateKey); 
     return JSON.parse(stateJSON);
   }
+  return null;
+}
+
+/**
+ * [FUNGSI BARU v3.4.0] Menyimpan data besar ke cache dengan teknik chunking.
+ * Fungsi ini secara otomatis menangani invalidasi cache lama sebelum menyimpan yang baru.
+ * @param {string} keyPrefix - Awalan unik untuk kunci cache, misal: 'vm_data'.
+ * @param {object} data - Objek atau array data yang akan disimpan.
+ * @param {number} durationInSeconds - Durasi penyimpanan cache dalam detik.
+ */
+function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
+  const cache = CacheService.getScriptCache();
+  const manifestKey = `${keyPrefix}_manifest`;
+  
+  // Hapus cache lama terlebih dahulu untuk memastikan invalidasi yang bersih
+  let oldManifest;
+  try {
+    const oldManifestJSON = cache.get(manifestKey);
+    if (oldManifestJSON) {
+      oldManifest = JSON.parse(oldManifestJSON);
+    }
+  } catch(e) {
+    console.warn(`Gagal mem-parse manifest cache lama untuk prefix "${keyPrefix}". Mungkin sudah tidak ada. Error: ${e.message}`);
+  }
+  
+  if (oldManifest && oldManifest.totalChunks) {
+    const keysToRemove = [manifestKey];
+    for (let i = 0; i < oldManifest.totalChunks; i++) {
+      keysToRemove.push(`${keyPrefix}_chunk_${i}`);
+    }
+    cache.removeAll(keysToRemove);
+    console.log(`Cache lama dengan prefix "${keyPrefix}" telah berhasil dihapus.`);
+  }
+
+  // Lanjutkan dengan penyimpanan data baru
+  const dataString = JSON.stringify(data);
+  const maxChunkSize = 95 * 1024; // 95KB untuk batas aman
+  const chunks = [];
+
+  // Pecah data menjadi beberapa bagian jika perlu
+  for (let i = 0; i < dataString.length; i += maxChunkSize) {
+    chunks.push(dataString.substring(i, i + maxChunkSize));
+  }
+
+  // Siapkan manifest dan semua potongan data untuk disimpan
+  const manifest = { totalChunks: chunks.length };
+  const itemsToCache = {
+    [manifestKey]: JSON.stringify(manifest)
+  };
+  chunks.forEach((chunk, index) => {
+    itemsToCache[`${keyPrefix}_chunk_${index}`] = chunk;
+  });
+
+  try {
+    cache.putAll(itemsToCache, durationInSeconds);
+    console.log(`Data berhasil disimpan ke cache dengan prefix "${keyPrefix}" dalam ${chunks.length} potongan.`);
+  } catch (e) {
+    console.error(`Gagal menyimpan data cache dengan teknik chunking untuk prefix "${keyPrefix}". Error: ${e.message}`);
+  }
+}
+
+/**
+ * [FUNGSI BARU v3.4.0] Membaca data besar dari cache yang disimpan dengan teknik chunking.
+ * Dilengkapi dengan validasi integritas untuk memastikan data tidak rusak.
+ * @param {string} keyPrefix - Awalan unik untuk kunci cache.
+ * @returns {object|null} Data yang telah direkonstruksi, atau null jika cache tidak lengkap atau tidak ada.
+ */
+function readLargeDataFromCache(keyPrefix) {
+  const cache = CacheService.getScriptCache();
+  const manifestKey = `${keyPrefix}_manifest`;
+  
+  try {
+    const manifestJSON = cache.get(manifestKey);
+    if (!manifestJSON) {
+      console.log(`Cache manifest untuk prefix "${keyPrefix}" tidak ditemukan (cache miss).`);
+      return null; 
+    }
+
+    const manifest = JSON.parse(manifestJSON);
+    const totalChunks = manifest.totalChunks;
+    const chunkKeys = [];
+
+    for (let i = 0; i < totalChunks; i++) {
+      chunkKeys.push(`${keyPrefix}_chunk_${i}`);
+    }
+
+    const cachedChunks = cache.getAll(chunkKeys);
+    let reconstructedString = "";
+
+    // Validasi Integritas Cache (Sangat Penting!)
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkKey = `${keyPrefix}_chunk_${i}`;
+      if (!cachedChunks[chunkKey]) {
+        console.error(`Integritas cache rusak: Potongan "${chunkKey}" hilang. Membatalkan pembacaan cache.`);
+        return null; // Cache miss karena tidak lengkap
+      }
+      reconstructedString += cachedChunks[chunkKey];
+    }
+
+    console.log(`Data berhasil direkonstruksi dari ${totalChunks} potongan cache.`);
+    return JSON.parse(reconstructedString);
+
+  } catch (e) {
+    console.error(`Gagal membaca atau mem-parse data cache dengan prefix "${keyPrefix}". Error: ${e.message}`);
+    return null; // Cache miss karena error
+  }
+}
+
+/**
+ * [FUNGSI BARU v3.7.0] Membuat sesi callback sementara di cache.
+ * Menyimpan data konteks (seperti nama cluster & PK asal) dan mengembalikan ID unik.
+ * @param {object} dataToStore - Objek yang berisi data yang perlu disimpan.
+ * @returns {string} ID unik (seperti "nomor resi") untuk sesi ini.
+ */
+function createCallbackSession(dataToStore) {
+  const cache = CacheService.getScriptCache();
+  const sessionId = Utilities.getUuid().substring(0, 8); // Membuat ID unik 8 karakter yang ringkas
+  // Simpan sesi selama 15 menit (900 detik), lebih dari cukup untuk pengguna menekan tombol.
+  cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), 900); 
+  console.log(`Sesi callback dibuat dengan ID: ${sessionId}`);
+  return sessionId;
+}
+
+/**
+ * [FUNGSI BARU v3.7.0] Mengambil dan menghapus sesi callback dari cache.
+ * @param {string} sessionId - ID unik dari sesi yang akan diambil.
+ * @returns {object|null} Objek data yang tersimpan, atau null jika sesi tidak ditemukan/kedaluwarsa.
+ */
+function getCallbackSession(sessionId) {
+  const cache = CacheService.getScriptCache();
+  const sessionKey = `session_${sessionId}`;
+  const sessionJSON = cache.get(sessionKey);
+
+  if (sessionJSON) {
+    console.log(`Mengambil sesi callback dengan ID: ${sessionId}`);
+    // Setelah sesi diambil, langsung hapus agar tidak bisa digunakan lagi (keamanan).
+    cache.remove(sessionKey);
+    return JSON.parse(sessionJSON);
+  }
+  console.warn(`Sesi callback dengan ID: ${sessionId} tidak ditemukan atau telah kedaluwarsa.`);
   return null;
 }

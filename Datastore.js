@@ -46,54 +46,72 @@ function jalankanPemeriksaanDatastore(config) {
   }
 }
 
+// ===== FILE: Datastore.js (v3.5.0 - FINAL & ROBUST) =====
+
 /**
- * [MODIFIKASI FINAL] Mengambil detail lengkap datastore, menggunakan konstanta terpusat untuk semua header.
+ * [REFACTORED v3.5.0 - FINAL & ROBUST] Mengambil detail lengkap datastore dengan header dinamis dan validasi proaktif.
+ * Fungsi ini tidak akan gagal secara senyap dan akan melaporkan kesalahan konfigurasi header.
  * @param {string} dsName - Nama datastore yang akan dicari.
- * @param {object} config - Objek konfigurasi bot.
+ * @param {object} config - Objek konfigurasi bot yang aktif.
  * @returns {object|null} Objek berisi detail datastore, atau null jika tidak ditemukan.
  */
 function getDatastoreDetails(dsName, config) {
-  const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
-  if (!dsSheet) throw new Error(`Sheet datastore '${config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]}' tidak ditemukan.`);
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_DS]);
+  if (!dsSheet) throw new Error(`Sheet datastore '${config[K.SHEET_DS]}' tidak ditemukan.`);
 
   const dsHeaders = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-  const allDsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
+  
+  const requiredHeaders = {
+    dsName: config[K.DS_NAME_HEADER],
+    capacityGb: config[K.HEADER_DS_CAPACITY_GB],
+    provisionedGb: config[K.HEADER_DS_PROV_DS_GB],
+    capacityTb: config[K.HEADER_DS_CAPACITY_TB], // Menggunakan kunci yang sudah benar
+    provisionedTb: config[K.HEADER_DS_PROV_DS_TB]
+  };
 
-  const dsNameIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-  const dsRow = allDsData.find(row => String(row[dsNameIndex] || '').toLowerCase() === dsName.toLowerCase());
+  const indices = {};
+  for (const key in requiredHeaders) {
+    if (!requiredHeaders[key]) {
+        throw new Error(`Kunci konfigurasi untuk '${key}' tidak ditemukan. Pastikan semua kunci HEADER_DS... telah diatur di sheet Konfigurasi.`);
+    }
+    indices[key] = dsHeaders.indexOf(requiredHeaders[key]);
+    if (indices[key] === -1) {
+      throw new Error(`Header '${requiredHeaders[key]}' tidak ditemukan di sheet Datastore atau tidak diatur dengan benar di Konfigurasi.`);
+    }
+  }
+  // --- [AKHIR VALIDASI] ---
+
+  const allDsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
+  const dsRow = allDsData.find(row => String(row[indices.dsName] || '').toLowerCase() === dsName.toLowerCase());
 
   if (!dsRow) return null;
 
-  const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+  // Mencari jumlah VM (logika tidak berubah)
+  const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_VM]);
   let vmCount = 0;
   if (vmSheet) {
     const vmHeaders = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
-    const vmDsIndex = vmHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER]);
+    const vmDsIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
     if (vmDsIndex !== -1) {
       const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
       vmCount = allVmData.filter(row => String(row[vmDsIndex] || '') === dsName).length;
     }
   }
 
-  // --- [PERUBAHAN UTAMA DIMULAI DI SINI] ---
-  // Menggunakan konstanta dari KONSTANTA.HEADER_DS
-  const capacityGb = parseFloat(dsRow[dsHeaders.indexOf(KONSTANTA.HEADER_DS.CAPACITY_GB)]) || 0;
-  const provisionedGb = parseFloat(dsRow[dsHeaders.indexOf(KONSTANTA.HEADER_DS.PROV_DS_GB)]) || 0;
-  const usagePercent = capacityGb > 0 ? (provisionedGb / capacityGb * 100) : 0;
+  // Perhitungan sekarang dijamin aman karena indeks sudah divalidasi
+  const capacityGb = parseLocaleNumber(dsRow[indices.capacityGb]);
+  const provisionedGb = parseLocaleNumber(dsRow[indices.provisionedGb]);
+  const capacityTb = parseLocaleNumber(dsRow[indices.capacityTb]);
+  const provisionedTb = parseLocaleNumber(dsRow[indices.provisionedTb]);
   
-  const capacityTbIndex = dsHeaders.indexOf(KONSTANTA.HEADER_DS.CAPACITY_TB);
-  const provisionedTbIndex = dsHeaders.indexOf(KONSTANTA.HEADER_DS.PROV_DS_TB);
-
-  const capacityTb = capacityTbIndex !== -1 ? parseFloat(dsRow[capacityTbIndex]) : 0;
-  const provisionedTb = provisionedTbIndex !== -1 ? parseFloat(dsRow[provisionedTbIndex]) : 0;
-  // --- [PERUBAHAN UTAMA SELESAI] ---
-
-  const migrationConfig = getMigrationConfig(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_LOGIKA_MIGRASI]));
+  const usagePercent = capacityGb > 0 ? (provisionedGb / capacityGb * 100) : 0;
+  const migrationConfig = getMigrationConfig(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_LOGIKA_MIGRASI]));
 
   return {
     name: dsName,
     ...getDsInfo(dsName, migrationConfig),
-    environment: getEnvironmentFromDsName(dsName, config[KONSTANTA.KUNCI_KONFIG.MAP_ENV]),
+    environment: getEnvironmentFromDsName(dsName, config[K.MAP_ENV]),
     capacityGb: capacityGb,
     provisionedGb: provisionedGb,
     freeGb: capacityGb - provisionedGb,
@@ -105,10 +123,10 @@ function getDatastoreDetails(dsName, config) {
   };
 }
 
+
 /**
- * [MODIFIKASI FINAL] Memformat detail datastore dengan format bold pada label dan italic pada satuan TB.
- * @param {object} details - Objek detail datastore dari getDatastoreDetails.
- * @returns {object} Objek berisi { pesan: string, keyboard: object|null }.
+ * [REFACTORED v3.5.0 - FINAL] Memformat detail datastore.
+ * Fungsi ini tidak perlu diubah, tetapi disertakan untuk kelengkapan file.
  */
 function formatDatastoreDetail(details) {
   if (!details) {
@@ -132,7 +150,6 @@ function formatDatastoreDetail(details) {
   message += addDetail(details.type, '⚙️', 'Tipe');
   
   message += `\n<b>Status Kapasitas</b>\n`;
-
   message += `• 📦 <b>Kapasitas:</b> ${details.capacityGb.toFixed(2)} GB <i>(${details.capacityTb.toFixed(2)} TB)</i>\n`;
   message += `• 📥 <b>Terpakai (Provisioned):</b> ${details.provisionedGb.toFixed(2)} GB <i>(${details.provisionedTb.toFixed(2)} TB)</i>\n`;
   message += `• 📤 <b>Tersedia:</b> ${details.freeGb.toFixed(2)} GB <i>(${details.freeTb.toFixed(2)} TB)</i>\n`;

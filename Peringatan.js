@@ -115,25 +115,24 @@ function jalankanPemeriksaanAmbangBatas(config = null) {
 }
   
 /**
- * [PERBAIKAN KONSISTENSI]
- * Memeriksa datastore yang kapasitasnya melebihi threshold dan MENGEMBALIKAN array berisi objek terstruktur.
- * @param {object} config Objek konfigurasi bot.
- * @returns {Array<object>} Array berisi objek peringatan.
+ * [REFACTORED v3.5.0] Memeriksa datastore yang kapasitasnya melebihi threshold.
+ * Kini membaca nama header dari Konfigurasi.
  */
 function cekKapasitasDatastore(config) {
-  const threshold = parseInt(config.THRESHOLD_DS_USED_PERCENT, 10);
+  const K = KONSTANTA.KUNCI_KONFIG; // Standarisasi menggunakan 'K'
+  const threshold = parseInt(config[K.THRESHOLD_DS_USED], 10);
   if (isNaN(threshold)) return [];
 
-  const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
-  // Mengembalikan objek error yang terstruktur jika sheet tidak ditemukan
+  const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_DS]);
   if (!dsSheet) return [{ tipe: "Error Sistem", item: "Pengecekan Kapasitas Datastore", detailFormatted: "Sheet tidak ditemukan.", detailRaw: "Sheet tidak ditemukan.", icon: "⚠️", kritikalitas: "N/A" }];
 
   const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-  const nameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-  const usedPercentIndex = headers.indexOf(KONSTANTA.HEADER_DS.USED_PERCENT);
+  
+  const nameIndex = headers.indexOf(config[K.DS_NAME_HEADER]);
+  const usedPercentHeaderName = config[K.HEADER_DS_USED_PERCENT];
+  const usedPercentIndex = headers.indexOf(usedPercentHeaderName);
 
-  // Mengembalikan objek error yang terstruktur jika header tidak ditemukan
-  if (nameIndex === -1 || usedPercentIndex === -1) return [{ tipe: "Error Sistem", item: "Pengecekan Kapasitas Datastore", detailFormatted: "Header penting tidak ditemukan.", detailRaw: "Header penting tidak ditemukan.", icon: "⚠️", kritikalitas: "N/A" }];
+  if (nameIndex === -1 || usedPercentIndex === -1) return [{ tipe: "Error Sistem", item: "Pengecekan Kapasitas Datastore", detailFormatted: `Header penting ('${config[K.DS_NAME_HEADER]}' atau '${usedPercentHeaderName}') tidak ditemukan/dikonfigurasi.`, detailRaw: "Header penting tidak ditemukan.", icon: "⚠️", kritikalitas: "N/A" }];
 
   const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
   const alerts = [];
@@ -142,14 +141,13 @@ function cekKapasitasDatastore(config) {
     const usedPercent = parseFloat(row[usedPercentIndex]);
     if (!isNaN(usedPercent) && usedPercent > threshold) {
       const dsName = row[nameIndex];
-      // [IMPLEMENTASI] Logika tidak berubah, hanya format output yang diubah menjadi OBJEK.
       alerts.push({
         tipe: "Kapasitas Datastore Kritis",
         item: dsName,
         detailFormatted: `Kapasitas Terpakai: <b>${usedPercent.toFixed(1)}%</b> (Ambang Batas: ${threshold}%)`,
         detailRaw: `Terpakai: ${usedPercent.toFixed(1)}%, Batas: ${threshold}%`,
         icon: "🔥",
-        kritikalitas: null // Datastore tidak memiliki kolom kritikalitas
+        kritikalitas: null
       });
     }
   });
@@ -178,9 +176,10 @@ function cekUptimeVmKritis(config) {
   const headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
   const vmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
 
-  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-  const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
-  const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const nameIndex = headers.indexOf(config[K.HEADER_VM_NAME]);
+  const uptimeIndex = headers.indexOf(config[K.HEADER_VM_UPTIME]);
+  const critIndex = headers.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
   if (nameIndex === -1 || uptimeIndex === -1 || critIndex === -1) return [];
 
   const alerts = [];
@@ -224,9 +223,10 @@ function cekVmKritisMati(config) {
   const headers = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
   const vmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
 
-  const nameIndex = headers.indexOf(KONSTANTA.HEADER_VM.VM_NAME);
-  const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
-  const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const nameIndex = headers.indexOf(config[K.HEADER_VM_NAME]);
+  const stateIndex = headers.indexOf(config[K.HEADER_VM_STATE]);
+  const critIndex = headers.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
   if (nameIndex === -1 || stateIndex === -1 || critIndex === -1) return [];
 
   const alerts = [];

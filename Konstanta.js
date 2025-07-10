@@ -34,6 +34,7 @@ const KONSTANTA = {
     BACK_TO_SUMMARY: 'ticket_back_summary',
     BACK_TO_LIST: 'ticket_back_list_',
   },
+  
   // Callback data catatan
   CALLBACK_CATATAN: {
     PREFIX: 'note_',
@@ -41,6 +42,7 @@ const KONSTANTA = {
     DELETE: 'note_delete_',
     DELETE_CONFIRM: 'note_delete_confirm_'
   },
+
   // Callback data histori
   CALLBACK_HISTORY: {
     PREFIX: 'history_',
@@ -51,71 +53,20 @@ const KONSTANTA = {
   CALLBACK_CEKVM: {
     PREFIX: 'cekvm_',
     HISTORY_PREFIX: 'cekvm_history_',
-    CLUSTER_PREFIX: 'cekvm_cluster_',
-    DATASTORE_PREFIX: 'cekvm_datastore_',
+    CLUSTER_PREFIX: 'vmcl_',
+    DATASTORE_PREFIX: 'vmds_',
     CLUSTER_NAV_PREFIX: 'cekvm_cluster_nav_', // Untuk navigasi halaman VM di cluster
     CLUSTER_EXPORT_PREFIX: 'cekvm_cluster_export_', // Untuk ekspor VM di cluster
     DATASTORE_EXPORT_PREFIX: 'cekvm_ds_export_', // Untuk ekspor VM di datastore
     DATASTORE_LIST_VMS_PREFIX: 'cekvm_ds_list_', // Untuk melihat daftar VM di datastore
     DATASTORE_NAV_PREFIX: 'cekvm_ds_nav_',       // Untuk navigasi halaman VM di datastore
+    BACK_TO_DETAIL_PREFIX: 'cekvm_back_to_detail_',
   },
+  
   // Aksi spesifik untuk pagination
   PAGINATION_ACTIONS: {
     NAVIGATE: 'nav',
     EXPORT: 'export',
-  },
-  // Header sheet Log Perubahan
-  HEADER_LOG: {
-    TIMESTAMP: 'Timestamp', 
-    ACTION: 'Action/Tipe perubahan', 
-    OLD_VAL: 'Old Value', 
-    NEW_VAL: 'New Value', 
-    DETAIL: 'Detail Perubahan',
-    TIPE_LOG: 'Tipe Log',
-  },
-  
-  // Header kolom krusial VM
-  HEADER_VM: {
-    PK: 'Primary Key', 
-    VM_NAME: 'Virtual Machine', 
-    IP: 'IP Address', 
-    GUEST_OS: 'Guest OS (Manual)', 
-    STATE: 'State', 
-    VCENTER: 'vCenter', 
-    CLUSTER: 'Cluster', 
-    UPTIME: 'Uptime', 
-    CPU: 'CPU', 
-    MEMORY: 'Memory', 
-    PROV_GB: 'Provisioned Space (GB)', 
-    PROV_TB: 'Provisioned Space (TB)', 
-    KRITIKALITAS: 'Kritikalitas By BIA 2024', 
-    KELOMPOK_APP: 'Kelompok Aplikasi by BIA VM 2024', 
-    DEV_OPS: 'DEV/OPS by BIA 2024',
-    ENVIRONMENT: 'Environment'
-  },
-  
-  // Header kolom Datastore
-  HEADER_DS: {
-    CAPACITY_GB: 'Capacity (GB)', 
-    CAPACITY_TB: 'Capacity (TB)',
-    PROV_DS_GB: 'Provisioned (GB)',
-    PROV_DS_TB: 'Provisioned (TB)',
-    USED_PERCENT: 'Used Space (%)',
-  },
-  
-  // Header kolom Tiket
-  HEADER_TIKET: {
-    NAMA_VM: 'Name', 
-    KRITIKALITAS: 'Krtikalitas VM', 
-    LINK_TIKET: 'Link Tiket', 
-    KATEGORI: 'Kategori', 
-    TGL_CREATE: 'Tanggal Created Tiket', 
-    TGL_FU: 'Tanggal FU ke User', 
-    STATUS: 'Status Tiket', 
-    ACTION: 'Action', 
-    TGL_DONE: 'Tanggal Done Tiket', 
-    DEV_OPS: 'DEV/OPS by BIA 2024', 
-    KETERANGAN: 'Keterangan'
   },
   
   // Kunci di sheet Konfigurasi
@@ -132,10 +83,9 @@ const KONSTANTA = {
     MAP_ENV: 'PEMETAAN_ENVIRONMENT', 
     DS_KECUALI: 'KATA_KUNCI_DS_DIKECUALIKAN', 
     SHEET_LOGIKA_MIGRASI: 'NAMA_SHEET_LOGIKA_MIGRASI', 
-    DS_NAME_HEADER: 'HEADER_DATASTORE_NAME', 
+    DS_NAME_HEADER: 'HEADER_DATASTORE_NAME',
     VM_DS_COLUMN_HEADER: 'HEADER_VM_DATASTORE_COLUMN', 
     DS_PROV_GB_HEADER: 'HEADER_DATASTORE_PROVISIONED_GB', 
-    VM_PROV_GB_HEADER: 'HEADER_VM_PROVISIONED_GB', 
     THRESHOLD_DS_USED: 'THRESHOLD_DS_USED_PERCENT', 
     THRESHOLD_VM_UPTIME: 'THRESHOLD_VM_UPTIME_DAYS', 
     KRITIKALITAS_PANTAU: 'KRITIKALITAS_VM_DIPANTAU', 
@@ -145,6 +95,48 @@ const KONSTANTA = {
     SKOR_KRITIKALITAS: 'SKOR_KRITIKALITAS',
     KOLOM_PANTAU_DS: 'KOLOM_PANTAU_DATASTORE',
     LOG_TOLERANCE_PROV_GB: 'LOG_TOLERANCE_PROV_GB',
+    
+    HEADER_VM_PK: 'HEADER_VM_PK',
+    HEADER_VM_NAME: 'HEADER_VM_NAME',
+    HEADER_VM_IP: 'HEADER_VM_IP',
+    HEADER_VM_GUEST_OS: 'HEADER_VM_GUEST_OS',
+    HEADER_VM_STATE: 'HEADER_VM_STATE',
+    HEADER_VM_VCENTER: 'HEADER_VM_VCENTER',
+    HEADER_VM_CLUSTER: 'HEADER_VM_CLUSTER',
+    HEADER_VM_UPTIME: 'HEADER_VM_UPTIME',
+    HEADER_VM_CPU: 'HEADER_VM_CPU',
+    HEADER_VM_MEMORY: 'HEADER_VM_MEMORY',
+    HEADER_VM_PROV_GB: 'HEADER_VM_PROV_GB',
+    HEADER_VM_PROV_TB: 'HEADER_VM_PROV_TB',
+    HEADER_VM_KRITIKALITAS: 'HEADER_VM_KRITIKALITAS',
+    HEADER_VM_KELOMPOK_APP: 'HEADER_VM_KELOMPOK_APP',
+    HEADER_VM_DEV_OPS: 'HEADER_VM_DEV_OPS',
+    HEADER_VM_ENVIRONMENT: 'HEADER_VM_ENVIRONMENT',
+    
+    HEADER_DS_CAPACITY_GB: 'HEADER_DS_CAPACITY_GB',
+    HEADER_DS_CAPACITY_TB: 'HEADER_DS_CAPACITY_TB',
+    HEADER_DS_PROV_DS_GB: 'HEADER_DS_PROV_DS_GB',
+    HEADER_DS_PROV_DS_TB: 'HEADER_DS_PROV_DS_TB',
+    HEADER_DS_USED_PERCENT: 'HEADER_DS_USED_PERCENT',
+
+    HEADER_LOG_TIMESTAMP: 'HEADER_LOG_TIMESTAMP',
+    HEADER_LOG_ACTION: 'HEADER_LOG_ACTION',
+    HEADER_LOG_OLD_VAL: 'HEADER_LOG_OLD_VAL',
+    HEADER_LOG_NEW_VAL: 'HEADER_LOG_NEW_VAL',
+    HEADER_LOG_DETAIL: 'HEADER_LOG_DETAIL',
+    HEADER_LOG_TIPE_LOG: 'HEADER_LOG_TIPE_LOG',
+
+    HEADER_TIKET_NAMA_VM: 'HEADER_TIKET_NAMA_VM',
+    HEADER_TIKET_KRITIKALITAS: 'HEADER_TIKET_KRITIKALITAS',
+    HEADER_TIKET_LINK: 'HEADER_TIKET_LINK',
+    HEADER_TIKET_KATEGORI: 'HEADER_TIKET_KATEGORI',
+    HEADER_TIKET_TGL_CREATE: 'HEADER_TIKET_TGL_CREATE',
+    HEADER_TIKET_TGL_FU: 'HEADER_TIKET_TGL_FU',
+    HEADER_TIKET_STATUS: 'HEADER_TIKET_STATUS',
+    HEADER_TIKET_ACTION: 'HEADER_TIKET_ACTION',
+    HEADER_TIKET_TGL_DONE: 'HEADER_TIKET_TGL_DONE',
+    HEADER_TIKET_DEV_OPS: 'HEADER_TIKET_DEV_OPS',
+    HEADER_TIKET_KETERANGAN: 'HEADER_TIKET_KETERANGAN'
   },
   
   // Nama file arsip
@@ -186,6 +178,7 @@ const KONSTANTA = {
     DISTRIBUSI_VM: '/distribusi_vm',
     CEK_KONDISI: '/cek_kondisi',
   },
+
   // String yang sering digunakan
   UI_STRINGS: {
     SEPARATOR: "\n--------------------------------------------------\n",

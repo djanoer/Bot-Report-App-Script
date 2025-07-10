@@ -223,8 +223,8 @@ const commandHandlers = {
 };
 
 /**
- * [HARDENED & ROBUST v3.3.4 - FINAL] Fungsi utama untuk menangani semua permintaan dari Telegram.
- * Penyempurnaan UX: Perintah 'batal' saat input catatan akan mengembalikan tampilan ke detail VM.
+ * [REFACTORED v3.7.0 - FINAL] Fungsi utama yang menangani semua permintaan dari Telegram.
+ * Kini menggunakan arsitektur Session Cache untuk memproses callback data secara tangguh.
  */
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) { return HtmlService.createHtmlOutput("Bad Request"); }
@@ -273,7 +273,27 @@ function doPost(e) {
         const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
         const K_NOTE = KONSTANTA.CALLBACK_CATATAN;
 
-        if (callbackData.startsWith(K_NOTE.EDIT_ADD)) {
+        // Router Callback Query dengan arsitektur Session Cache
+        if (callbackData.startsWith(K_CEKVM.CLUSTER_PREFIX) || callbackData.startsWith(K_CEKVM.DATASTORE_PREFIX)) {
+            const prefix = callbackData.startsWith(K_CEKVM.CLUSTER_PREFIX) ? K_CEKVM.CLUSTER_PREFIX : K_CEKVM.DATASTORE_PREFIX;
+            const sessionId = callbackData.replace(prefix, '');
+            const sessionData = getCallbackSession(sessionId);
+
+            if (sessionData) {
+              if (sessionData.type === 'cluster') {
+                handlePaginatedVmList(update, config, 'cluster', sessionData.itemName, true, sessionData.originPk);
+              } else if (sessionData.type === 'datastore') {
+                try {
+                  const details = getDatastoreDetails(sessionData.itemName, config);
+                  const { pesan, keyboard } = formatDatastoreDetail(details, sessionData.originPk);
+                  editMessageText(pesan, keyboard, chatId, messageId, config);
+                } catch (err) { handleCentralizedError(err, `Detail Datastore: ${sessionData.itemName}`, config); }
+              }
+            } else {
+              editMessageText("Sesi telah kedaluwarsa atau tidak valid. Silakan mulai lagi dari perintah /cekvm.", null, chatId, messageId, config);
+            }
+        }
+        else if (callbackData.startsWith(K_NOTE.EDIT_ADD)) {
             const pk = callbackData.replace(K_NOTE.EDIT_ADD, '');
             setUserState(userEvent.from.id, { action: 'AWAITING_NOTE_INPUT', pk: pk, messageId: messageId });
             const promptMessage = `✏️ Silakan kirimkan teks catatan yang baru untuk VM dengan PK: <code>${escapeHtml(pk)}</code>.\n\nKirim "batal" untuk membatalkan.`;
@@ -281,8 +301,7 @@ function doPost(e) {
         }
         else if (callbackData.startsWith(K_NOTE.DELETE_CONFIRM)) {
             const pk = callbackData.replace(K_NOTE.DELETE_CONFIRM, '');
-            const isSuccess = deleteVmNote(pk);
-            if (isSuccess) {
+            if (deleteVmNote(pk)) {
                 const { headers, results } = searchVmOnSheet(pk, config);
                 if (results.length > 0) {
                   const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
@@ -291,13 +310,12 @@ function doPost(e) {
                   editMessageText(`✅ Catatan berhasil dihapus, namun VM dengan PK <code>${escapeHtml(pk)}</code> tidak lagi ditemukan.`, null, chatId, messageId, config);
                 }
             } else {
-                const feedbackText = `❌ Gagal menghapus catatan. Kemungkinan catatan sudah dihapus sebelumnya atau terjadi error.`;
-                editMessageText(feedbackText, null, chatId, messageId, config);
+                editMessageText(`❌ Gagal menghapus catatan.`, null, chatId, messageId, config);
             }
         }
         else if (callbackData.startsWith(K_NOTE.DELETE)) {
             const pk = callbackData.replace(K_NOTE.DELETE, '');
-            const confirmationText = `❓Apakah Anda yakin ingin menghapus catatan untuk VM dengan PK <code>${escapeHtml(pk)}</code>? Aksi ini tidak dapat dibatalkan.`;
+            const confirmationText = `❓Apakah Anda yakin ingin menghapus catatan untuk VM <code>${escapeHtml(pk)}</code>?`;
             const confirmationKeyboard = {
                 inline_keyboard: [[
                     { text: '✅ Ya, Hapus', callback_data: `${K_NOTE.DELETE_CONFIRM}${pk}` },
@@ -316,58 +334,6 @@ function doPost(e) {
               editMessageText(`❌ VM dengan PK <code>${escapeHtml(pk)}</code> tidak lagi ditemukan.`, null, chatId, messageId, config);
             }
         }
-        else if (callbackData.startsWith(K_CEKVM.CLUSTER_PREFIX)) {
-          const isInitial = !callbackData.startsWith(K_CEKVM.CLUSTER_NAV_PREFIX);
-          const prefixToRemove = isInitial ? K_CEKVM.CLUSTER_PREFIX : K_CEKVM.CLUSTER_NAV_PREFIX;
-          const data = callbackData.replace(prefixToRemove, '');
-          let itemName = data;
-          if (!isInitial) {
-              const lastUnderscoreIndex = data.lastIndexOf('_');
-              if (lastUnderscoreIndex > -1) {
-                  itemName = data.substring(0, lastUnderscoreIndex);
-              }
-          }
-          handlePaginatedVmList(update, config, 'cluster', itemName, isInitial);
-        }
-        else if (callbackData.startsWith(K_CEKVM.DATASTORE_LIST_VMS_PREFIX) || callbackData.startsWith(K_CEKVM.DATASTORE_NAV_PREFIX)) {
-          const isInitial = callbackData.startsWith(K_CEKVM.DATASTORE_LIST_VMS_PREFIX);
-          const prefixToRemove = isInitial ? K_CEKVM.DATASTORE_LIST_VMS_PREFIX : K_CEKVM.DATASTORE_NAV_PREFIX;
-          const data = callbackData.replace(prefixToRemove, '');
-          let itemName = data;
-          if (!isInitial) {
-              const lastUnderscoreIndex = data.lastIndexOf('_');
-              if (lastUnderscoreIndex > -1) {
-                  itemName = data.substring(0, lastUnderscoreIndex);
-              }
-          }
-          handlePaginatedVmList(update, config, 'datastore', itemName, isInitial);
-        }
-        else if (callbackData.startsWith(K_CEKVM.HISTORY_PREFIX)) {
-          const pk = callbackData.replace(K_CEKVM.HISTORY_PREFIX, '');
-          const result = getVmHistory(pk, config);
-          kirimPesanTelegram(result.message, config, 'HTML', null, chatId);
-          if (result.success && result.data) {
-            exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
-          }
-        } 
-        else if (callbackData.startsWith(K_CEKVM.CLUSTER_EXPORT_PREFIX)) {
-          const clusterName = callbackData.replace(K_CEKVM.CLUSTER_EXPORT_PREFIX, '');
-          const { headers, results } = searchVmsByCluster(clusterName, config);
-          exportResultsToSheet(headers, results, `Daftar VM di Cluster ${clusterName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-        }
-        else if (callbackData.startsWith(K_CEKVM.DATASTORE_EXPORT_PREFIX)) {
-          const datastoreName = callbackData.replace(K_CEKVM.DATASTORE_EXPORT_PREFIX, '');
-          const { headers, results } = searchVmsByDatastore(datastoreName, config);
-          exportResultsToSheet(headers, results, `Daftar VM di Datastore ${datastoreName}`, config, userData, KONSTANTA.HEADER_VM.VM_NAME);
-        }
-        else if (callbackData.startsWith(K_CEKVM.DATASTORE_PREFIX)) {
-          const dsName = callbackData.replace(K_CEKVM.DATASTORE_PREFIX, '');
-          try {
-            const details = getDatastoreDetails(dsName, config);
-            const { pesan, keyboard } = formatDatastoreDetail(details);
-            editMessageText(pesan, keyboard, chatId, messageId, config);
-          } catch (err) { handleCentralizedError(err, `Detail Datastore: ${dsName}`, config); }
-        }
         else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
           handleTicketInteraction(update, config);
         } 
@@ -380,7 +346,9 @@ function doPost(e) {
         else {
           handleVmSearchInteraction(update, config, userData);
         }
+
         answerCallbackQuery(callbackQueryId, config);
+
       } catch (err) {
         throw new Error(`[${contextForError}] ${err.message}`);
       }
@@ -397,7 +365,6 @@ function doPost(e) {
             const originalMessageId = userState.messageId;
             
             if (text.toLowerCase() === 'batal') {
-                // Alih-alih hanya mengirim pesan batal, kita tampilkan kembali detail VM
                 const { headers, results } = searchVmOnSheet(pk, config);
                 if (results.length > 0) {
                     const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
@@ -411,9 +378,7 @@ function doPost(e) {
             const userData = userAccessMap.get(userId) || {};
             userData.firstName = userEvent.from.first_name;
 
-            const isSuccess = saveOrUpdateVmNote(pk, text, userData);
-            
-            if (isSuccess) {
+            if (saveOrUpdateVmNote(pk, text, userData)) {
                 const { headers, results } = searchVmOnSheet(pk, config);
                 if (results.length > 0) {
                     const { pesan, keyboard } = formatVmDetail(results[0], headers, config);

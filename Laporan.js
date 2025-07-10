@@ -1,11 +1,12 @@
 // ===== FILE: Laporan.js =====
 
 /**
- * [FINAL & STABIL] Mengambil status provisioning dengan menggunakan konstanta dan penanganan error yang lebih baik.
+ * [REFACTORED v3.5.0] Mengambil status provisioning dengan membaca header dari Konfigurasi.
  */
 function getProvisioningStatusSummary(config) {
   try {
-    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_DS];
+    const K = KONSTANTA.KUNCI_KONFIG; // Standarisasi menggunakan 'K'
+    const sheetName = config[K.SHEET_DS];
     if (!sheetName) {
       return "<i>Status provisioning tidak dapat diperiksa: NAMA_SHEET_DATASTORE belum diatur.</i>";
     }
@@ -17,15 +18,16 @@ function getProvisioningStatusSummary(config) {
     }
 
     const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-    const nameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-    const capGbIndex = headers.indexOf(KONSTANTA.HEADER_DS.CAPACITY_GB);
-    const provGbIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_PROV_GB_HEADER]);
+    
+    const nameIndex = headers.indexOf(config[K.DS_NAME_HEADER]);
+    const capGbIndex = headers.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
+    const provGbIndex = headers.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
 
     if ([nameIndex, capGbIndex, provGbIndex].includes(-1)) {
       const missing = [];
-      if(nameIndex === -1) missing.push(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-      if(capGbIndex === -1) missing.push(KONSTANTA.HEADER_DS.CAPACITY_GB);
-      if(provGbIndex === -1) missing.push(config[KONSTANTA.KUNCI_KONFIG.DS_PROV_GB_HEADER]);
+      if(nameIndex === -1) missing.push(config[K.DS_NAME_HEADER]);
+      if(capGbIndex === -1) missing.push(config[K.HEADER_DS_CAPACITY_GB]);
+      if(provGbIndex === -1) missing.push(config[K.HEADER_DS_PROV_DS_GB]);
       throw new Error(`Header tidak ditemukan di sheet Datastore: ${missing.join(', ')}`);
     }
 
@@ -69,11 +71,12 @@ function generateVcenterSummary(config) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
 
-  const vCenterIndex = headers.indexOf(KONSTANTA.HEADER_VM.VCENTER);
-  const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
-  const uptimeIndex = headers.indexOf(KONSTANTA.HEADER_VM.UPTIME);
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const vCenterIndex = headers.indexOf(config[K.HEADER_VM_VCENTER]);
+  const stateIndex = headers.indexOf(config[K.HEADER_VM_STATE]);
+  const uptimeIndex = headers.indexOf(config[K.HEADER_VM_UPTIME]);
   if (vCenterIndex === -1 || stateIndex === -1) {
-      throw new Error(`Header '${KONSTANTA.HEADER_VM.VCENTER}' atau '${KONSTANTA.HEADER_VM.STATE}' tidak ditemukan.`);
+      throw new Error(`Header '${config[K.HEADER_VM_VCENTER]}' atau '${config[K.HEADER_VM_STATE]}' tidak ditemukan.`);
   }
 
   const vCenterSummary = {};
@@ -134,15 +137,16 @@ function generateVcenterSummary(config) {
   return { vCenterMessage: message, uptimeMessage: uptimeMessage };
 }
 
+// Gantikan fungsi ini di Laporan.js
 /**
- * [LOGIKA FINAL & BENAR] Membuat laporan harian yang kini secara akurat
- * membaca log perubahan hari ini langsung dari sheet "Log Perubahan".
+ * [REFACTORED v3.5.0] Membuat laporan harian yang akurat dengan header dinamis.
  */
 function buatLaporanHarianVM(config) {
   let pesanLaporan = `📊 <b>Status Operasional Infrastruktur</b>\n`;
   pesanLaporan += `🗓️ <i>${new Date().toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</i>\n`;
   
   try {
+    const K = KONSTANTA.KUNCI_KONFIG;
     pesanLaporan += "\n<b>Aktivitas Sistem Hari Ini:</b>\n";
     
     const todayStartDate = new Date();
@@ -151,7 +155,8 @@ function buatLaporanHarianVM(config) {
 
     if (todaysLogs.length > 0) {
       const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
-      const actionIndex = headers.indexOf(KONSTANTA.HEADER_LOG.ACTION);
+      const actionHeader = config[K.HEADER_LOG_ACTION];
+      const actionIndex = headers.indexOf(actionHeader);
       
       todaysLogs.forEach(log => {
         const action = log[actionIndex];
@@ -166,14 +171,11 @@ function buatLaporanHarianVM(config) {
     }
     
     pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR;
-
     const summary = generateVcenterSummary(config);
-    pesanLaporan += "<b>Status VMs vCenter:</b>\n" + summary.vCenterMessage;
-    pesanLaporan += "\n<b>Tinjauan Uptime:</b>\n" + summary.uptimeMessage;
-    
+    pesanLaporan += "<b>Ringkasan vCenter & Uptime:</b>\n" + summary.vCenterMessage;
+    pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR;
     const provisioningSummary = getProvisioningStatusSummary(config);
-    pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR + "<b>Status Provisioning:</b>\n" + provisioningSummary;
-    
+    pesanLaporan += "<b>Status Provisioning:</b>\n" + provisioningSummary;
     pesanLaporan += `\n\n<i>Rincian aktivitas dapat dilihat melalui perintah /cekhistory.</i>`;
 
     return pesanLaporan;
@@ -232,7 +234,7 @@ function buatLaporanPeriodik(periode) {
 }
 
 /**
- * [FINAL & STABIL] Menyusun laporan provisioning dengan menggunakan konstanta terpusat untuk semua header.
+ * [FINAL & STABIL - REFACTORED v3.5.0] Menyusun laporan provisioning dengan membaca header dari Konfigurasi.
  */
 function generateProvisioningReport(config) {
   try {
@@ -242,14 +244,15 @@ function generateProvisioningReport(config) {
 
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     
+    const K = KONSTANTA.KUNCI_KONFIG;
     const requiredHeaders = {
-        PK: KONSTANTA.HEADER_VM.PK,
-        VM_NAME: KONSTANTA.HEADER_VM.VM_NAME,
-        VCENTER: KONSTANTA.HEADER_VM.VCENTER,
-        STATE: KONSTANTA.HEADER_VM.STATE,
-        CPU: KONSTANTA.HEADER_VM.CPU,
-        MEMORY: KONSTANTA.HEADER_VM.MEMORY,
-        PROV_TB: KONSTANTA.HEADER_VM.PROV_TB
+        PK: config[K.HEADER_VM_PK],
+        VM_NAME: config[K.HEADER_VM_NAME],
+        VCENTER: config[K.HEADER_VM_VCENTER],
+        STATE: config[K.HEADER_VM_STATE],
+        CPU: config[K.HEADER_VM_CPU],
+        MEMORY: config[K.HEADER_VM_MEMORY],
+        PROV_TB: config[K.HEADER_VM_PROV_TB]
     };
     
     const indices = {};
@@ -292,7 +295,6 @@ function generateProvisioningReport(config) {
     let message = `⚙️ <b>Laporan Alokasi Sumber Daya Infrastruktur</b>\n`;
     message += `<i>Data per ${new Date().toLocaleString('id-ID')}</i>`;
 
-    // Bagian 1: Rincian per vCenter
     Object.keys(reportData).filter(key => key !== 'Top5' && key !== 'Total').sort().forEach(vc => {
       message += KONSTANTA.UI_STRINGS.SEPARATOR;
       message += `🏢 <b>vCenter: ${vc}</b>\n\n`;
@@ -308,7 +310,6 @@ function generateProvisioningReport(config) {
       message += ` • Total Provisioned: <b>${reportData[vc].disk.toFixed(2)} TB</b>\n`;
     });
     
-    // Bagian 2: Total Keseluruhan
     message += KONSTANTA.UI_STRINGS.SEPARATOR;
     message += `🌍 <b>Total Keseluruhan</b>\n\n`;
     const totalCpuGrand = reportData['Total'].cpuOn + reportData['Total'].cpuOff;
@@ -322,7 +323,6 @@ function generateProvisioningReport(config) {
     message += `💽 <b>Disk:</b>\n`;
     message += ` • Total Provisioned: <b>${reportData['Total'].disk.toFixed(2)} TB</b>\n`;
 
-    // Bagian 3: Pengguna Resource Teratas
     message += KONSTANTA.UI_STRINGS.SEPARATOR;
     message += `🏆 <b>Pengguna Resource Teratas</b>\n`;
     const topCpuText = reportData.Top5.cpu.map((vm, i) => `${i+1}. <code>${escapeHtml(vm.name)}</code> (${vm.value} vCPU)`).join('\n');
@@ -340,7 +340,6 @@ function generateProvisioningReport(config) {
     throw new Error(`Gagal membuat laporan provisioning: ${e.message}`);
   }
 }
-
 
 /**
  * [FINAL & STABIL] Fungsi pembantu untuk mengelola daftar top 5.
@@ -396,8 +395,6 @@ function analisisTrenPerubahan(startDate, config) {
     counts: counts
   };
 }
-
-// ===== FILE: Laporan.js =====
 
 /**
  * [FITUR BARU] Menghasilkan laporan distribusi aset VM berdasarkan kritikalitas dan environment
@@ -502,3 +499,107 @@ function generateAssetDistributionReport(config) {
 
   return message;
 }
+
+/**
+ * [FUNGSI BARU v3.5.0 - LOGIKA FINAL & AKURAT] Menganalisis sebuah cluster secara komprehensif.
+ * Menerapkan logika parsing DS yang cerdas dengan mengekstrak pola inti cluster (cth: 'CL01').
+ * @param {string} clusterName - Nama cluster yang akan dianalisis (misal: 'TBN-COM-LNV-CL01').
+ * @param {object} config - Objek konfigurasi bot yang aktif.
+ * @returns {object} Objek yang berisi data analisis cluster.
+ */
+function generateClusterAnalysis(clusterName, config) {
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const analysis = {
+    totalVms: 0,
+    on: 0,
+    off: 0,
+    totalCpu: 0,
+    totalMemory: 0,
+    totalVmProvisionedTb: 0,
+    totalDsCapacityTb: 0,
+    diskUtilizationPercent: 0,
+    criticalVmOffCount: 0,
+    criticalVmOffDetails: {}
+  };
+
+  try {
+    // 1. Analisis VM (Tidak ada perubahan di blok ini)
+    const { headers: vmHeaders, results: vmsInCluster } = searchVmsByCluster(clusterName, config);
+    if (vmsInCluster.length > 0) {
+      analysis.totalVms = vmsInCluster.length;
+      const stateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
+      const cpuIndex = vmHeaders.indexOf(config[K.HEADER_VM_CPU]);
+      const memoryIndex = vmHeaders.indexOf(config[K.HEADER_VM_MEMORY]);
+      const critIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
+      const provTbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_TB]);
+      const monitoredCritLevels = Object.keys(config[K.SKOR_KRITIKALITAS] || {});
+
+      vmsInCluster.forEach(row => {
+        const state = String(row[stateIndex] || '').toLowerCase();
+        if (state.includes('on')) analysis.on++; else analysis.off++;
+        analysis.totalCpu += parseInt(row[cpuIndex], 10) || 0;
+        analysis.totalMemory += parseFloat(row[memoryIndex]) || 0;
+        analysis.totalVmProvisionedTb += parseLocaleNumber(row[provTbIndex]);
+        
+        const criticality = String(row[critIndex] || '').toUpperCase().trim();
+        if (monitoredCritLevels.includes(criticality) && !state.includes('on')) {
+          analysis.criticalVmOffCount++;
+          analysis.criticalVmOffDetails[criticality] = (analysis.criticalVmOffDetails[criticality] || 0) + 1;
+        }
+      });
+    }
+
+    // 2. Analisis Datastore dengan Logika Parsing Baru
+    const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_DS]);
+    if (dsSheet && dsSheet.getLastRow() > 1) {
+      const dsData = dsSheet.getDataRange().getValues();
+      const dsHeaders = dsData.shift();
+      const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
+      const dsCapTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_TB]);
+      
+      const includedKeywords = (config.KATA_KUNCI_DS_DIUTAMAKAN || []).map(k => k.toLowerCase());
+      const excludedKeywords = (config[K.DS_KECUALI] || []).map(k => k.toLowerCase());
+
+      // --- [PERBAIKAN LOGIKA PARSING UTAMA] ---
+      // Ekstrak pola inti cluster (CLxx) dari nama cluster lengkap yang dicari.
+      const clusterPatternMatch = clusterName.match(/CL\d+/i);
+      const coreClusterPattern = clusterPatternMatch ? clusterPatternMatch[0].toLowerCase() : null;
+
+      if (coreClusterPattern && dsNameIndex !== -1 && dsCapTbIndex !== -1) {
+        dsData.forEach(row => {
+          const dsName = String(row[dsNameIndex] || '');
+          const dsNameLower = dsName.toLowerCase();
+          
+          // Periksa apakah nama DS mengandung pola inti cluster (cth: 'cl01').
+          if (!dsNameLower.includes(coreClusterPattern)) {
+            return; // Lanjut ke datastore berikutnya jika tidak cocok
+          }
+          // --- [AKHIR PERBAIKAN] ---
+
+          const isIncluded = includedKeywords.length === 0 || includedKeywords.some(keyword => dsNameLower.includes(keyword));
+          if (!isIncluded) {
+              return;
+          }
+          
+          const isExcluded = excludedKeywords.some(keyword => dsNameLower.includes(keyword));
+          if (isExcluded) {
+            return;
+          }
+
+          analysis.totalDsCapacityTb += parseLocaleNumber(row[dsCapTbIndex]);
+        });
+      }
+    }
+
+    // 3. Hitung utilisasi
+    if (analysis.totalDsCapacityTb > 0) {
+      analysis.diskUtilizationPercent = (analysis.totalVmProvisionedTb / analysis.totalDsCapacityTb) * 100;
+    }
+
+    return analysis;
+
+  } catch (e) {
+    console.error(`Gagal melakukan analisis untuk cluster "${clusterName}". Error: ${e.message}`);
+    return analysis;
+  }
+}            
