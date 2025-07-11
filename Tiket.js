@@ -275,19 +275,22 @@ function findTicketCategoryWithNewRules(ticketRow, headers, config) {
   return 'notFollowedUp';
 }
 
-// Fungsi getLocalTicketData dan parseTicketId tidak perlu diubah.
+/**
+ * [REFACTORED v4.6.0] Mengambil data tiket lokal.
+ * Fungsi ini sekarang menggunakan helper _getSheetData untuk efisiensi.
+ */
 function getLocalTicketData(config) {
   const K = KONSTANTA.KUNCI_KONFIG;
   const namaSheetTiket = config[K.NAMA_SHEET_TIKET];
   if (!namaSheetTiket) throw new Error("Konfigurasi NAMA_SHEET_TIKET tidak ditemukan.");
 
-  const ssBot = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetTiket = ssBot.getSheetByName(namaSheetTiket);
-  if (!sheetTiket || sheetTiket.getLastRow() <= 1) return { ticketData: [], headers: [] };
+  const { headers, dataRows } = _getSheetData(namaSheetTiket);
+
+  if (dataRows.length === 0) {
+    return { ticketData: [], headers: [] };
+  }
   
-  const headers = sheetTiket.getRange(1, 1, 1, sheetTiket.getLastColumn()).getValues()[0];
-  const ticketData = sheetTiket.getRange(2, 1, sheetTiket.getLastRow() - 1, sheetTiket.getLastColumn()).getValues();
-  return { ticketData, headers };
+  return { ticketData: dataRows, headers: headers };
 }
 
 function parseTicketId(url) {

@@ -57,24 +57,23 @@ function getProvisioningStatusSummary(config) {
 }
 
 /**
- * [FINAL & STABIL] Fungsi pembantu untuk membuat ringkasan vCenter.
+ * [REFACTORED v4.6.0] Membuat ringkasan vCenter.
+ * Fungsi ini sekarang menggunakan helper _getSheetData untuk efisiensi.
  */
 function generateVcenterSummary(config) {
   const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
+  
+  const { headers, dataRows } = _getSheetData(sheetName);
 
-  if (!sheet || sheet.getLastRow() < 2) {
+  if (dataRows.length === 0) {
     return { vCenterMessage: "<i>Data VM tidak ditemukan untuk membuat ringkasan.</i>\n\n", uptimeMessage: "" };
   }
-
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
 
   const K = KONSTANTA.KUNCI_KONFIG;
   const vCenterIndex = headers.indexOf(config[K.HEADER_VM_VCENTER]);
   const stateIndex = headers.indexOf(config[K.HEADER_VM_STATE]);
   const uptimeIndex = headers.indexOf(config[K.HEADER_VM_UPTIME]);
+
   if (vCenterIndex === -1 || stateIndex === -1) {
       throw new Error(`Header '${config[K.HEADER_VM_VCENTER]}' atau '${config[K.HEADER_VM_STATE]}' tidak ditemukan.`);
   }
@@ -83,7 +82,7 @@ function generateVcenterSummary(config) {
   let totalGlobal = { on: 0, off: 0, total: 0 };
   const uptimeCategories = { '0_1': 0, '1_2': 0, '2_3': 0, 'over_3': 0, 'invalid': 0 };
 
-  data.forEach(row => {
+  dataRows.forEach(row => {
     const vCenter = row[vCenterIndex] || 'Lainnya';
     if (!vCenterSummary[vCenter]) {
       vCenterSummary[vCenter] = { on: 0, off: 0, total: 0 };
@@ -357,42 +356,76 @@ function updateTop5(topArray, newItem) {
 }
 
 /**
- * [FINAL & STABIL] Menganalisis log perubahan untuk mendeteksi tren dan anomali.
+ * [REFACTORED v4.3.2 - CRITICAL FIX] Menganalisis tren perubahan dari log.
+ * Memperbaiki bug 'Cannot read properties of undefined (reading 'ACTION')' dengan
+ * menggunakan referensi konstanta yang benar dari objek config.
  */
 function analisisTrenPerubahan(startDate, config) {
-  const combinedLogResult = getCombinedLogs(startDate, config);
-  const logData = combinedLogResult.data;
-  const logHeaders = combinedLogResult.headers;
-
-  const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
-  const actionIndex = logHeaders.indexOf(KONSTANTA.HEADER_LOG.ACTION);
-
-  if (actionIndex !== -1) {
-    logData.forEach(row => {
-        const action = String(row[actionIndex] || '');
-        if (action.includes('PENAMBAHAN')) counts.baru++;
-        else if (action.includes('MODIFIKASI')) counts.dimodifikasi++;
-        else if (action.includes('PENGHAPUSAN')) counts.dihapus++;
-    });
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const { headers, data: logs } = getCombinedLogs(startDate, config);
+  
+  if (logs.length === 0) {
+    return {
+      trendMessage: "Tidak ada aktivitas perubahan data yang signifikan pada periode ini.",
+      anomalyMessage: null,
+      counts: { baru: 0, dimodifikasi: 0, dihapus: 0 }
+    };
   }
 
-  let trendMessage = "⚙️ Aktivitas infrastruktur pada periode ini cenderung stabil.";
-  if (counts.baru > (counts.dihapus + 5)) {
-    trendMessage = "📈 Tren periode ini menunjukkan adanya pertumbuhan infrastruktur.";
-  } else if (counts.dihapus > (counts.baru + 5)) {
-    trendMessage = "📉 Tren periode ini menunjukkan adanya perampingan infrastruktur.";
+  // Menggunakan referensi yang BENAR dari objek 'config'
+  const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
+  const timestampIndex = headers.indexOf(config[K.HEADER_LOG_TIMESTAMP]);
+
+  if (actionIndex === -1 || timestampIndex === -1) {
+    throw new Error("Header 'Action' atau 'Timestamp' tidak ditemukan di log.");
   }
 
-  let anomalyMessage = "";
-  const totalChanges = counts.baru + counts.dimodifikasi + counts.dihapus;
-  if (totalChanges > KONSTANTA.LIMIT.HIGH_ACTIVITY_THRESHOLD) {
-    anomalyMessage = `⚠️ Terdeteksi aktivitas sangat tinggi (${totalChanges} perubahan) pada periode ini. Disarankan untuk melakukan review pada log.`;
+  const counts = {
+    'PENAMBAHAN': 0,
+    'MODIFIKASI': 0,
+    'PENGHAPUSAN': 0
+  };
+
+  const activityByDay = {};
+
+  logs.forEach(log => {
+    const action = log[actionIndex];
+    if (counts.hasOwnProperty(action)) {
+      counts[action]++;
+    }
+
+    const date = new Date(log[timestampIndex]).toISOString().split('T')[0];
+    activityByDay[date] = (activityByDay[date] || 0) + 1;
+  });
+
+  let trendMessage;
+  const totalChanges = logs.length;
+  if (totalChanges > 50) {
+    trendMessage = "Aktivitas perubahan terpantau <b>sangat tinggi</b>.";
+  } else if (totalChanges > 10) {
+    trendMessage = "Aktivitas perubahan terpantau <b>moderat</b>.";
+  } else {
+    trendMessage = "Aktivitas perubahan terpantau <b>rendah</b>.";
+  }
+
+  let anomalyMessage = null;
+  const days = Object.keys(activityByDay);
+  if (days.length > 1) {
+    const avgChanges = totalChanges / days.length;
+    const highActivityDays = days.filter(day => activityByDay[day] > avgChanges * 2 && activityByDay[day] > KONSTANTA.LIMIT.HIGH_ACTIVITY_THRESHOLD);
+    if (highActivityDays.length > 0) {
+      anomalyMessage = `⚠️ Terdeteksi anomali aktivitas pada tanggal: <b>${highActivityDays.join(', ')}</b>.`;
+    }
   }
 
   return {
     trendMessage: trendMessage,
     anomalyMessage: anomalyMessage,
-    counts: counts
+    counts: {
+      baru: counts['PENAMBAHAN'],
+      dimodifikasi: counts['MODIFIKASI'],
+      dihapus: counts['PENGHAPUSAN']
+    }
   };
 }
 

@@ -45,8 +45,9 @@ const KONSTANTA = {
 
   // Callback data histori
   CALLBACK_HISTORY: {
-    PREFIX: 'history_',
-    NAVIGATE: 'history_nav', // Hanya perlu prefix navigasi, karena aksi lain (export) punya prefix sendiri
+    PREFIX: 'history_',         // Untuk klik pertama kali pada tombol "Riwayat VM"
+    NAVIGATE_PREFIX: 'history_nav_', // Untuk tombol navigasi (Next/Prev)
+    EXPORT_PREFIX: 'history_export_' // Untuk tombol ekspor di masa depan
   },
   
   // Callback data cek VM

@@ -212,8 +212,9 @@ const commandHandlers = {
 };
 
 /**
- * [REFACTORED v4.2.3 - HISTORY ROUTER FIX] Fungsi utama yang menangani semua permintaan dari Telegram.
- * Memperbaiki router callback untuk secara benar mengenali permintaan awal untuk fitur Riwayat VM.
+ * [REFACTORED v4.3.3 - DEFINITIVE HISTORY ROUTER] Fungsi utama yang menangani semua permintaan dari Telegram.
+ * Memperbaiki bug paginasi pada halaman riwayat dengan menerapkan metode pengecekan
+ * prefix 'startsWith' yang lebih kuat dan tidak rapuh.
  */
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) { return HtmlService.createHtmlOutput("Bad Request"); }
@@ -291,12 +292,10 @@ function doPost(e) {
                     userEvent.sessionData.listType = 'datastore';
                     handlePaginatedVmList(update, config, userData);
                 }
-                // ==================== PERUBAHAN UTAMA DI SINI ====================
                 else if (prefix === K_HISTORY.PREFIX || prefix === K_HISTORY.NAVIGATE_PREFIX || prefix === K_HISTORY.EXPORT_PREFIX) {
                     userEvent.action = prefix.includes(K_PAGINATE.EXPORT) ? K_PAGINATE.EXPORT : K_PAGINATE.NAVIGATE;
                     handleHistoryInteraction(update, config, userData);
-                }
-                // ==================== AKHIR PERUBAHAN ====================
+                } 
                 else {
                     console.warn(`Prefix callback sesi tidak dikenal: ${prefix}`);
                 }
@@ -346,7 +345,7 @@ function doPost(e) {
         else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
           handleTicketInteraction(update, config);
         }
-        else {
+        else if (callbackData.startsWith('run_export_') || callbackData.startsWith('export_')) {
              handleExportRequest(update, config, userData);
         }
 

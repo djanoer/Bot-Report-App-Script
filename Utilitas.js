@@ -503,3 +503,32 @@ function getCallbackSession(sessionId) {
   console.warn(`Sesi callback dengan ID: ${sessionId} tidak ditemukan atau telah kedaluwarsa.`);
   return null;
 }
+
+/**
+ * [HELPER v4.6.0] Fungsi terpusat untuk mengambil data dari sebuah sheet.
+ * Mengembalikan header dan baris data secara terpisah.
+ * @param {string} sheetName Nama sheet yang akan dibaca.
+ * @returns {{headers: Array<string>, dataRows: Array<Array<any>>}} Objek berisi header dan baris data.
+ */
+function _getSheetData(sheetName) {
+  if (!sheetName) {
+    console.error("Nama sheet tidak disediakan ke _getSheetData.");
+    return { headers: [], dataRows: [] };
+  }
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    console.error(`Sheet dengan nama "${sheetName}" tidak ditemukan.`);
+    return { headers: [], dataRows: [] };
+  }
+
+  if (sheet.getLastRow() < 1) {
+    return { headers: [], dataRows: [] }; // Sheet kosong
+  }
+  
+  const allData = sheet.getDataRange().getValues();
+  const headers = allData.shift() || []; // Ambil baris pertama sebagai header, atau array kosong jika tidak ada
+  
+  return { headers: headers, dataRows: allData };
+}

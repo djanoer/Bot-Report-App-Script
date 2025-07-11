@@ -620,20 +620,41 @@ function handleVmSearchInteraction(update, config, userData) {
 }
 
 /**
- * [REVISED v4.3.1] Menangani interaksi untuk riwayat.
- * Sekarang dapat menangani permintaan untuk riwayat VM spesifik (dari /history)
- * dan riwayat hari ini (dari /cekhistory).
+ * [REVISED v4.3.4 - EXPORT ENABLED] Menangani interaksi untuk riwayat.
+ * Fungsi ini sekarang sepenuhnya mendukung aksi ekspor, membuat pekerjaan yang benar,
+ * dan menyimpannya ke antrean untuk diproses.
  */
 function handleHistoryInteraction(update, config, userData) {
   const userEvent = update.callback_query;
   const sessionData = userEvent.sessionData;
-  const isCallback = !!userEvent.id; // Cek apakah ini benar-benar callback atau mock
+  const isCallback = !!userEvent.id;
   
   try {
+    // ==================== PERUBAHAN UTAMA DI SINI ====================
+    // Logika untuk menangani aksi ekspor
+    if (userEvent.action === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
+        answerCallbackQuery(userEvent.id, config, "Menambahkan ke antrean...");
+        
+        // Membuat jobData yang spesifik untuk riwayat
+        const jobData = { 
+            jobType: 'history', // Menandai ini sebagai pekerjaan ekspor riwayat
+            context: sessionData, // Mengirim seluruh konteks (pk atau timeframe)
+            config: config, 
+            userData: userData, 
+            chatId: userEvent.message.chat.id 
+        };
+        const jobKey = `export_job_${userEvent.from.id}_${Date.now()}`;
+        PropertiesService.getUserProperties().setProperty(jobKey, JSON.stringify(jobData));
+        
+        const title = sessionData.pk ? `Riwayat untuk PK ${sessionData.pk}` : "Riwayat Hari Ini";
+        kirimPesanTelegram(`✅ Permintaan ekspor Anda untuk "<b>${escapeHtml(title)}</b>" telah ditambahkan ke antrean.`, config, 'HTML', null, userEvent.message.chat.id);
+        return;
+    }
+    // ==================== AKHIR PERUBAHAN ====================
+
     const page = sessionData.page || 1;
     let logsToShow, logHeaders, title, headerContent;
 
-    // Membedakan antara /history [pk] dan /cekhistory
     if (sessionData.pk) {
         const pk = sessionData.pk;
         const result = getVmHistory(pk, config);
@@ -643,7 +664,7 @@ function handleHistoryInteraction(update, config, userData) {
         headerContent = `<b>📜 Riwayat Perubahan untuk VM</b>\n` +
                           `<b>Nama:</b> ${escapeHtml(result.vmName)}\n` +
                           `<b>PK:</b> <code>${escapeHtml(pk)}</code>`;
-    } else { // Asumsi ini untuk /cekhistory
+    } else {
         const todayStartDate = new Date();
         todayStartDate.setHours(0, 0, 0, 0);
         const result = getCombinedLogs(todayStartDate, config);
@@ -681,7 +702,6 @@ function handleHistoryInteraction(update, config, userData) {
         const newValueFormatted = escapeHtml(row[headerIndices.newValue] || '(Kosong)');
 
         let formattedText = `<b>🗓️ ${timestamp}</b> | <b>Aksi:</b> ${action}\n`;
-        // Jika bukan riwayat spesifik, tampilkan nama VM
         if (!sessionData.pk) {
             formattedText += `<b>VM:</b> ${escapeHtml(row[headerIndices.vmName] || row[headerIndices.pk])}\n`;
         }
@@ -717,7 +737,9 @@ function handleHistoryInteraction(update, config, userData) {
     }
     
     if (isCallback) {
-        editMessageText(text, keyboard, userEvent.message.chat.id, userEvent.message.message_id, config);
+        if (userEvent.message.text !== text || JSON.stringify(userEvent.message.reply_markup) !== JSON.stringify(keyboard)) {
+            editMessageText(text, keyboard, userEvent.message.chat.id, userEvent.message.message_id, config);
+        }
     } else {
         kirimPesanTelegram(text, config, 'HTML', keyboard, userEvent.chat.id);
     }
@@ -1061,29 +1083,47 @@ function getClusterEquilibriumStatus(datastoresInCluster) {
 }
 
 /**
- * [REFACTORED v4.4.0 - ORCHESTRATOR] Menjalankan alur kerja analisis migrasi.
- * Fungsi ini sekarang bertindak sebagai orkestrator yang memanggil helper untuk
- * pengumpulan data dan pembangunan rencana, kemudian memformat laporan akhir.
+ * [REFACTORED v4.7.0 - PROACTIVE VALIDATION] Menjalankan alur kerja analisis migrasi.
+ * Fungsi ini sekarang secara proaktif memvalidasi 'Logika Migrasi' dan akan menyertakan
+ * peringatan dalam laporan jika ditemukan tipe datastore yang tidak memiliki aturan.
  */
 function jalankanRekomendasiMigrasi() {
     const { config } = getBotState();
     console.log("Memulai analisis penyeimbangan cluster...");
-
+    
     try {
-        // Langkah 1: Panggil "Pekerja" untuk mengumpulkan semua data
         const { allDatastores, allVms, vmHeaders, migrationConfig } = _gatherMigrationDataSource(config);
 
-        // Langkah 2: Identifikasi datastore yang bermasalah
-        const overProvisionedDsList = allDatastores.filter(ds => ds.provisionedGb > ds.capacityGb);
-        if (overProvisionedDsList.length === 0) {
-            return "✅ Semua datastore dalam kondisi provisioning yang aman (1:1).";
-        }
-
-        // Langkah 3: Siapkan kerangka laporan
         let finalMessage = `⚖️ <b>Analisis & Rekomendasi Migrasi Datastore</b>\n`;
         finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>`;
+        
+        // ==================== PERUBAHAN UTAMA DI SINI: VALIDASI PROAKTIF ====================
+        const uniqueDsTypes = [...new Set(allDatastores.map(ds => ds.type).filter(Boolean))];
+        const unconfiguredTypes = [];
 
-        // Langkah 4: Proses setiap datastore yang bermasalah
+        uniqueDsTypes.forEach(type => {
+            const rule = migrationConfig.get(type) || Array.from(migrationConfig.values()).find(r => r.alias === type);
+            if (!rule) {
+                unconfiguredTypes.push(type);
+            }
+        });
+
+        if (unconfiguredTypes.length > 0) {
+            finalMessage += `\n\n⚠️ <b>Peringatan Konfigurasi</b>\n`;
+            finalMessage += `Ditemukan tipe datastore berikut yang belum memiliki aturan di sheet "Logika Migrasi":\n`;
+            unconfiguredTypes.forEach(type => {
+                finalMessage += ` • <code>${escapeHtml(type)}</code>\n`;
+            });
+            finalMessage += `<i>Rekomendasi untuk tipe ini mungkin tidak optimal. Harap perbarui konfigurasi.</i>`;
+        }
+        // ==================== AKHIR PERUBAHAN ====================
+
+        const overProvisionedDsList = allDatastores.filter(ds => ds.provisionedGb > ds.capacityGb);
+        if (overProvisionedDsList.length === 0) {
+            finalMessage += "\n\n✅ Semua datastore dalam kondisi provisioning yang aman (1:1).";
+            return finalMessage;
+        }
+
         overProvisionedDsList.forEach(dsInfo => {
             finalMessage += KONSTANTA.UI_STRINGS.SEPARATOR;
             const migrationTargetGb = dsInfo.provisionedGb - dsInfo.capacityGb;
@@ -1098,10 +1138,8 @@ function jalankanRekomendasiMigrasi() {
             if (diagnosis) finalMessage += `• <b>Indikasi Penyebab:</b> ${diagnosis}\n`;
             finalMessage += `• <b>Target Migrasi:</b> ${migrationTargetGb.toFixed(2)} GB (~${migrationTargetTb.toFixed(2)} TB)\n`;
 
-            // Langkah 5: Panggil "Insinyur" untuk membuat rencana teknis
             const migrationPlan = _buildMigrationPlan(dsInfo, allDatastores, allVms, vmHeaders, migrationConfig, config);
             
-            // Langkah 6: Format rencana menjadi pesan yang bisa dibaca
             finalMessage += `\n✅ <b>Rencana Tindak Lanjut:</b>\n`;
             if (migrationPlan.size > 0) {
                 migrationPlan.forEach((vms, destDsName) => {
@@ -1121,8 +1159,8 @@ function jalankanRekomendasiMigrasi() {
         return finalMessage;
 
     } catch (e) {
-        console.error(`Gagal menjalankan analisis migrasi: ${e.message}\nStack: ${e.stack}`);
-        throw new Error(`Gagal Menjalankan Analisis Migrasi. Penyebab: ${e.message}`);
+      console.error(`Gagal menjalankan analisis migrasi: ${e.message}\nStack: ${e.stack}`);
+      throw new Error(`Gagal Menjalankan Analisis Migrasi. Penyebab: ${e.message}`);
     }
 }
 
@@ -1786,7 +1824,6 @@ function handlePaginatedVmList(update, config, userData) {
     
     const { listType, itemName, originPk, page = 1 } = sessionData;
 
-    // ==================== PERUBAHAN UTAMA DI SINI ====================
     // Logika untuk menangani aksi ekspor
     if (userEvent.action === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
         answerCallbackQuery(userEvent.id, config, "Menambahkan ke antrean...");
@@ -1806,7 +1843,6 @@ function handlePaginatedVmList(update, config, userData) {
         kirimPesanTelegram(`✅ Permintaan ekspor Anda untuk VM di <b>${friendlyListType} "${escapeHtml(itemName)}"</b> telah ditambahkan ke antrean.`, config, 'HTML', null, chatId);
         return;
     }
-    // ==================== AKHIR PERUBAHAN ====================
     
     let searchFunction, titlePrefix, navPrefix, exportPrefix, headerContent = "";
     const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
@@ -1919,70 +1955,68 @@ function handlePaginatedVmList(update, config, userData) {
 }
 
 /**
- * [REFACTORED v4.2.2 - SMART EXECUTOR] Mengeksekusi pekerjaan ekspor.
- * Fungsi ini sekarang cerdas dan dapat menangani berbagai jenis pekerjaan:
- * - Berdasarkan 'searchTerm' dari /cekvm.
- * - Berdasarkan 'listType' dan 'itemName' dari daftar Cluster/Datastore.
+ * [REFACTORED - ADAPTIVE EXECUTOR] Mengeksekusi satu pekerjaan ekspor.
+ * Memperbaiki bug 'cannot read length' dengan cara beradaptasi terhadap
+ * berbagai struktur data hasil (baik 'results' maupun 'history').
  */
 function executeExportJob(jobData) {
-  const { config, userData, chatId } = jobData;
-  let searchResults;
-  let fileName;
+  try {
+    const { config, userData, chatId } = jobData;
+    let searchResults;
+    let title;
+    let headers, results; // Deklarasikan di sini
 
-  // Logika cerdas untuk menentukan metode pencarian
-  if (jobData.listType) {
-    const { listType, itemName } = jobData;
-    const searchFunction = listType === 'cluster' ? searchVmsByCluster : searchVmsByDatastore;
-    searchResults = searchFunction(itemName, config);
-    const friendlyListType = listType.charAt(0).toUpperCase() + listType.slice(1);
-    fileName = `Ekspor VM di ${friendlyListType} - ${itemName}`;
-  } else if (jobData.searchTerm) {
-    const { searchTerm } = jobData;
-    searchResults = searchVmOnSheet(searchTerm, config);
-    fileName = `Ekspor Hasil Pencarian - ${searchTerm}`;
-  } else {
-    throw new Error("Data pekerjaan ekspor tidak valid. 'searchTerm' atau 'listType' tidak ditemukan.");
-  }
+    // Logika cerdas untuk menentukan metode pencarian
+    if (jobData.jobType === 'history') {
+        const context = jobData.context;
+        searchResults = context.pk 
+            ? getVmHistory(context.pk, config) 
+            : getCombinedLogs(new Date(0), config); // Ambil semua log jika tidak ada pk
+        
+        title = context.pk 
+            ? `Laporan Riwayat - PK ${context.pk}` 
+            : `Laporan Riwayat Perubahan Hari Ini`;
+        
+        // Logika adaptif untuk menangani struktur data yang berbeda
+        headers = searchResults.headers;
+        results = searchResults.history || searchResults.data; // Ambil dari 'history' atau 'data'
 
-  const { headers, results } = searchResults;
-
-  if (results.length === 0) {
-    kirimPesanTelegram(`ℹ️ Tidak ada data untuk diekspor.`, config, 'HTML', null, chatId);
-    return;
-  }
-
-  const spreadsheet = SpreadsheetApp.create(fileName);
-  const sheet = spreadsheet.getActiveSheet();
-  sheet.appendRow(headers);
-  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#d9ead3');
-  sheet.setFrozenRows(1);
-  
-  sheet.getRange(2, 1, results.length, headers.length).setValues(results);
-  SpreadsheetApp.flush();
-
-  const fileUrl = spreadsheet.getUrl();
-  const fileId = spreadsheet.getId();
-  const exportFolderId = config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR_ID];
-  
-  if (exportFolderId) {
-    try {
-      const file = DriveApp.getFileById(fileId);
-      const exportFolder = DriveApp.getFolderById(exportFolderId);
-      file.moveTo(exportFolder);
-    } catch (e) {
-      console.error(`Gagal memindahkan file ekspor ke folder. Error: ${e.message}`);
+    } else { // Untuk pekerjaan ekspor non-riwayat
+        if (jobData.listType) {
+            const { listType, itemName } = jobData;
+            const searchFunction = listType === 'cluster' ? searchVmsByCluster : searchVmsByDatastore;
+            searchResults = searchFunction(itemName, config);
+            const friendlyListType = listType.charAt(0).toUpperCase() + listType.slice(1);
+            title = `Laporan VM di ${friendlyListType} - ${itemName}`;
+        } else if (jobData.searchTerm) {
+            const { searchTerm } = jobData;
+            searchResults = searchVmOnSheet(searchTerm, config);
+            title = `Laporan Hasil Pencarian - '${searchTerm}'`;
+        } else {
+            throw new Error("Data pekerjaan ekspor tidak valid.");
+        }
+        headers = searchResults.headers;
+        results = searchResults.results; // Ambil dari 'results'
     }
+
+    if (!results || results.length === 0) {
+      kirimPesanTelegram(`ℹ️ Tidak ada data untuk diekspor untuk permintaan: "${title}".`, config, 'HTML', null, chatId);
+      return;
+    }
+    
+    exportResultsToSheet(headers, results, title, config, userData);
+
+  } catch (e) {
+      console.error(`Gagal mengeksekusi pekerjaan ekspor. Data: ${JSON.stringify(jobData)}. Error: ${e.message}\nStack: ${e.stack}`);
+      if (jobData.config && jobData.chatId) {
+          const failMessage = `🔴 Maaf, terjadi kesalahan saat memproses file ekspor Anda.\n\n<code>Penyebab: ${escapeHtml(e.message)}</code>`;
+          kirimPesanTelegram(failMessage, jobData.config, 'HTML', null, jobData.chatId);
+      }
   }
-
-  const pesan = `✅ File ekspor Anda siap!\n\n` +
-                `<b>Nama File:</b> ${escapeHtml(fileName)}\n` +
-                `<a href="${fileUrl}">Buka di Google Sheets</a>`;
-
-  kirimPesanTelegram(pesan, config, 'HTML', null, chatId);
 }
 
 /**
- * [NEW v4.2.0] Memproses antrean pekerjaan ekspor.
+ * [NEW v4.5.0] Memproses antrean pekerjaan ekspor.
  * Fungsi ini dirancang untuk dijalankan oleh trigger berbasis waktu. Ia akan memeriksa
  * PropertiesService untuk setiap pekerjaan ekspor yang tertunda dan mengeksekusinya.
  */
@@ -1996,24 +2030,27 @@ function processExportQueue() {
   }
 
   for (const key of jobKeys) {
-    let jobData;
+    let jobDataString = null;
     try {
-      const jobString = properties.getProperty(key);
-      if (jobString) {
-        jobData = JSON.parse(jobString);
-        
-        // Panggil fungsi eksekutor yang sudah ada
+      jobDataString = properties.getProperty(key);
+      if (jobDataString) {
+        const jobData = JSON.parse(jobDataString);
         executeExportJob(jobData);
       }
     } catch (e) {
       console.error(`Gagal memproses pekerjaan ekspor dengan kunci ${key}. Error: ${e.message}`);
-      // Jika terjadi error saat eksekusi, kirim notifikasi ke pengguna
-      if (jobData && jobData.config && jobData.chatId) {
-          const failMessage = `🔴 Maaf, terjadi kesalahan saat memproses file ekspor Anda untuk pencarian "<b>${escapeHtml(jobData.searchTerm || 'Tidak Dikenal')}</b>".\n\n<code>Penyebab: ${escapeHtml(e.message)}</code>`;
-          kirimPesanTelegram(failMessage, jobData.config, 'HTML', null, jobData.chatId);
+      if (jobDataString) {
+        try {
+            const jobData = JSON.parse(jobDataString);
+            if (jobData.config && jobData.chatId) {
+                const failMessage = `🔴 Maaf, terjadi kesalahan saat memproses file ekspor Anda.\n\n<code>Penyebab: ${escapeHtml(e.message)}</code>`;
+                kirimPesanTelegram(failMessage, jobData.config, 'HTML', null, jobData.chatId);
+            }
+        } catch (parseError) {
+            console.error("Gagal mengirim notifikasi error karena jobData tidak valid.");
+        }
       }
     } finally {
-      // Selalu hapus properti setelah diproses untuk mencegah eksekusi ganda
       properties.deleteProperty(key);
       console.log(`Pekerjaan dengan kunci ${key} telah selesai diproses dan dihapus dari antrean.`);
     }
