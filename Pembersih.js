@@ -1,9 +1,12 @@
 // ===== FILE: Pembersih.gs =====
 
-function bersihkanFileEksporTua() {
+/**
+ * [REFACTORED v4.3.0] Membersihkan file ekspor lama.
+ * Fungsi ini sekarang menerima objek config, bukan membacanya sendiri.
+ */
+function bersihkanFileEksporTua(config) {
   console.log("Memulai proses pembersihan file ekspor lama...");
   try {
-    const config = bacaKonfigurasi();
     if (!config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR]) {
       console.warn(`Proses pembersihan dibatalkan: ${KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR} tidak diatur di Konfigurasi.`);
       return;

@@ -157,7 +157,8 @@ const KONSTANTA = {
     LOG_ARCHIVE_THRESHOLD: 1000,
     LOCK_TIMEOUT_MS: 10000, // Timeout untuk script lock
     // Ambang batas untuk deteksi aktivitas tinggi/anomali dalam satu periode laporan
-    HIGH_ACTIVITY_THRESHOLD: 50
+    HIGH_ACTIVITY_THRESHOLD: 50,
+    SESSION_TIMEOUT_SECONDS: 900 // Durasi 15 menit untuk session callback
   },
 
   // Nama perintah bot

@@ -186,10 +186,13 @@ function buatLaporanHarianVM(config) {
 }
 
 /**
- * [FINAL & STABIL] Menghasilkan laporan periodik dengan format teks dan penanganan error yang andal.
+ * [REFACTORED v4.3.0] Menghasilkan laporan periodik.
+ * Fungsi ini sekarang menerima objek config, bukan membacanya sendiri.
  */
 function buatLaporanPeriodik(periode) {
-  const config = bacaKonfigurasi();
+  // Menggunakan getBotState untuk efisiensi
+  const { config } = getBotState();
+  
   const today = new Date();
   let startDate = new Date();
   let title;
@@ -202,11 +205,8 @@ function buatLaporanPeriodik(periode) {
   
   } else if (periode === 'bulanan') {
     startDate.setMonth(today.getMonth() - 1);
-    
-    // [PERBAIKAN] Menggunakan rentang tanggal yang jelas untuk konsistensi.
     const tglMulai = startDate.toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'});
     const tglSelesai = today.toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'});
-    
     title = `📈 <b>Laporan Tren Bulanan</b>\n<i>Periode: ${tglMulai} - ${tglSelesai}</i>`;
   
   } else {
@@ -397,13 +397,12 @@ function analisisTrenPerubahan(startDate, config) {
 }
 
 /**
- * [FITUR BARU] Menghasilkan laporan distribusi aset VM berdasarkan kritikalitas dan environment
- * dengan kategori yang dibaca dari sheet konfigurasi.
- * @param {object} config - Objek konfigurasi bot yang sudah diproses.
- * @returns {string} String pesan laporan yang sudah diformat untuk Telegram.
+ * [REFACTORED v4.3.1] Menghasilkan laporan distribusi aset VM.
+ * Memperbaiki bug referensi konstanta untuk 'KRITIKALITAS'.
  */
 function generateAssetDistributionReport(config) {
-  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const sheetName = config[K.SHEET_VM];
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
 
@@ -414,9 +413,10 @@ function generateAssetDistributionReport(config) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
 
-  const critIndex = headers.indexOf(KONSTANTA.HEADER_VM.KRITIKALITAS);
-  const envIndex = headers.indexOf(KONSTANTA.HEADER_VM.ENVIRONMENT);
-  const stateIndex = headers.indexOf(KONSTANTA.HEADER_VM.STATE);
+  // Menggunakan referensi yang BENAR dari objek 'config'
+  const critIndex = headers.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
+  const envIndex = headers.indexOf(config[K.HEADER_VM_ENVIRONMENT]);
+  const stateIndex = headers.indexOf(config[K.HEADER_VM_STATE]);
 
   if ([critIndex, envIndex, stateIndex].includes(-1)) {
     throw new Error("Satu atau lebih header penting (Kritikalitas, Environment, State) tidak ditemukan di sheet VM.");
@@ -432,14 +432,12 @@ function generateAssetDistributionReport(config) {
   const recognizedEnvironment = config.LIST_ENVIRONMENT || [];
 
   allData.forEach(row => {
-    // 1. Agregasi berdasarkan Kritikalitas (dengan kategori "Other")
     let criticality = String(row[critIndex] || '').trim();
     if (!recognizedCriticality.includes(criticality) || criticality === '') {
       criticality = 'Other';
     }
     report.criticality[criticality] = (report.criticality[criticality] || 0) + 1;
 
-    // 2. Agregasi berdasarkan Environment (dengan kategori "Other")
     let environment = String(row[envIndex] || '').trim();
     if (!recognizedEnvironment.includes(environment) || environment === '') {
       environment = 'Other';

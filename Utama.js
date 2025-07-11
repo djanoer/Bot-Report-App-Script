@@ -1,6 +1,9 @@
 // ===== FILE: Utama.gs =====
 
-// [FINAL & STABIL] Definisikan objek handler untuk semua perintah bot.
+/**
+ * [REFACTORED v4.3.1] Handler untuk semua perintah bot.
+ * Memperbaiki alur untuk /history, /cekhistory, dan /distribusi_vm.
+ */
 const commandHandlers = {
   [KONSTANTA.PERINTAH_BOT.LAPORAN]: (update, config) => {
     if (update.message.text.split(' ').length > 1) {
@@ -72,14 +75,21 @@ const commandHandlers = {
   [KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK]: (update, config) => {
     let statusMessageId = null;
     try {
-      const sentMessage = kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore...", config, 'HTML');
+      const sentMessage = kirimPesanTelegram("🔬 Menganalisis rekomendasi migrasi datastore... Ini mungkin memerlukan beberapa saat.", config, 'HTML');
        if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
-      const laporan = jalankanRekomendasiMigrasi(config);
-      kirimPesanTelegram(laporan, config, 'HTML');
+      
+      // Menangkap hasil laporan yang dikembalikan oleh fungsi
+      const laporanMigrasi = jalankanRekomendasiMigrasi(); 
+      
+      // Mengirim laporan yang sebenarnya
+      kirimPesanTelegram(laporanMigrasi, config, 'HTML');
+      
       if (statusMessageId) {
-        editMessageText("✅ Analisis migrasi selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        // Hapus pesan "Menganalisis..." karena laporan sudah dikirim
+        // Note: hapusPesanTelegram perlu dibuat jika belum ada, atau gunakan editMessageText
+        editMessageText("✅ Laporan analisis migrasi telah dikirimkan.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       }
     } catch(e) {
        handleCentralizedError(e, "Perintah: /migrasicheck", config);
@@ -95,9 +105,7 @@ const commandHandlers = {
         kirimMenuEkspor(config);
     }
   },
-  // Handler untuk /cekvm yang langsung mendelegasikan ke fungsi utama
   [KONSTANTA.PERINTAH_BOT.CEK_VM]: (update, config, userData) => {
-    // Langsung dan hanya panggil handler utama.
     handleVmSearchInteraction(update, config, userData);
   },
   [KONSTANTA.PERINTAH_BOT.HISTORY]: (update, config, userData) => {
@@ -108,42 +116,31 @@ const commandHandlers = {
         kirimPesanTelegram(`Gunakan format: <code>${KONSTANTA.PERINTAH_BOT.HISTORY} [PK]</code>`, config, 'HTML');
         return;
     }
-    let statusMessageId = null;
-    try {
-        const pkToDisplay = normalizePrimaryKey(pk);
-        const sentMessage = kirimPesanTelegram(`🔍 Mencari riwayat lengkap untuk PK: <code>${escapeHtml(pkToDisplay)}</code>...\n<i>Ini mungkin memerlukan beberapa saat...</i>`, config, 'HTML');
-        if (sentMessage && sentMessage.ok) {
-            statusMessageId = sentMessage.result.message_id;
-        }
-        const result = getVmHistory(pk, config);
-        if (result.success) {
-            kirimPesanTelegram(result.message, config, 'HTML');
-            if (result.data) {
-                exportResultsToSheet(result.headers, result.data, `Riwayat Lengkap - ${pk}`, config, userData, KONSTANTA.HEADER_LOG.ACTION);
-            }
-            if (statusMessageId) {
-                editMessageText("✅ Pencarian riwayat selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
-            }
-        } else {
-            kirimPesanTelegram(result.message, config, 'HTML');
-            if (statusMessageId) {
-                editMessageText("❌ Gagal mencari riwayat.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
-            }
-        }
-    } catch (e) {
-        handleCentralizedError(e, `Perintah: /history`, config);
-        if (statusMessageId) {
-            editMessageText("❌ Terjadi kesalahan kritis.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
-        }
-    }
+    
+    // Membuat 'update' tiruan untuk memulai alur riwayat
+    const mockUpdate = {
+      callback_query: {
+        ...update.message,
+        message: update.message,
+        sessionData: { pk: pk, page: 1 }
+      }
+    };
+    handleHistoryInteraction(mockUpdate, config, userData);
   },
-  // Handler untuk /cekhistory yang sekarang menerima userData
   [KONSTANTA.PERINTAH_BOT.CEK_HISTORY]: (update, config, userData) => {
       if (update.message.text.split(' ').length > 1) {
         kirimPesanTelegram(`❌ Perintah tidak valid. Gunakan <code>${KONSTANTA.PERINTAH_BOT.CEK_HISTORY}</code> tanpa argumen tambahan.`, config, 'HTML');
-    } else {
-        handleHistoryInteraction(update, config, userData);
+        return;
     }
+    // Membuat 'update' tiruan untuk memulai alur riwayat hari ini
+    const mockUpdate = {
+      callback_query: {
+        ...update.message,
+        message: update.message,
+        sessionData: { timeframe: 'today', page: 1 }
+      }
+    };
+    handleHistoryInteraction(mockUpdate, config, userData);
   },
   [KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG]: (update, config) => {
     let statusMessageId = null;
@@ -153,14 +150,11 @@ const commandHandlers = {
           statusMessageId = sentMessage.result.message_id;
       }
       
-      // Panggil fungsi yang sekarang mengembalikan pesan
       const resultMessage = cekDanArsipkanLogJikaPenuh(config);
 
-      // Edit pesan status dengan hasil akhir
       if (statusMessageId) {
           editMessageText(resultMessage, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       } else {
-          // Fallback jika pengiriman pesan status gagal
           kirimPesanTelegram(resultMessage, config, 'HTML');
       }
     } catch(e) {
@@ -202,14 +196,9 @@ const commandHandlers = {
         if (sentMessage && sentMessage.ok) {
             statusMessageId = sentMessage.result.message_id;
         }
-        // Langsung memanggil fungsi pemeriksaan
         jalankanPemeriksaanAmbangBatas(config);
         
-        // Hapus pesan status karena jalankanPemeriksaanAmbangBatas sudah mengirim laporannya sendiri
         if (statusMessageId) {
-            // Gunakan fitur hapus pesan jika ada, atau edit jika tidak ada
-            // Ini adalah contoh, implementasi bisa berbeda tergantung API Telegram Anda
-            // Untuk saat ini, kita akan mengeditnya menjadi pesan konfirmasi singkat
             editMessageText("✅ Pemeriksaan kondisi sistem selesai.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
         }
     } catch(e) {
@@ -223,8 +212,8 @@ const commandHandlers = {
 };
 
 /**
- * [REFACTORED v3.7.0 - FINAL] Fungsi utama yang menangani semua permintaan dari Telegram.
- * Kini menggunakan arsitektur Session Cache untuk memproses callback data secara tangguh.
+ * [REFACTORED v4.2.3 - HISTORY ROUTER FIX] Fungsi utama yang menangani semua permintaan dari Telegram.
+ * Memperbaiki router callback untuk secara benar mengenali permintaan awal untuk fitur Riwayat VM.
  */
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) { return HtmlService.createHtmlOutput("Bad Request"); }
@@ -269,82 +258,96 @@ function doPost(e) {
         }
         userData.firstName = userEvent.from.first_name;
         userData.userId = userEvent.from.id;
-
+        
         const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
         const K_NOTE = KONSTANTA.CALLBACK_CATATAN;
+        const K_HISTORY = KONSTANTA.CALLBACK_HISTORY;
+        const K_PAGINATE = KONSTANTA.PAGINATION_ACTIONS;
+        
+        const sessionCallbackRegex = /^([a-z_]+_)([a-zA-Z0-9]{8})$/;
+        const match = callbackData.match(sessionCallbackRegex);
 
-        // Router Callback Query dengan arsitektur Session Cache
-        if (callbackData.startsWith(K_CEKVM.CLUSTER_PREFIX) || callbackData.startsWith(K_CEKVM.DATASTORE_PREFIX)) {
-            const prefix = callbackData.startsWith(K_CEKVM.CLUSTER_PREFIX) ? K_CEKVM.CLUSTER_PREFIX : K_CEKVM.DATASTORE_PREFIX;
-            const sessionId = callbackData.replace(prefix, '');
+        if (match) {
+            const prefix = match[1];
+            const sessionId = match[2];
             const sessionData = getCallbackSession(sessionId);
 
-            if (sessionData) {
-              if (sessionData.type === 'cluster') {
-                handlePaginatedVmList(update, config, 'cluster', sessionData.itemName, true, sessionData.originPk);
-              } else if (sessionData.type === 'datastore') {
-                try {
-                  const details = getDatastoreDetails(sessionData.itemName, config);
-                  const { pesan, keyboard } = formatDatastoreDetail(details, sessionData.originPk);
-                  editMessageText(pesan, keyboard, chatId, messageId, config);
-                } catch (err) { handleCentralizedError(err, `Detail Datastore: ${sessionData.itemName}`, config); }
-              }
+            if (!sessionData) {
+                editMessageText("Sesi telah kedaluwarsa atau tidak valid. Silakan mulai lagi perintah awal.", null, chatId, messageId, config);
             } else {
-              editMessageText("Sesi telah kedaluwarsa atau tidak valid. Silakan mulai lagi dari perintah /cekvm.", null, chatId, messageId, config);
-            }
-        }
-        else if (callbackData.startsWith(K_NOTE.EDIT_ADD)) {
-            const pk = callbackData.replace(K_NOTE.EDIT_ADD, '');
-            setUserState(userEvent.from.id, { action: 'AWAITING_NOTE_INPUT', pk: pk, messageId: messageId });
-            const promptMessage = `✏️ Silakan kirimkan teks catatan yang baru untuk VM dengan PK: <code>${escapeHtml(pk)}</code>.\n\nKirim "batal" untuk membatalkan.`;
-            editMessageText(promptMessage, null, chatId, messageId, config);
-        }
-        else if (callbackData.startsWith(K_NOTE.DELETE_CONFIRM)) {
-            const pk = callbackData.replace(K_NOTE.DELETE_CONFIRM, '');
-            if (deleteVmNote(pk)) {
-                const { headers, results } = searchVmOnSheet(pk, config);
-                if (results.length > 0) {
-                  const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
-                  editMessageText(pesan, keyboard, chatId, messageId, config);
-                } else {
-                  editMessageText(`✅ Catatan berhasil dihapus, namun VM dengan PK <code>${escapeHtml(pk)}</code> tidak lagi ditemukan.`, null, chatId, messageId, config);
+                userEvent.sessionData = sessionData;
+                
+                if (prefix === `cekvm_${K_PAGINATE.NAVIGATE}_` || prefix === `cekvm_${K_PAGINATE.EXPORT}_`) {
+                    userEvent.action = prefix.includes(K_PAGINATE.EXPORT) ? K_PAGINATE.EXPORT : K_PAGINATE.NAVIGATE;
+                    handleVmSearchInteraction(update, config, userData);
+                } 
+                else if (prefix === K_CEKVM.CLUSTER_PREFIX || prefix === K_CEKVM.CLUSTER_NAV_PREFIX || prefix === K_CEKVM.CLUSTER_EXPORT_PREFIX) {
+                    userEvent.action = prefix.includes(K_PAGINATE.EXPORT) ? K_PAGINATE.EXPORT : K_PAGINATE.NAVIGATE;
+                    userEvent.sessionData.listType = 'cluster';
+                    handlePaginatedVmList(update, config, userData);
+                } 
+                else if (prefix === K_CEKVM.DATASTORE_PREFIX || prefix === K_CEKVM.DATASTORE_NAV_PREFIX || prefix === K_CEKVM.DATASTORE_EXPORT_PREFIX) {
+                    userEvent.action = prefix.includes(K_PAGINATE.EXPORT) ? K_PAGINATE.EXPORT : K_PAGINATE.NAVIGATE;
+                    userEvent.sessionData.listType = 'datastore';
+                    handlePaginatedVmList(update, config, userData);
                 }
-            } else {
-                editMessageText(`❌ Gagal menghapus catatan.`, null, chatId, messageId, config);
+                // ==================== PERUBAHAN UTAMA DI SINI ====================
+                else if (prefix === K_HISTORY.PREFIX || prefix === K_HISTORY.NAVIGATE_PREFIX || prefix === K_HISTORY.EXPORT_PREFIX) {
+                    userEvent.action = prefix.includes(K_PAGINATE.EXPORT) ? K_PAGINATE.EXPORT : K_PAGINATE.NAVIGATE;
+                    handleHistoryInteraction(update, config, userData);
+                }
+                // ==================== AKHIR PERUBAHAN ====================
+                else {
+                    console.warn(`Prefix callback sesi tidak dikenal: ${prefix}`);
+                }
             }
-        }
-        else if (callbackData.startsWith(K_NOTE.DELETE)) {
-            const pk = callbackData.replace(K_NOTE.DELETE, '');
-            const confirmationText = `❓Apakah Anda yakin ingin menghapus catatan untuk VM <code>${escapeHtml(pk)}</code>?`;
-            const confirmationKeyboard = {
-                inline_keyboard: [[
-                    { text: '✅ Ya, Hapus', callback_data: `${K_NOTE.DELETE_CONFIRM}${pk}` },
-                    { text: '❌ Batal', callback_data: `${K_CEKVM.BACK_TO_DETAIL_PREFIX}${pk}` }
-                ]]
-            };
-            editMessageText(confirmationText, confirmationKeyboard, chatId, messageId, config);
+        } 
+        else if (callbackData.startsWith(K_NOTE.PREFIX)) {
+            if (callbackData.startsWith(K_NOTE.EDIT_ADD)) {
+                const pk = callbackData.replace(K_NOTE.EDIT_ADD, '');
+                setUserState(userEvent.from.id, { action: 'AWAITING_NOTE_INPUT', pk: pk, messageId: messageId });
+                const promptMessage = `✏️ Silakan kirimkan teks catatan yang baru untuk VM dengan PK: <code>${escapeHtml(pk)}</code>.\n\nKirim "batal" untuk membatalkan.`;
+                editMessageText(promptMessage, null, chatId, messageId, config);
+            } else if (callbackData.startsWith(K_NOTE.DELETE_CONFIRM)) {
+                const pk = callbackData.replace(K_NOTE.DELETE_CONFIRM, '');
+                if (deleteVmNote(pk)) {
+                    const { headers, results } = searchVmOnSheet(pk, config);
+                    if (results.length > 0) {
+                        const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
+                        editMessageText(pesan, keyboard, chatId, messageId, config);
+                    } else {
+                        editMessageText(`✅ Catatan berhasil dihapus, namun VM dengan PK <code>${escapeHtml(pk)}</code> tidak lagi ditemukan.`, null, chatId, messageId, config);
+                    }
+                } else {
+                    editMessageText(`❌ Gagal menghapus catatan.`, null, chatId, messageId, config);
+                }
+            } else if (callbackData.startsWith(K_NOTE.DELETE)) {
+                const pk = callbackData.replace(K_NOTE.DELETE, '');
+                const confirmationText = `❓Apakah Anda yakin ingin menghapus catatan untuk VM <code>${escapeHtml(pk)}</code>?`;
+                const confirmationKeyboard = {
+                    inline_keyboard: [[
+                        { text: '✅ Ya, Hapus', callback_data: `${K_NOTE.DELETE_CONFIRM}${pk}` },
+                        { text: '❌ Batal', callback_data: `${K_CEKVM.BACK_TO_DETAIL_PREFIX}${pk}` }
+                    ]]
+                };
+                editMessageText(confirmationText, confirmationKeyboard, chatId, messageId, config);
+            }
         }
         else if (callbackData.startsWith(K_CEKVM.BACK_TO_DETAIL_PREFIX)) {
             const pk = callbackData.replace(K_CEKVM.BACK_TO_DETAIL_PREFIX, '');
             const { headers, results } = searchVmOnSheet(pk, config);
             if (results.length > 0) {
-              const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
-              editMessageText(pesan, keyboard, chatId, messageId, config);
+                const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
+                editMessageText(pesan, keyboard, chatId, messageId, config);
             } else {
-              editMessageText(`❌ VM dengan PK <code>${escapeHtml(pk)}</code> tidak lagi ditemukan.`, null, chatId, messageId, config);
+                editMessageText(`❌ VM dengan PK <code>${escapeHtml(pk)}</code> tidak lagi ditemukan.`, null, chatId, messageId, config);
             }
         }
         else if (callbackData.startsWith(KONSTANTA.CALLBACK_TIKET.PREFIX)) {
           handleTicketInteraction(update, config);
-        } 
-        else if (callbackData.startsWith(KONSTANTA.CALLBACK_HISTORY.PREFIX)) {
-          handleHistoryInteraction(update, config, userData);
-        } 
-        else if (callbackData.startsWith("run_export_log_") || callbackData.startsWith("export_")) {
-          handleExportRequest(update, config, userData);
         }
         else {
-          handleVmSearchInteraction(update, config, userData);
+             handleExportRequest(update, config, userData);
         }
 
         answerCallbackQuery(callbackQueryId, config);
@@ -473,18 +476,13 @@ function kirimPesanInfo(config) {
 
 // ===== FILE: Utama.js =====
 
-/**
- * [PERBAIKAN DX] Membuat menu kustom yang lebih terstruktur dan menyertakan setup interaktif.
- */
 function onOpen() {
   SpreadsheetApp.getUi()
       .createMenu('⚙️ Menu Bot')
       .addItem('1. Jalankan Pekerjaan Harian Sekarang', 'runDailyJobs')
-      .addItem('2. Jalankan Laporan Migrasi Saja', 'jalankanRekomendasiMigrasi')
+      .addItem('2. Jalankan Laporan Migrasi Saja', 'jalankanLaporanMigrasiDariMenu') // Menggunakan fungsi wrapper
       .addSeparator()
-      // ===== PERUBAHAN DI SINI =====
-      .addItem('3. Hapus Cache Bot (State)', 'clearBotStateCache') // Menggunakan nama fungsi baru
-      // =============================
+      .addItem('3. Hapus Cache Bot (State)', 'clearBotStateCache')
       .addItem('4. Tes Koneksi ke Telegram', 'tesKoneksiTelegram')
       .addSeparator()
       .addSubMenu(SpreadsheetApp.getUi().createMenu('🛠️ Setup Awal')
@@ -529,22 +527,20 @@ function kirimMenuEkspor(config) {
 // =====================================================================
 
 /**
- * [MODIFIKASI] Fungsi kini menjadi satu-satunya pusat untuk semua pekerjaan harian
+ * [REFACTORED v4.3.0] Fungsi kini menjadi satu-satunya pusat untuk semua pekerjaan harian
  * dengan alur yang bersih, berurutan, dan tidak redundan.
  */
 function runDailyJobs() {
   console.log("Memulai pekerjaan harian via trigger...");
   
-  // Baca konfigurasi sekali di awal
-  const config = bacaKonfigurasi();
+  // Membaca state sekali di awal menggunakan metode terpusat
+  const { config } = getBotState();
 
   // Langkah 1: Jalankan sinkronisasi dan kirim laporan operasional
   syncDanBuatLaporanHarian(false, "TRIGGER HARIAN", config); 
   
   // Langkah 2: Jalankan pemeriksaan kondisi dan kirim laporannya
   jalankanPemeriksaanAmbangBatas(config);
-  
-  // Panggilan yang redundan ke jalankanPemeriksaanDatastore telah dihapus.
   
   console.log("Pekerjaan harian via trigger selesai.");
 }
@@ -563,8 +559,13 @@ function runMonthlyReport() {
 
 function runCleanupAndArchivingJobs() {
   console.log("Memulai pekerjaan pembersihan dan arsip via trigger...");
-  bersihkanFileEksporTua();
-  cekDanArsipkanLogJikaPenuh();
+  
+  // Membaca state sekali di awal menggunakan metode terpusat
+  const { config } = getBotState();
+  
+  bersihkanFileEksporTua(config);
+  cekDanArsipkanLogJikaPenuh(config);
+  
   console.log("Pekerjaan pembersihan dan arsip via trigger selesai.");
 }
 

@@ -358,32 +358,40 @@ function deleteVmNote(vmPrimaryKey) {
 }
 
 /**
- * [REFACTORED v3.5.0 - FINAL & ROBUST] Memformat detail VM dengan validasi header proaktif.
- * Fungsi ini tidak akan gagal secara senyap dan akan melaporkan kesalahan konfigurasi header.
+ * [REFACTORED v4.1.9 - HISTORY FIX] Memformat detail VM menjadi pesan yang siap kirim.
+ * Tombol Riwayat VM sekarang secara benar menggunakan arsitektur sesi.
  */
 function formatVmDetail(row, headers, config) {
   const K = KONSTANTA.KUNCI_KONFIG;
 
-  // --- [PERBAIKAN UTAMA] Validasi Header yang Jelas dan Aman ---
-  const requiredHeaderKeys = [
-    K.HEADER_VM_NAME, K.HEADER_VM_PK, K.HEADER_VM_IP, K.HEADER_VM_STATE,
-    K.HEADER_VM_UPTIME, K.HEADER_VM_CPU, K.HEADER_VM_MEMORY, K.HEADER_VM_PROV_GB,
-    K.HEADER_VM_CLUSTER, K.VM_DS_COLUMN_HEADER, K.HEADER_VM_KRITIKALITAS,
-    K.HEADER_VM_KELOMPOK_APP, K.HEADER_VM_DEV_OPS, K.HEADER_VM_GUEST_OS, K.HEADER_VM_VCENTER
-  ];
+  const indices = {
+    pk: headers.indexOf(config[K.HEADER_VM_PK]),
+    name: headers.indexOf(config[K.HEADER_VM_NAME]),
+    ip: headers.indexOf(config[K.HEADER_VM_IP]),
+    state: headers.indexOf(config[K.HEADER_VM_STATE]),
+    uptime: headers.indexOf(config[K.HEADER_VM_UPTIME]),
+    cpu: headers.indexOf(config[K.HEADER_VM_CPU]),
+    memory: headers.indexOf(config[K.HEADER_VM_MEMORY]),
+    provGb: headers.indexOf(config[K.HEADER_VM_PROV_GB]),
+    cluster: headers.indexOf(config[K.HEADER_VM_CLUSTER]),
+    datastore: headers.indexOf(config[K.VM_DS_COLUMN_HEADER]),
+    kritikalitas: headers.indexOf(config[K.HEADER_VM_KRITIKALITAS]),
+    kelompokApp: headers.indexOf(config[K.HEADER_VM_KELOMPOK_APP]),
+    devOps: headers.indexOf(config[K.HEADER_VM_DEV_OPS]),
+    guestOs: headers.indexOf(config[K.HEADER_VM_GUEST_OS]),
+    vcenter: headers.indexOf(config[K.HEADER_VM_VCENTER])
+  };
 
-  const indices = {};
-  for (const key of requiredHeaderKeys) {
-    const headerName = config[key];
-    if (!headerName) {
-      throw new Error(`Kunci konfigurasi '${key}' tidak ditemukan di sheet Konfigurasi.`);
-    }
-    indices[key] = headers.indexOf(headerName);
+  for (const key in indices) {
     if (indices[key] === -1) {
-      throw new Error(`Header '${headerName}' (dari kunci '${key}') tidak ditemukan di sheet Data Utama.`);
+      throw new Error(`Header untuk '${key}' tidak ditemukan. Periksa konfigurasi nama header.`);
     }
   }
-  // --- [AKHIR VALIDASI] ---
+
+  const normalizedPk = normalizePrimaryKey(row[indices.pk]);
+  const clusterName = row[indices.cluster];
+  const datastoreName = row[indices.datastore];
+  const vmNote = getVmNote(normalizedPk, config);
 
   const addDetail = (value, icon, label, isCode = false) => {
     if (value !== undefined && value !== null && String(value).trim() !== '') {
@@ -395,23 +403,19 @@ function formatVmDetail(row, headers, config) {
   
   let pesan = "🖥️  <b>Detail Virtual Machine</b>\n\n";
   pesan += "<b>Informasi Umum</b>\n";
-  pesan += addDetail(row[indices[K.HEADER_VM_NAME]], '🏷️', 'Nama VM', true);
-  const rawPk = row[indices[K.HEADER_VM_PK]];
-  const normalizedPk = normalizePrimaryKey(rawPk);
+  pesan += addDetail(row[indices.name], '🏷️', 'Nama VM', true);
   pesan += addDetail(normalizedPk, '🔑', 'Primary Key', true);
-  pesan += addDetail(row[indices[K.HEADER_VM_IP]], '🌐', 'IP Address', true);
-  const stateValue = row[indices[K.HEADER_VM_STATE]] || '';
+  pesan += addDetail(row[indices.ip], '🌐', 'IP Address', true);
+  const stateValue = row[indices.state] || '';
   const stateIcon = stateValue.toLowerCase().includes('on') ? '🟢' : '🔴';
   pesan += addDetail(stateValue, stateIcon, 'Status');
-  pesan += addDetail(`${row[indices[K.HEADER_VM_UPTIME]]} hari`, '⏳', 'Uptime');
+  pesan += addDetail(`${row[indices.uptime]} hari`, '⏳', 'Uptime');
 
   pesan += "\n<b>Sumber Daya & Kapasitas</b>\n";
-  pesan += addDetail(`${row[indices[K.HEADER_VM_CPU]]} vCPU`, '⚙️', 'CPU');
-  pesan += addDetail(`${row[indices[K.HEADER_VM_MEMORY]]} GB`, '🧠', 'Memory');
-  pesan += addDetail(`${row[indices[K.HEADER_VM_PROV_GB]]} GB`, '💽', 'Provisioned');
+  pesan += addDetail(`${row[indices.cpu]} vCPU`, '⚙️', 'CPU');
+  pesan += addDetail(`${row[indices.memory]} GB`, '🧠', 'Memory');
+  pesan += addDetail(`${row[indices.provGb]} GB`, '💽', 'Provisioned');
   
-  const clusterName = row[indices[K.HEADER_VM_CLUSTER]];
-  const datastoreName = row[indices[K.VM_DS_COLUMN_HEADER]];
   pesan += addDetail(clusterName, '☁️', 'Cluster');
   pesan += addDetail(datastoreName, '🗄️', 'Datastore');
 
@@ -419,13 +423,12 @@ function formatVmDetail(row, headers, config) {
   
   pesan += "\n<b>Konfigurasi & Manajemen</b>\n";
   pesan += addDetail(environment, '🌍', 'Environment');
-  pesan += addDetail(row[indices[K.HEADER_VM_KRITIKALITAS]], '🔥', 'Kritikalitas BIA');
-  pesan += addDetail(row[indices[K.HEADER_VM_KELOMPOK_APP]], '📦', 'Aplikasi BIA');
-  pesan += addDetail(row[indices[K.HEADER_VM_DEV_OPS]], '👥', 'DEV/OPS');
-  pesan += addDetail(row[indices[K.HEADER_VM_GUEST_OS]], '🐧', 'Guest OS');
-  pesan += addDetail(row[indices[K.HEADER_VM_VCENTER]], '🏢', 'vCenter');
+  pesan += addDetail(row[indices.kritikalitas], '🔥', 'Kritikalitas BIA');
+  pesan += addDetail(row[indices.kelompokApp], '📦', 'Aplikasi BIA');
+  pesan += addDetail(row[indices.devOps], '👥', 'DEV/OPS');
+  pesan += addDetail(row[indices.guestOs], '🐧', 'Guest OS');
+  pesan += addDetail(row[indices.vcenter], '🏢', 'vCenter');
 
-  const vmNote = getVmNote(normalizedPk, config);
   pesan += `\n--------------------------------------------------\n`;
   pesan += `📝  <b>Catatan untuk VM ini:</b>\n`;
   if (vmNote) {
@@ -440,31 +443,32 @@ function formatVmDetail(row, headers, config) {
   pesan += `--------------------------------------------------\n`;
 
   const keyboardRows = [];
-  const noteButtons = [];
-  
-  noteButtons.push({ text: `✏️ ${vmNote ? 'Edit' : 'Tambah'} Catatan`, callback_data: `${KONSTANTA.CALLBACK_CATATAN.EDIT_ADD}${normalizedPk}` });
+  const K_NOTE = KONSTANTA.CALLBACK_CATATAN;
+  const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
+  const K_HISTORY = KONSTANTA.CALLBACK_HISTORY;
 
+  // ==================== PERUBAHAN UTAMA DI SINI ====================
+  // Tombol Riwayat VM sekarang membuat sesi yang valid.
+  const historySessionId = createCallbackSession({ pk: normalizedPk });
+  // ==================== AKHIR PERUBAHAN ====================
+
+  const firstRowButtons = [];
+  firstRowButtons.push({ text: '📜 Riwayat VM', callback_data: `${K_HISTORY.PREFIX}${historySessionId}` });
+  firstRowButtons.push({ text: `✏️ ${vmNote ? 'Edit' : 'Tambah'} Catatan`, callback_data: `${K_NOTE.EDIT_ADD}${normalizedPk}` });
   if (vmNote) {
-    noteButtons.push({ text: '🗑️ Hapus Catatan', callback_data: `${KONSTANTA.CALLBACK_CATATAN.DELETE}${normalizedPk}` });
+    firstRowButtons.push({ text: '🗑️ Hapus Catatan', callback_data: `${K_NOTE.DELETE}${normalizedPk}` });
   }
-  keyboardRows.push(noteButtons);
-
-  if (normalizedPk) {
-    keyboardRows.push([{ text: `📜 Lihat Riwayat VM (${normalizedPk})`, callback_data: `${KONSTANTA.CALLBACK_CEKVM.HISTORY_PREFIX}${normalizedPk}` }]);
-  }
+  keyboardRows.push(firstRowButtons);
 
   const secondRowButtons = [];
   if (clusterName) {
-    const sessionId = createCallbackSession({ type: 'cluster', itemName: clusterName, originPk: normalizedPk });
-    const clusterCallback = `${KONSTANTA.CALLBACK_CEKVM.CLUSTER_PREFIX}${sessionId}`;
-    secondRowButtons.push({ text: `⚙️ VM di Cluster ${clusterName}`, callback_data: clusterCallback });
+    const clusterSessionId = createCallbackSession({ itemName: clusterName, originPk: normalizedPk });
+    secondRowButtons.push({ text: `⚙️ VM di Cluster`, callback_data: `${K_CEKVM.CLUSTER_PREFIX}${clusterSessionId}` });
   }
   if (datastoreName) {
-    const sessionId = createCallbackSession({ type: 'datastore', itemName: datastoreName, originPk: normalizedPk });
-    const datastoreCallback = `${KONSTANTA.CALLBACK_CEKVM.DATASTORE_PREFIX}${sessionId}`;
-    secondRowButtons.push({ text: `🗄️ Detail DS ${datastoreName}`, callback_data: datastoreCallback });
+    const datastoreSessionId = createCallbackSession({ itemName: datastoreName, originPk: normalizedPk });
+    secondRowButtons.push({ text: `🗄️ Detail DS`, callback_data: `${K_CEKVM.DATASTORE_PREFIX}${datastoreSessionId}` });
   }
-
   if (secondRowButtons.length > 0) {
     keyboardRows.push(secondRowButtons);
   }
@@ -524,8 +528,9 @@ function formatDatastoreDetail(details, originPk = null) {
 }
 
 /**
- * [REFACTORED v3.8.2 - "Pramusaji"] Menangani pencarian VM.
- * Kini menambahkan pekerjaan ke dalam antrean dengan konteks yang lengkap.
+ * [REFACTORED v4.1.6 - CONTEXT-AWARE FIX] Menangani pencarian VM.
+ * Fungsi ini sekarang secara benar menangani dua konteks: panggilan awal dari
+ * perintah teks dan panggilan lanjutan dari callback, secara permanen memperbaiki bug 'undefined'.
  */
 function handleVmSearchInteraction(update, config, userData) {
   const isCallback = !!update.callback_query;
@@ -540,55 +545,45 @@ function handleVmSearchInteraction(update, config, userData) {
     let searchTerm;
     let page = 1;
 
+    // Logika ini sekarang secara eksplisit membedakan sumber panggilan.
     if (isCallback) {
-      const callbackData = userEvent.data;
-      const parts = callbackData.split('_');
-      page = parseInt(parts.pop(), 10) || 1;
-      searchTerm = decodeURIComponent(parts.slice(2).join('_'));
-      
-      if (parts[1] === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
-        answerCallbackQuery(userEvent.id, config);
+        // Jika ini adalah callback, kita bisa percaya sessionData ada karena sudah divalidasi oleh doPost.
+        const sessionData = userEvent.sessionData;
+        searchTerm = sessionData.searchTerm;
+        page = sessionData.page || 1;
         
-        const properties = PropertiesService.getUserProperties();
-        const jobKey = `export_job_${userEvent.from.id}_${Date.now()}`;
-        
-        // --- [PERBAIKAN UTAMA DI SINI] ---
-        // Simpan semua data yang dibutuhkan, termasuk chatId untuk pengiriman pesan.
-        const jobData = { 
-          searchTerm: searchTerm, 
-          config: config, 
-          userData: userData, 
-          chatId: userEvent.message.chat.id 
-        };
-        properties.setProperty(jobKey, JSON.stringify(jobData));
-
-        kirimPesanTelegram(
-          `✅ Permintaan ekspor Anda untuk pencarian "<b>${escapeHtml(searchTerm)}</b>" telah ditambahkan ke antrean.\n\nFile akan dikirimkan dalam beberapa saat (biasanya dalam 1-2 menit).`, 
-          config, 'HTML', null, userEvent.message.chat.id
-        );
-        return; 
-      }
+        if (userEvent.action === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
+            answerCallbackQuery(userEvent.id, config, "Menambahkan ke antrean...");
+            
+            const jobData = { searchTerm, config, userData, chatId: userEvent.message.chat.id };
+            const jobKey = `export_job_${userEvent.from.id}_${Date.now()}`;
+            PropertiesService.getUserProperties().setProperty(jobKey, JSON.stringify(jobData));
+            
+            kirimPesanTelegram(`✅ Permintaan ekspor Anda untuk "<b>${escapeHtml(searchTerm)}</b>" telah ditambahkan ke antrean.`, config, 'HTML', null, userEvent.message.chat.id);
+            return; 
+        }
     } else {
-      searchTerm = userEvent.text.split(' ').slice(1).join(' ');
-      if (!searchTerm) {
-        kirimPesanTelegram(`Gunakan format: <code>/cekvm [IP / Nama / PK]</code>`, config, 'HTML');
-        return;
-      }
+        // Jika ini bukan callback, berarti ini adalah panggilan pertama dari pesan teks.
+        searchTerm = userEvent.text.split(' ').slice(1).join(' ');
+        if (!searchTerm) {
+            kirimPesanTelegram(`Gunakan format: <code>/cekvm [IP / Nama / PK]</code>`, config, 'HTML');
+            return;
+        }
     }
 
-    // Sisa dari logika untuk menampilkan hasil pencarian tidak berubah
     const { headers, results } = searchVmOnSheet(searchTerm, config);
     if (results.length === 0) {
-      kirimPesanTelegram(`❌ VM dengan kriteria "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`, config, 'HTML');
+      const message = `❌ VM dengan kriteria "<b>${escapeHtml(searchTerm)}</b>" tidak ditemukan.`;
+      isCallback ? editMessageText(message, null, userEvent.message.chat.id, userEvent.message.message_id, config) : kirimPesanTelegram(message, config, 'HTML');
       return;
     }
+
     if (results.length === 1 && !isCallback) {
         const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
-        let fullMessage = `✅ Ditemukan 1 hasil untuk "<b>${escapeHtml(searchTerm)}</b>":\n\n`;
-        fullMessage += pesan;
-        kirimPesanTelegram(fullMessage, config, 'HTML', keyboard);
+        kirimPesanTelegram(`✅ Ditemukan 1 hasil untuk "<b>${escapeHtml(searchTerm)}</b>":\n\n${pesan}`, config, 'HTML', keyboard);
         return;
     }
+
     const formatVmEntry = (row) => {
       const K = KONSTANTA.KUNCI_KONFIG;
       const nameIndex = headers.indexOf(config[K.HEADER_VM_NAME]);
@@ -596,82 +591,139 @@ function handleVmSearchInteraction(update, config, userData) {
       const pkIndex = headers.indexOf(config[K.HEADER_VM_PK]);
       return `<b>${escapeHtml(row[nameIndex])}</b>\n   (<code>${escapeHtml(row[ipIndex])}</code> | <code>${escapeHtml(normalizePrimaryKey(row[pkIndex]))}</code>)`;
     };
-    const safeSearchTerm = encodeURIComponent(searchTerm);
+    
+    const K_PAGINATE = KONSTANTA.PAGINATION_ACTIONS;
+    const callbackInfo = {
+        navPrefix: `cekvm_${K_PAGINATE.NAVIGATE}_`,
+        exportPrefix: `cekvm_${K_PAGINATE.EXPORT}_`,
+        context: { searchTerm: searchTerm }
+    };
+
     const { text, keyboard } = createPaginatedView({
       allItems: results,
       page: page,
       title: `Hasil Pencarian untuk "${escapeHtml(searchTerm)}"`,
       formatEntryCallback: formatVmEntry,
-      navCallbackPrefix: `cekvm_${KONSTANTA.PAGINATION_ACTIONS.NAVIGATE}_${safeSearchTerm}`,
-      exportCallbackData: `cekvm_${KONSTANTA.PAGINATION_ACTIONS.EXPORT}_${safeSearchTerm}`
+      callbackInfo: callbackInfo
     });
+
     if (isCallback) {
-      if(userEvent.message.text !== text) {
+      if(userEvent.message.text !== text || JSON.stringify(userEvent.message.reply_markup) !== JSON.stringify(keyboard)) {
         editMessageText(text, keyboard, userEvent.message.chat.id, userEvent.message.message_id, config);
       }
     } else {
       kirimPesanTelegram(text, config, 'HTML', keyboard, userEvent.chat.id);
     }
   } catch (err) {
-    console.error(`[handleVmSearchInteraction] Gagal total: ${err.message}\nStack: ${err.stack}`);
-    kirimPesanTelegram(`🔴 Terjadi kesalahan saat memproses pencarian.\n\n<b>Penyebab:</b>\n<code>${escapeHtml(err.message)}</code>`, config, 'HTML');
+    handleCentralizedError(err, "[handleVmSearchInteraction]", config);
   }
 }
 
 /**
- * [FINAL - PAGINATION LENGKAP] Mengendalikan interaksi untuk /cekhistory menggunakan fungsi generik 'createPaginatedView'.
- * [DIPERBAIKI] Fungsi ini tidak lagi memanggil getUserData, tetapi menerimanya dari pemanggil.
+ * [REVISED v4.3.1] Menangani interaksi untuk riwayat.
+ * Sekarang dapat menangani permintaan untuk riwayat VM spesifik (dari /history)
+ * dan riwayat hari ini (dari /cekhistory).
  */
 function handleHistoryInteraction(update, config, userData) {
-  const isCallback = !!update.callback_query;
-  const userEvent = isCallback ? update.callback_query : update.message;
-  if (userData) {
-      userData.userId = userEvent.from.id;
-      userData.firstName = userEvent.from.first_name;
-  }
-  let page = 1, chatId, messageId;
-  if (isCallback) {
-    chatId = userEvent.message.chat.id;
-    messageId = userEvent.message.message_id;
-    const callbackData = userEvent.data;
-    const parts = callbackData.split('_');
-    const action = parts[1];
-    const P_ACTIONS = KONSTANTA.PAGINATION_ACTIONS;
-    if (action === P_ACTIONS.NAVIGATE) {
-      page = parseInt(parts[parts.length - 1], 10);
-    } else if (action === P_ACTIONS.EXPORT) {
-      const todayStartDate = new Date();
-      todayStartDate.setHours(0, 0, 0, 0);
-      const { headers, data } = getCombinedLogs(todayStartDate, config);
-      exportResultsToSheet(headers, data, "Log Perubahan Hari Ini", config, userData, KONSTANTA.HEADER_LOG.ACTION);
-      answerCallbackQuery(userEvent.id, config, "Membuat file ekspor...");
+  const userEvent = update.callback_query;
+  const sessionData = userEvent.sessionData;
+  const isCallback = !!userEvent.id; // Cek apakah ini benar-benar callback atau mock
+  
+  try {
+    const page = sessionData.page || 1;
+    let logsToShow, logHeaders, title, headerContent;
+
+    // Membedakan antara /history [pk] dan /cekhistory
+    if (sessionData.pk) {
+        const pk = sessionData.pk;
+        const result = getVmHistory(pk, config);
+        logsToShow = result.history;
+        logHeaders = result.headers;
+        title = `Riwayat Perubahan untuk ${escapeHtml(pk)}`;
+        headerContent = `<b>📜 Riwayat Perubahan untuk VM</b>\n` +
+                          `<b>Nama:</b> ${escapeHtml(result.vmName)}\n` +
+                          `<b>PK:</b> <code>${escapeHtml(pk)}</code>`;
+    } else { // Asumsi ini untuk /cekhistory
+        const todayStartDate = new Date();
+        todayStartDate.setHours(0, 0, 0, 0);
+        const result = getCombinedLogs(todayStartDate, config);
+        logsToShow = result.data;
+        logHeaders = result.headers;
+        title = "Log Perubahan Hari Ini";
+        headerContent = `<b>📜 Log Perubahan Hari Ini</b>\n<i>(Termasuk dari arsip jika relevan)</i>`;
+    }
+
+    if (logsToShow.length === 0) {
+      const message = sessionData.pk 
+          ? `ℹ️ Tidak ditemukan riwayat perubahan untuk VM dengan PK: <code>${escapeHtml(sessionData.pk)}</code>`
+          : `✅ Tidak ada aktivitas perubahan data yang tercatat hari ini.`;
+      isCallback ? editMessageText(message, null, userEvent.message.chat.id, userEvent.message.message_id, config) : kirimPesanTelegram(message, config, 'HTML', null, userEvent.chat.id);
       return;
     }
-  } else {
-    chatId = userEvent.chat.id;
-  }
-  const todayStartDate = new Date();
-  todayStartDate.setHours(0, 0, 0, 0);
-  const { headers: logHeaders, data: logsToShow } = getCombinedLogs(todayStartDate, config);
-  const title = "Log Perubahan Hari Ini";
-  const formatLogEntry = (row) => {
-      return formatHistoryEntry(row, logHeaders, config); 
-  };
-  const { text, keyboard } = createPaginatedView({
+
+    const K = KONSTANTA.KUNCI_KONFIG;
+    const headerIndices = {
+        timestamp: logHeaders.indexOf(config[K.HEADER_LOG_TIMESTAMP]),
+        action: logHeaders.indexOf(config[K.HEADER_LOG_ACTION]),
+        oldValue: logHeaders.indexOf(config[K.HEADER_LOG_OLD_VAL]),
+        newValue: logHeaders.indexOf(config[K.HEADER_LOG_NEW_VAL]),
+        detail: logHeaders.indexOf(config[K.HEADER_LOG_DETAIL]),
+        pk: logHeaders.indexOf(config[K.HEADER_VM_PK]),
+        vmName: logHeaders.indexOf(config[K.HEADER_VM_NAME])
+    };
+
+    const formatHistoryEntry = (row) => {
+        const timestamp = new Date(row[headerIndices.timestamp]).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
+        const action = escapeHtml(row[headerIndices.action] || '');
+        const detail = escapeHtml(row[headerIndices.detail] || '');
+        
+        const oldValueFormatted = escapeHtml(row[headerIndices.oldValue] || '(Kosong)');
+        const newValueFormatted = escapeHtml(row[headerIndices.newValue] || '(Kosong)');
+
+        let formattedText = `<b>🗓️ ${timestamp}</b> | <b>Aksi:</b> ${action}\n`;
+        // Jika bukan riwayat spesifik, tampilkan nama VM
+        if (!sessionData.pk) {
+            formattedText += `<b>VM:</b> ${escapeHtml(row[headerIndices.vmName] || row[headerIndices.pk])}\n`;
+        }
+
+        if (action === 'MODIFIKASI') {
+            const columnName = detail.replace("Kolom '", "").replace("' diubah", "");
+            formattedText += `<b>Detail:</b> Kolom '${escapeHtml(columnName)}' diubah\n`;
+            formattedText += `   - <code>${oldValueFormatted}</code> ➔ <code>${newValueFormatted}</code>\n`;
+        } else {
+            formattedText += `<b>Detail:</b> ${detail}\n`;
+        }
+        return formattedText;
+    };
+
+    const K_HISTORY = KONSTANTA.CALLBACK_HISTORY;
+    const callbackInfo = {
+        navPrefix: K_HISTORY.NAVIGATE_PREFIX,
+        exportPrefix: K_HISTORY.EXPORT_PREFIX,
+        context: sessionData.pk ? { pk: sessionData.pk } : { timeframe: 'today' }
+    };
+
+    const { text, keyboard } = createPaginatedView({
       allItems: logsToShow,
       page: page,
       title: title,
-      formatEntryCallback: formatLogEntry,
-      navCallbackPrefix: `history_${KONSTANTA.PAGINATION_ACTIONS.NAVIGATE}`,
-      exportCallbackData: `history_${KONSTANTA.PAGINATION_ACTIONS.EXPORT}`
-  });
-  if (isCallback) {
-    if (userEvent.message.text !== text) {
-      editMessageText(text, keyboard, chatId, messageId, config);
+      headerContent: headerContent,
+      formatEntryCallback: formatHistoryEntry,
+      callbackInfo: callbackInfo
+    });
+
+    if (sessionData.pk && keyboard) {
+      keyboard.inline_keyboard.push([{ text: '⬅️ Kembali ke Detail VM', callback_data: `${KONSTANTA.CALLBACK_CEKVM.BACK_TO_DETAIL_PREFIX}${sessionData.pk}` }]);
     }
-    answerCallbackQuery(userEvent.id, config);
-  } else {
-    kirimPesanTelegram(text, config, 'HTML', keyboard, chatId);
+    
+    if (isCallback) {
+        editMessageText(text, keyboard, userEvent.message.chat.id, userEvent.message.message_id, config);
+    } else {
+        kirimPesanTelegram(text, config, 'HTML', keyboard, userEvent.chat.id);
+    }
+  } catch (err) {
+    const context = sessionData.pk ? `PK: ${sessionData.pk}` : 'Today';
+    handleCentralizedError(err, `[handleHistoryInteraction for ${context}]`, config);
   }
 }
 
@@ -767,72 +819,83 @@ function exportResultsToSheet(headers, dataRows, title, config, userData, highli
 }
 
 /**
- * [REFACTORED v3.5.0] Mencari riwayat lengkap sebuah VM dengan header dinamis.
+ * [REVISED v4.3.1 - ROBUST ARCHIVE SEARCH] Mengumpulkan semua riwayat perubahan untuk satu VM.
+ * Secara andal membaca log dari sheet aktif dan semua file arsip JSON.
  */
 function getVmHistory(pk, config) {
-  if (!pk) {
-    return { success: false, message: "❌ Terjadi kesalahan: Primary Key untuk melihat riwayat tidak valid." };
+  const allHistory = [];
+  const K = KONSTANTA.KUNCI_KONFIG;
+  
+  const logSheetName = KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN;
+  const archiveFolderId = config[K.FOLDER_ARSIP_LOG]; 
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(logSheetName);
+  if (!sheet) throw new Error(`Sheet log dengan nama "${logSheetName}" tidak ditemukan.`);
+  
+  let headers = [];
+  let pkIndex = -1;
+  let vmNameIndex = -1;
+  let lastKnownVmName = pk;
+
+  if (sheet.getLastRow() > 0) {
+    const data = sheet.getDataRange().getValues();
+    headers = data.shift() || [];
+    pkIndex = headers.indexOf(config[K.HEADER_VM_PK]);
+    vmNameIndex = headers.indexOf(config[K.HEADER_VM_NAME]);
+
+    if (pkIndex === -1 && data.length > 0) {
+        throw new Error(`Kolom Primary Key ('${config[K.HEADER_VM_PK]}') tidak ditemukan di header sheet log.`);
+    }
+
+    if (pkIndex !== -1) {
+        for (const row of data) {
+            if (normalizePrimaryKey(row[pkIndex]) === normalizePrimaryKey(pk)) {
+                allHistory.push(row);
+            }
+        }
+    }
   }
 
-  try {
-    const K = KONSTANTA.KUNCI_KONFIG;
-    const pkToDisplay = normalizePrimaryKey(pk);
-    const allTimeStartDate = new Date('2020-01-01');
-    const { headers: logHeaders, data: allLogs } = getCombinedLogs(allTimeStartDate, config);
+  if (archiveFolderId && headers.length > 0 && pkIndex !== -1) {
+    try {
+      const archiveFolder = DriveApp.getFolderById(archiveFolderId);
+      const files = archiveFolder.getFilesByName('archive_log_index.json');
 
-    if (logHeaders.length === 0) {
-      return { success: false, message: "❌ Gagal memproses: Tidak dapat menemukan header di sheet 'Log Perubahan'." };
+      if (files.hasNext()) {
+        const indexFile = files.next();
+        const indexData = JSON.parse(indexFile.getBlob().getDataAsString());
+
+        for (const indexEntry of indexData) {
+            const archiveFiles = archiveFolder.getFilesByName(indexEntry.fileName);
+            if(archiveFiles.hasNext()){
+                const file = archiveFiles.next();
+                const archivedRows = JSON.parse(file.getBlob().getDataAsString());
+                if (Array.isArray(archivedRows)) {
+                  for (const rowObj of archivedRows) {
+                    if (rowObj[config[K.HEADER_VM_PK]] && normalizePrimaryKey(rowObj[config[K.HEADER_VM_PK]]) === normalizePrimaryKey(pk)) {
+                      const rowArray = headers.map(header => rowObj[header] || '');
+                      allHistory.push(rowArray);
+                    }
+                  }
+                }
+            }
+        }
+      }
+    } catch(e) {
+        console.error(`Gagal memproses arsip log: ${e.message}`);
     }
-
-    const pkHeader = config[K.HEADER_VM_PK];
-    const pkIndex = logHeaders.indexOf(pkHeader);
-    if (pkIndex === -1) {
-      return { success: false, message: `❌ Gagal memproses: Kolom krusial '${pkHeader}' tidak ditemukan di dalam log.` };
-    }
-
-    const pkTrimmed = normalizePrimaryKey(pk.trim()).toLowerCase();
-    const historyEntries = allLogs.filter(row => 
-      row[pkIndex] && normalizePrimaryKey(String(row[pkIndex])).toLowerCase() === pkTrimmed
-    );
-
-    if (historyEntries.length === 0) {
-      return { success: true, message: `ℹ️ Tidak ada riwayat perubahan ditemukan untuk Primary Key <code>${escapeHtml(pkToDisplay)}</code>.`, data: null, headers: null };
-    }
-
-    const timestampHeader = config[K.HEADER_LOG_TIMESTAMP];
-    const timestampIndex = logHeaders.indexOf(timestampHeader);
-    historyEntries.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
-    
-    const vmNameHeader = config[K.HEADER_VM_NAME];
-    const vmNameIndex = logHeaders.indexOf(vmNameHeader);
-    const currentVmName = historyEntries[0][vmNameIndex] || pk;
-    
-    let message = `<b>📜 Riwayat Lengkap untuk VM</b>\n`;
-    message += `<b>${vmNameHeader}:</b> ${escapeHtml(currentVmName)}\n`;
-    message += `<b>${pkHeader}:</b> <code>${escapeHtml(pkToDisplay)}</code>\n`;
-    message += `<i>Total ditemukan ${historyEntries.length} entri riwayat.</i>`;
-    message += KONSTANTA.UI_STRINGS.SEPARATOR;
-    message += `\n`;
-
-    if (historyEntries.length > 8) {
-      message += `Menampilkan 5 dari ${historyEntries.length} perubahan terakhir:\n\n`;
-      historyEntries.slice(0, 5).forEach(entry => {
-        message += formatHistoryEntry(entry, logHeaders, config);
-      });
-      message += KONSTANTA.UI_STRINGS.SEPARATOR;
-      message += `<i>Riwayat terlalu panjang. Laporan lengkap sedang dibuat dalam file Google Sheet...</i>`;
-      return { success: true, message: message, data: historyEntries, headers: logHeaders };
-    } else {
-      historyEntries.forEach(entry => {
-        message += formatHistoryEntry(entry, logHeaders, config);
-      });
-      return { success: true, message: message, data: null, headers: null };
-    }
-
-  } catch (e) {
-    console.error(`Gagal total saat menjalankan getVmHistory: ${e.message}\nStack: ${e.stack}`);
-    return { success: false, message: `❌ Terjadi kesalahan teknis saat mengambil riwayat.\n<b>Error:</b> ${e.message}`};
   }
+
+  const timestampIndex = headers.indexOf(config[K.HEADER_LOG_TIMESTAMP]);
+  if (timestampIndex !== -1 && allHistory.length > 0) {
+    allHistory.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
+    if (vmNameIndex !== -1 && allHistory[0][vmNameIndex]) {
+        lastKnownVmName = allHistory[0][vmNameIndex];
+    }
+  }
+
+  return { history: allHistory, headers: headers, vmName: lastKnownVmName };
 }
 
 /**
@@ -917,19 +980,16 @@ function sortVmForMigration(a, b, config) {
 }
 
 /**
- * [LOGIKA FINAL & BENAR] Mencari datastore tujuan terbaik dengan memastikan
- * aturan dari 'Logika Migrasi' diterapkan sebagai prioritas utama.
- * @returns {object|null} Objek datastore tujuan jika berhasil, atau objek error dengan alasan jika gagal.
- * [MODIFIKASI v2.1] Memperbaiki logika pengecualian datastore agar case-insensitive.
+ * [REFACTORED v4.2.5 - BULLETPROOF LOGIC] Mencari datastore tujuan terbaik.
+ * Versi ini memiliki benteng pertahanan yang diperkuat untuk secara definitif
+ * menangani kasus di mana sebuah tipe datastore tidak memiliki aturan migrasi sama sekali,
+ * sehingga menyelesaikan error 'Cannot read properties of undefined'.
  */
 function findBestDestination(sourceDs, requiredGb, availableDestinations, migrationConfig, config) {
     const sourceType = sourceDs.type;
-    // Mengubah daftar kata kunci menjadi huruf besar sekali saja di awal
     const excludedKeywords = (config[KONSTANTA.KUNCI_KONFIG.DS_KECUALI] || []).map(k => k.toUpperCase());
 
-    // --- Filter Tahap 1: Syarat Mutlak ---
     let candidates = availableDestinations.filter(destDs => {
-        // Mengubah nama datastore menjadi huruf besar saat pengecekan
         const destDsNameUpper = destDs.name.toUpperCase();
         return destDs.cluster === sourceDs.cluster && 
                destDs.environment === sourceDs.environment &&
@@ -946,29 +1006,35 @@ function findBestDestination(sourceDs, requiredGb, availableDestinations, migrat
         return { error: true, reason: `Semua kandidat datastore termasuk dalam daftar pengecualian.` };
     }
     
-    // --- Filter Tahap 2: Aturan Prioritas dari 'Logika Migrasi' ---
-    const sourceRule = migrationConfig.get(sourceType) || Array.from(migrationConfig.values()).find(rule => rule.alias === sourceType);
+    const sourceRule = migrationConfig.get(sourceType) || Array.from(migrationConfig.values()).find(rule => rule && rule.alias === sourceType);
     
-    if (sourceType && sourceRule && sourceRule.destinations.length > 0) {
-        const priorityTypes = sourceRule.destinations;
-        
-        for (const priorityType of priorityTypes) {
-            const found = candidates.find(d => d.type === priorityType);
-            if (found) {
-                return candidates
-                    .filter(c => c.type === priorityType)
-                    .sort((a,b) => b.freeSpace - a.freeSpace)[0];
+    // ==================== PERUBAHAN UTAMA DI SINI ====================
+    // "Benteng pertahanan" yang lebih kuat.
+    // Pertama, pastikan 'sourceRule' ada.
+    if (sourceRule) {
+        // Kedua, setelah yakin 'sourceRule' ada, baru periksa properti 'destinations'.
+        if (Array.isArray(sourceRule.destinations) && sourceRule.destinations.length > 0) {
+            const priorityTypes = sourceRule.destinations;
+            
+            for (const priorityType of priorityTypes) {
+                const found = candidates.find(d => d.type === priorityType);
+                if (found) {
+                    return candidates
+                        .filter(c => c.type === priorityType)
+                        .sort((a,b) => b.freeSpace - a.freeSpace)[0];
+                }
             }
+            return { error: true, reason: `Tidak ditemukan datastore tujuan yang memenuhi syarat migrasi.` };
         }
-        return { error: true, reason: `Tidak ditemukan datastore tujuan yang memenuhi syarat migrasi.` };
     }
+    // ==================== AKHIR PERUBAHAN ====================
 
-    // --- Tahap 3: Logika Fallback (Jika TIDAK ADA Aturan Migrasi) ---
+    // Jika tidak ada aturan migrasi yang cocok, atau jika aturan ada tapi tujuannya kosong,
+    // maka lanjutkan ke logika fallback.
     candidates.sort((a, b) => b.freeSpace - a.freeSpace);
     
     return candidates.length > 0 ? candidates[0] : { error: true, reason: `Tidak ditemukan datastore yang cocok.` };
 }
-
 
 /**
  * [FUNGSI BARU v3.1] Menganalisis semua datastore dalam sebuah cluster untuk
@@ -995,131 +1061,47 @@ function getClusterEquilibriumStatus(datastoresInCluster) {
 }
 
 /**
- * [REFACTORED v3.5.0 - FINAL & HOLISTIC] Mengimplementasikan "Algoritma Rekomendasi Cerdas Holistik".
- * Kini memberikan rekomendasi pembuatan Datastore baru jika tidak ada tujuan yang cocok.
+ * [REFACTORED v4.4.0 - ORCHESTRATOR] Menjalankan alur kerja analisis migrasi.
+ * Fungsi ini sekarang bertindak sebagai orkestrator yang memanggil helper untuk
+ * pengumpulan data dan pembangunan rencana, kemudian memformat laporan akhir.
  */
 function jalankanRekomendasiMigrasi() {
-    const config = bacaKonfigurasi();
+    const { config } = getBotState();
     console.log("Memulai analisis penyeimbangan cluster...");
+
     try {
-        const K = KONSTANTA.KUNCI_KONFIG;
-        const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_DS]);
-        if (!dsSheet) throw new Error(`Sheet datastore '${config[K.SHEET_DS]}' tidak ditemukan.`);
-        
-        const dsHeaders = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-        
-        const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
-        const dsCapGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
-        const dsProvGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
+        // Langkah 1: Panggil "Pekerja" untuk mengumpulkan semua data
+        const { allDatastores, allVms, vmHeaders, migrationConfig } = _gatherMigrationDataSource(config);
 
-        if ([dsNameIndex, dsCapGbIndex, dsProvGbIndex].includes(-1)) {
-            throw new Error("Header penting (Name, Capacity, Provisioned) tidak ditemukan di sheet Datastore atau salah dikonfigurasi.");
-        }
-        
-        const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
-        const migrationConfig = getMigrationConfig(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_LOGIKA_MIGRASI]));
-        const allDatastores = dsData.map(row => {
-            const dsName = row[dsNameIndex];
-            const capacity = parseLocaleNumber(row[dsCapGbIndex]);
-            const provisioned = parseLocaleNumber(row[dsProvGbIndex]);
-            const dsInfo = getDsInfo(dsName, migrationConfig);
-            return {
-                name: dsName, capacity: capacity, provisioned: provisioned, freeSpace: capacity - provisioned,
-                utilization: capacity > 0 ? (provisioned / capacity * 100) : 0, cluster: dsInfo.cluster,
-                type: dsInfo.type, environment: getEnvironmentFromDsName(dsName, config[K.MAP_ENV])
-            };
-        });
-
-        const overProvisionedDsList = allDatastores.filter(ds => ds.provisioned > ds.capacity);
+        // Langkah 2: Identifikasi datastore yang bermasalah
+        const overProvisionedDsList = allDatastores.filter(ds => ds.provisionedGb > ds.capacityGb);
         if (overProvisionedDsList.length === 0) {
             return "✅ Semua datastore dalam kondisi provisioning yang aman (1:1).";
         }
 
-        const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_VM]);
-        if (!vmSheet) throw new Error(`Sheet VM '${config[K.SHEET_VM]}' tidak ditemukan.`);
-        const vmHeaders = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
-        
-        const vmNameIndex = vmHeaders.indexOf(config[K.HEADER_VM_NAME]);
-        const vmProvGbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_GB]);
-        const vmStateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
-        const vmCritIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
-        const vmDsColumnIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
-        
-        const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
-        const skorKritikalitas = config[K.SKOR_KRITIKALITAS] || {};
-
+        // Langkah 3: Siapkan kerangka laporan
         let finalMessage = `⚖️ <b>Analisis & Rekomendasi Migrasi Datastore</b>\n`;
         finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString('id-ID')}</i>`;
 
+        // Langkah 4: Proses setiap datastore yang bermasalah
         overProvisionedDsList.forEach(dsInfo => {
             finalMessage += KONSTANTA.UI_STRINGS.SEPARATOR;
-            const migrationTarget = dsInfo.provisioned - dsInfo.capacity;
-            finalMessage += `❗️ <b>Datastore Teridentifikasi Over-Provisioned:</b> <code>${dsInfo.name}</code>\n`;
-            finalMessage += `• <b>Status:</b> Provisioned ${dsInfo.provisioned.toFixed(2)} / ${dsInfo.capacity.toFixed(2)} GB (<b>${dsInfo.utilization.toFixed(1)}%</b>)\n`;
+            const migrationTargetGb = dsInfo.provisionedGb - dsInfo.capacityGb;
+            const provisionedTb = dsInfo.provisionedGb / 1024;
+            const capacityTb = dsInfo.capacityGb / 1024;
+            const migrationTargetTb = migrationTargetGb / 1024;
+            
+            finalMessage += `❗️ <b>Datastore Over-Provisioned:</b> <code>${dsInfo.name}</code>\n`;
+            finalMessage += `• <b>Status:</b> Provisioned ${dsInfo.provisionedGb.toFixed(2)} GB (${provisionedTb.toFixed(2)} TB) / ${dsInfo.capacityGb.toFixed(2)} GB (${capacityTb.toFixed(2)} TB) (<b>${dsInfo.utilization.toFixed(1)}%</b>)\n`;
             
             const diagnosis = diagnoseOverprovisioningCause(dsInfo.name, config);
-            if (diagnosis) {
-                finalMessage += `• <b>Indikasi Penyebab:</b> ${diagnosis}\n`;
-            }
-            finalMessage += `• <b>Target Migrasi:</b> ${migrationTarget.toFixed(2)} GB\n`;
+            if (diagnosis) finalMessage += `• <b>Indikasi Penyebab:</b> ${diagnosis}\n`;
+            finalMessage += `• <b>Target Migrasi:</b> ${migrationTargetGb.toFixed(2)} GB (~${migrationTargetTb.toFixed(2)} TB)\n`;
 
-            let datastoresInCluster = JSON.parse(JSON.stringify(allDatastores.filter(ds => ds.cluster === dsInfo.cluster)));
-
-            let candidatePool = allVmData
-                .filter(row => row[vmDsColumnIndex] === dsInfo.name)
-                .map(row => ({
-                    name: row[vmNameIndex],
-                    provisionedGb: parseLocaleNumber(row[vmProvGbIndex]),
-                    state: row[vmStateIndex],
-                    criticality: row[vmCritIndex],
-                }));
+            // Langkah 5: Panggil "Insinyur" untuk membuat rencana teknis
+            const migrationPlan = _buildMigrationPlan(dsInfo, allDatastores, allVms, vmHeaders, migrationConfig, config);
             
-            const migrationPlan = new Map();
-            let totalMigrated = 0;
-            const MAX_MIGRATION_LOOPS = 50;
-            let loopCount = 0;
-            
-            while (totalMigrated < migrationTarget && candidatePool.length > 0 && loopCount < MAX_MIGRATION_LOOPS) {
-                loopCount++;
-                let bestMove = { vmIndex: -1, destDsName: null, efficiencyScore: -Infinity };
-
-                for (let i = 0; i < candidatePool.length; i++) {
-                    const vm = candidatePool[i];
-                    const sourceDs = datastoresInCluster.find(ds => ds.name === dsInfo.name);
-                    const recipients = datastoresInCluster.filter(ds => ds.name !== sourceDs.name && vm.provisionedGb <= ds.freeSpace);
-                    if (recipients.length === 0) continue;
-                    for (const destDs of recipients) {
-                        const isValidMove = findBestDestination(sourceDs, vm.provisionedGb, [destDs], migrationConfig, config);
-                        if (!isValidMove || isValidMove.error) continue;
-                        let benefitScore = 1;
-                        if (String(vm.state || '').toLowerCase().includes('off')) benefitScore += 10000;
-                        if (String(vm.name || '').toLowerCase().includes('unused')) benefitScore += 5000;
-                        const critScore = skorKritikalitas[String(vm.criticality || '').toUpperCase().trim()] || 0;
-                        benefitScore += (10 - critScore) * 100;
-                        const sizeDifference = Math.abs(vm.provisionedGb - (migrationTarget - totalMigrated));
-                        const cost = 1 + sizeDifference;
-                        const efficiencyScore = benefitScore / cost;
-                        if (efficiencyScore > bestMove.efficiencyScore) {
-                            bestMove = { vmIndex: i, destDsName: destDs.name, efficiencyScore: efficiencyScore };
-                        }
-                    }
-                }
-
-                if (bestMove.vmIndex !== -1) {
-                    const vmToMove = candidatePool[bestMove.vmIndex];
-                    if (!migrationPlan.has(bestMove.destDsName)) {
-                        migrationPlan.set(bestMove.destDsName, []);
-                    }
-                    migrationPlan.get(bestMove.destDsName).push(vmToMove);
-                    totalMigrated += vmToMove.provisionedGb;
-                    const destDs = datastoresInCluster.find(ds => ds.name === bestMove.destDsName);
-                    destDs.freeSpace -= vmToMove.provisionedGb;
-                    candidatePool.splice(bestMove.vmIndex, 1);
-                } else {
-                    break;
-                }
-            }
-
+            // Langkah 6: Format rencana menjadi pesan yang bisa dibaca
             finalMessage += `\n✅ <b>Rencana Tindak Lanjut:</b>\n`;
             if (migrationPlan.size > 0) {
                 migrationPlan.forEach((vms, destDsName) => {
@@ -1130,18 +1112,17 @@ function jalankanRekomendasiMigrasi() {
                     });
                 });
             } else {
-                finalMessage += "<i>Tidak ditemukan datastore tujuan yang cocok di dalam cluster ini untuk menampung kandidat VM.</i>\n\n";
+                finalMessage += "<i>Tidak ditemukan datastore tujuan yang cocok di dalam cluster ini.</i>\n\n";
                 finalMessage += "💡 <b>Rekomendasi:</b>\n";
-                finalMessage += `Buat Datastore baru pada <b>Cluster ${dsInfo.cluster}</b> dengan spesifikasi minimum:\n`;
-                finalMessage += ` •  <b>Tipe:</b> <code>${dsInfo.type || 'Sesuai standar'}</code>\n`;
-                finalMessage += ` •  <b>Kapasitas Tersedia:</b> > <code>${migrationTarget.toFixed(2)} GB</code>\n`;
+                finalMessage += `Buat Datastore baru pada <b>Cluster ${dsInfo.cluster}</b> dengan tipe <code>${dsInfo.type || 'Sesuai standar'}</code> dan kapasitas > <code>${migrationTargetGb.toFixed(2)} GB</code>.\n`;
             }
         });
         
         return finalMessage;
+
     } catch (e) {
-      console.error(`Gagal menjalankan analisis migrasi: ${e.message}\nStack: ${e.stack}`);
-      throw new Error(`Gagal Menjalankan Analisis Migrasi. Penyebab: ${e.message}`);
+        console.error(`Gagal menjalankan analisis migrasi: ${e.message}\nStack: ${e.stack}`);
+        throw new Error(`Gagal Menjalankan Analisis Migrasi. Penyebab: ${e.message}`);
     }
 }
 
@@ -1519,8 +1500,9 @@ function cekDanArsipkanLogJikaPenuh(config = null) {
 }
 
 /**
- * [MODIFIKASI v4.0] Menambahkan logika toleransi saat memeriksa perubahan
- * pada kolom 'Provisioned Space (GB)'.
+ * [REFACTORED v4.3.1 - CRITICAL FIX] Memproses perubahan data untuk VM atau Datastore.
+ * Memperbaiki bug fatal 'Cannot read properties of undefined' dengan menggunakan referensi
+ * yang benar dari objek config untuk mendapatkan nama header dinamis.
  */
 function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, entityName) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -1576,11 +1558,14 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
 
   let logEntriesToAdd = [];
   const timestamp = new Date();
-  const nameHeaderForLog = entityName === 'VM' ? KONSTANTA.HEADER_VM.VM_NAME : primaryKeyHeader;
   
-  // Ambil nilai toleransi dari konfigurasi
-  const tolerance = parseFloat(config[KONSTANTA.KUNCI_KONFIG.LOG_TOLERANCE_PROV_GB]) || 0;
-  const provisionedGbHeader = KONSTANTA.HEADER_VM.PROV_GB;
+  // ==================== PERUBAHAN UTAMA DI SINI ====================
+  // Menggunakan referensi yang BENAR dari objek 'config'
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const nameHeaderForLog = entityName === 'VM' ? config[K.HEADER_VM_NAME] : primaryKeyHeader;
+  const tolerance = parseFloat(config[K.LOG_TOLERANCE_PROV_GB]) || 0;
+  const provisionedGbHeader = config[K.HEADER_VM_PROV_GB];
+  // ==================== AKHIR PERUBAHAN ====================
 
   for (const [id, dataBaru] of mapDataHariIni.entries()) {
     const dataLama = mapDataKemarin.get(id);
@@ -1600,21 +1585,17 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
           const newValue = dataBaru.data[key] || '';
           let hasChanged = false;
 
-          // --- AWAL MODIFIKASI: Logika Toleransi ---
           if (key === provisionedGbHeader && entityName === KONSTANTA.NAMA_ENTITAS.VM) {
             const oldNum = parseLocaleNumber(oldValue);
             const newNum = parseLocaleNumber(newValue);
-            // Hanya anggap berubah jika selisihnya lebih besar dari toleransi
             if (Math.abs(newNum - oldNum) > tolerance) {
               hasChanged = true;
             }
           } else {
-            // Gunakan perbandingan string biasa untuk kolom lain
             if (String(newValue) !== String(oldValue)) {
               hasChanged = true;
             }
           }
-          // --- AKHIR MODIFIKASI ---
 
           if (hasChanged) {
             const detail = `Kolom '${key}' diubah`;
@@ -1652,8 +1633,9 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
 }
 
 /**
- * [REFACTORED v3.5.0 - FINAL] Menganalisis log perubahan untuk mendiagnosis penyebab over-provisioning.
- * Sepenuhnya menggunakan header dinamis dari Konfigurasi.
+ * [REFACTORED v4.2.7 - STRICT CONSTANTS FIX] Menganalisis log perubahan untuk mendiagnosis penyebab over-provisioning.
+ * Memperbaiki bug 'Cannot read properties of undefined (reading 'TIPE_LOG')' dengan menggunakan
+ * referensi konstanta yang benar dari objek config.
  */
 function diagnoseOverprovisioningCause(dsName, config) {
     const K = KONSTANTA.KUNCI_KONFIG;
@@ -1663,19 +1645,23 @@ function diagnoseOverprovisioningCause(dsName, config) {
     const { headers, data: allRecentLogs } = getCombinedLogs(thirtyDaysAgo, config);
     if(allRecentLogs.length === 0) return null;
     
-    const typeLogIndex = headers.indexOf(KONSTANTA.HEADER_LOG.TIPE_LOG);
+    // ==================== PERUBAHAN UTAMA DI SINI ====================
+    // Menggunakan referensi yang BENAR dari objek 'config'
+    const typeLogHeader = config[K.HEADER_LOG_TIPE_LOG];
+    const typeLogIndex = headers.indexOf(typeLogHeader);
+    // ==================== AKHIR PERUBAHAN ====================
+
     if (typeLogIndex === -1) {
-        console.warn("Kolom 'Tipe Log' tidak ditemukan, analisis penyebab mungkin tidak akurat.");
+        console.warn(`Kolom 'Tipe Log' dengan header '${typeLogHeader}' tidak ditemukan, analisis penyebab mungkin tidak akurat.`);
         return null;
     }
     
-    const recentLogs = allRecentLogs.filter(log => log[typeLogIndex] === 'VM');
+    const recentLogs = allRecentLogs.filter(log => log[typeLogIndex] === KONSTANTA.NAMA_ENTITAS.VM);
     if(recentLogs.length === 0) return null;
 
-    // --- [PERBAIKAN UTAMA DI SINI] ---
     const pkIndex = headers.indexOf(config[K.HEADER_VM_PK]);
-    const actionIndex = headers.indexOf(KONSTANTA.HEADER_LOG.ACTION);
-    const detailIndex = headers.indexOf(KONSTANTA.HEADER_LOG.DETAIL);
+    const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
+    const detailIndex = headers.indexOf(config[K.HEADER_LOG_DETAIL]);
 
     let newVmCount = 0;
     let diskModCount = 0;
@@ -1685,17 +1671,17 @@ function diagnoseOverprovisioningCause(dsName, config) {
     const vmHeaders = vmData.shift();
     const vmPkIndex = vmHeaders.indexOf(config[K.HEADER_VM_PK]);
     const vmDsIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
-    const vmProvGbHeader = config[K.HEADER_VM_PROV_GB]; // Nama header untuk Provisioned GB
+    const vmProvGbHeader = config[K.HEADER_VM_PROV_GB];
 
     if (vmPkIndex === -1 || vmDsIndex === -1) {
         console.warn("Header PK atau DS tidak ditemukan di sheet VM, analisis penyebab dibatalkan.");
         return null;
     }
 
-    const vmsOnThisDs = new Set(vmData.filter(row => row[vmDsIndex] === dsName).map(row => row[vmPkIndex]));
+    const vmsOnThisDs = new Set(vmData.filter(row => row[vmDsIndex] === dsName).map(row => normalizePrimaryKey(row[vmPkIndex])));
 
     recentLogs.forEach(log => {
-        const pk = log[pkIndex];
+        const pk = normalizePrimaryKey(log[pkIndex]);
         if (vmsOnThisDs.has(pk)) {
             const action = log[actionIndex];
             if (action === 'PENAMBAHAN') {
@@ -1705,7 +1691,6 @@ function diagnoseOverprovisioningCause(dsName, config) {
             }
         }
     });
-    // --- [AKHIR PERBAIKAN UTAMA] ---
 
     if (newVmCount > 0 || diskModCount > 0) {
         let diagnosis = "Kondisi ini kemungkinan disebabkan oleh ";
@@ -1782,65 +1767,113 @@ function searchVmsByDatastore(datastoreName, config) {
 }
 
 /**
- * [REFACTORED v3.6.0 - FINAL] Mengendalikan tampilan daftar VM yang kini berfungsi sebagai dashboard mini.
- * Mengintegrasikan hasil analisis cluster, memperkaya tampilan entri, dan menangani navigasi kembali.
- * @param {object} update - Objek update dari Telegram.
- * @param {object} config - Objek konfigurasi bot.
- * @param {string} listType - Tipe daftar, 'cluster' atau 'datastore'.
- * @param {string} itemName - Nama spesifik dari cluster atau datastore.
- * @param {boolean} isInitialRequest - True jika ini adalah permintaan pertama.
- * @param {string|null} originPk - (Opsional) Primary Key dari VM asal untuk tombol kembali.
+ * [REFACTORED v4.2.2 - EXPORT ENABLED] Mengendalikan tampilan daftar VM untuk Cluster/Datastore.
+ * Fungsi ini sekarang sepenuhnya mendukung aksi ekspor, membuat pekerjaan yang benar,
+ * dan menyimpannya ke antrean untuk diproses.
  */
-function handlePaginatedVmList(update, config, listType, itemName, isInitialRequest, originPk = null) {
+function handlePaginatedVmList(update, config, userData) {
+  const userEvent = update.callback_query;
+  const sessionData = userEvent.sessionData;
+
   try {
-    const userEvent = update.callback_query;
     const chatId = userEvent.message.chat.id;
     const messageId = userEvent.message.message_id;
 
-    let searchFunction, titlePrefix, navPrefix, exportPrefix;
+    if (!sessionData) {
+        editMessageText("Sesi telah kedaluwarsa atau tidak valid. Silakan mulai lagi perintah awal.", null, chatId, messageId, config);
+        return;
+    }
+    
+    const { listType, itemName, originPk, page = 1 } = sessionData;
+
+    // ==================== PERUBAHAN UTAMA DI SINI ====================
+    // Logika untuk menangani aksi ekspor
+    if (userEvent.action === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
+        answerCallbackQuery(userEvent.id, config, "Menambahkan ke antrean...");
+        
+        // Membuat jobData yang spesifik untuk tipe daftar ini
+        const jobData = { 
+            listType: listType, 
+            itemName: itemName, 
+            config: config, 
+            userData: userData, 
+            chatId: chatId 
+        };
+        const jobKey = `export_job_${userEvent.from.id}_${Date.now()}`;
+        PropertiesService.getUserProperties().setProperty(jobKey, JSON.stringify(jobData));
+        
+        const friendlyListType = listType === 'cluster' ? 'Cluster' : 'Datastore';
+        kirimPesanTelegram(`✅ Permintaan ekspor Anda untuk VM di <b>${friendlyListType} "${escapeHtml(itemName)}"</b> telah ditambahkan ke antrean.`, config, 'HTML', null, chatId);
+        return;
+    }
+    // ==================== AKHIR PERUBAHAN ====================
+    
+    let searchFunction, titlePrefix, navPrefix, exportPrefix, headerContent = "";
     const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
     const K_CONFIG = KONSTANTA.KUNCI_KONFIG;
 
     if (listType === 'cluster') {
-      searchFunction = searchVmsByCluster;
-      titlePrefix = 'VM di Cluster';
-      navPrefix = K_CEKVM.CLUSTER_NAV_PREFIX;
-      exportPrefix = K_CEKVM.CLUSTER_EXPORT_PREFIX;
+        searchFunction = searchVmsByCluster;
+        titlePrefix = 'VM di Cluster';
+        navPrefix = K_CEKVM.CLUSTER_NAV_PREFIX;
+        exportPrefix = K_CEKVM.CLUSTER_EXPORT_PREFIX;
+
+        const analysis = generateClusterAnalysis(itemName, config);
+        headerContent = `📊 <b>Analisis Cluster "${escapeHtml(itemName)}"</b>\n`;
+        headerContent += `• <b>Total VM:</b> ${analysis.totalVms} (🟢 ${analysis.on} On / 🔴 ${analysis.off} Off)\n`;
+        const totalMemoryInTb = analysis.totalMemory / 1024;
+        headerContent += `• <b>Alokasi Resource:</b> ${analysis.totalCpu} vCPU | ${analysis.totalMemory.toFixed(0)} GB RAM (~${totalMemoryInTb.toFixed(2)} TB)\n`;
+        const diskUtilPercent = analysis.diskUtilizationPercent;
+        const barLength = 12;
+        const filledLength = Math.round((diskUtilPercent / 100) * barLength);
+        const emptyLength = barLength - filledLength;
+        const progressBar = '█'.repeat(filledLength) + '░'.repeat(emptyLength);
+        headerContent += `• <b>Utilisasi Disk:</b> ${diskUtilPercent.toFixed(1)}% [<code>${progressBar}</code>] (${analysis.totalVmProvisionedTb.toFixed(2)} / ${analysis.totalDsCapacityTb.toFixed(2)} TB)\n`;
+        if (analysis.criticalVmOffCount > 0) {
+            headerContent += `• <b>Peringatan:</b> Terdapat <b>${analysis.criticalVmOffCount} VM Kritis</b> dalam kondisi mati!\n`;
+        }
     } else if (listType === 'datastore') {
-      searchFunction = searchVmsByDatastore;
-      titlePrefix = 'VM di Datastore';
-      navPrefix = K_CEKVM.DATASTORE_NAV_PREFIX;
-      exportPrefix = K_CEKVM.DATASTORE_EXPORT_PREFIX;
+        searchFunction = searchVmsByDatastore;
+        titlePrefix = 'VM di Datastore';
+        navPrefix = K_CEKVM.DATASTORE_NAV_PREFIX;
+        exportPrefix = K_CEKVM.DATASTORE_EXPORT_PREFIX;
+
+        const details = getDatastoreDetails(itemName, config);
+        const { headers: vmHeaders, results: vmResults } = searchFunction(itemName, config);
+
+        if (details) {
+            headerContent = `🗄️ <b>Ringkasan Datastore "${escapeHtml(details.name)}"</b>\n`;
+            headerContent += `• <b>Kapasitas:</b> ${details.capacityGb.toFixed(1)} GB (${details.capacityTb.toFixed(2)} TB) | <b>Terpakai:</b> ${details.provisionedGb.toFixed(1)} GB (${details.provisionedTb.toFixed(2)} TB)\n`;
+            const usage = details.usagePercent;
+            const barLength = 12;
+            const filledLength = Math.round((usage / 100) * barLength);
+            const emptyLength = barLength - filledLength;
+            const progressBar = '█'.repeat(filledLength) + '░'.repeat(emptyLength);
+            headerContent += `• <b>Alokasi Terpakai:</b> ${usage.toFixed(1)}% [ <code>${progressBar}</code> ]\n`;
+            
+            let onCount = 0;
+            let offCount = 0;
+            const stateIndex = vmHeaders.indexOf(config[K_CONFIG.HEADER_VM_STATE]);
+            if(stateIndex !== -1) {
+                vmResults.forEach(row => {
+                    const state = String(row[stateIndex] || '').toLowerCase();
+                    if (state.includes('on')) {
+                        onCount++;
+                    } else {
+                        offCount++;
+                    }
+                });
+            }
+            headerContent += `• <b>Total VM:</b> ${vmResults.length} (🟢 ${onCount} On / 🔴 ${offCount} Off)\n`;
+        } else {
+            headerContent = `🗄️ Detail untuk Datastore "${escapeHtml(itemName)}" tidak ditemukan.\n`;
+        }
     } else {
       throw new Error("Tipe daftar tidak valid: " + listType);
     }
     
-    // 1. Panggil "Mesin" Analisis
-    const analysis = generateClusterAnalysis(itemName, config);
-    
-    // 2. Format Dashboard Analisis
-    let analysisDashboard = `📊 <b>Analisis Cluster "${escapeHtml(itemName)}"</b>\n`;
-    analysisDashboard += `• <b>Total VM:</b> ${analysis.totalVms} (🟢 ${analysis.on} On / 🔴 ${analysis.off} Off)\n`;
-    const totalMemoryInTb = analysis.totalMemory / 1024;
-    analysisDashboard += `• <b>Alokasi Resource:</b> ${analysis.totalCpu} vCPU | ${analysis.totalMemory.toFixed(0)} GB RAM (~${totalMemoryInTb.toFixed(2)} TB)\n`;
-    
-    const diskUtilPercent = analysis.diskUtilizationPercent;
-    const barLength = 12;
-    const filledLength = Math.round((diskUtilPercent / 100) * barLength);
-    const emptyLength = barLength - filledLength;
-    const progressBar = '█'.repeat(filledLength) + '░'.repeat(emptyLength);
-    analysisDashboard += `• <b>Utilisasi Disk:</b> ${diskUtilPercent.toFixed(1)}% [<code>${progressBar}</code>] (${analysis.totalVmProvisionedTb.toFixed(2)} / ${analysis.totalDsCapacityTb.toFixed(2)} TB)\n`;
-
-    if (analysis.criticalVmOffCount > 0) {
-      analysisDashboard += `• <b>Peringatan:</b> Terdapat <b>${analysis.criticalVmOffCount} VM Kritis</b> dalam kondisi mati!\n`;
-       for (const critLevel in analysis.criticalVmOffDetails) {
-         analysisDashboard += `  • <code>${critLevel}</code>: ${analysis.criticalVmOffDetails[critLevel]}\n`;
-       }
-    }
-
     const { headers, results } = searchFunction(itemName, config);
 
-    // 3. Perkaya Format Entri VM
     const formatVmEntry = (row) => {
       const state = String(row[headers.indexOf(config[K_CONFIG.HEADER_VM_STATE])] || '').toLowerCase();
       const statusIcon = state.includes('on') ? '🟢' : '🔴';
@@ -1852,81 +1885,277 @@ function handlePaginatedVmList(update, config, listType, itemName, isInitialRequ
       const memory = row[headers.indexOf(config[K_CONFIG.HEADER_VM_MEMORY])] || 'N/A';
       const disk = row[headers.indexOf(config[K_CONFIG.HEADER_VM_PROV_TB])] || 'N/A';
       
-      return `${statusIcon} <b>${vmName}</b> ${criticalityLabel}\n     <code>${cpu} vCPU | ${memory} GB RAM | ${disk} TB Disk</code>`;
+      return `${statusIcon} <b>${vmName}</b> ${criticalityLabel}\n     <code>${cpu} vCPU</code> | <code>${memory} GB RAM</code> | <code>${disk} TB Disk</code>`;
+    };
+    
+    const callbackInfo = {
+        navPrefix: `${navPrefix}`,
+        exportPrefix: `${exportPrefix}`,
+        context: { listType, itemName, originPk }
     };
 
-     let page = 1;
-    if (!isInitialRequest) {
-      const callbackData = userEvent.data;
-      // Membaca format callback baru dengan pemisah '|'
-      const dataParts = callbackData.split('_'); // cth: ['vmcl', 'TBN-COM-LNV-CL01|pk-vm-asal', 'nav', '2']
-      const navPartIndex = dataParts.findIndex(p => p === 'nav' || p === 'export');
-      
-      // Jika ada bagian navigasi/ekspor, data utama ada sebelum itu
-      const mainDataPart = navPartIndex > -1 ? dataParts.slice(1, navPartIndex).join('_') : dataParts.slice(1).join('_');
-      
-      const [parsedItemName, parsedOriginPk] = mainDataPart.split('|');
-      
-      itemName = parsedItemName; // Pastikan itemName diperbarui
-      if (parsedOriginPk) {
-        originPk = parsedOriginPk;
-      }
-      
-      const pagePart = dataParts[dataParts.length - 1];
-      if (!isNaN(pagePart)) {
-        page = parseInt(pagePart, 10);
-      }
-    }
-    
-    const safeItemName = encodeURIComponent(itemName);
-    const originSuffix = originPk ? `|${originPk}` : '';
-    
     const paginatedView = createPaginatedView({
       allItems: results,
       page: page,
       title: `${titlePrefix} "${escapeHtml(itemName)}"`,
-      headerContent: analysisDashboard, // Sisipkan dashboard ke dalam view
+      headerContent: headerContent,
       formatEntryCallback: formatVmEntry,
-      navCallbackPrefix: `${navPrefix}${safeItemName}${originSuffix}`, // Bawa info asal
-      exportCallbackData: `${exportPrefix}${safeItemName}`
+      callbackInfo: callbackInfo
     });
 
-    // 4. Tambahkan Tombol Kembali jika ada originPk
     if (originPk && paginatedView.keyboard) {
         paginatedView.keyboard.inline_keyboard.push([{ text: `⬅️ Kembali ke Detail VM`, callback_data: `${K_CEKVM.BACK_TO_DETAIL_PREFIX}${originPk}` }]);
     }
     
-    if (isInitialRequest) {
-        kirimPesanTelegram(paginatedView.text, config, 'HTML', paginatedView.keyboard, chatId);
-    } else {
-        if (userEvent.message.text !== paginatedView.text) {
-            editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
-        }
+    if (userEvent.message.text !== paginatedView.text || JSON.stringify(userEvent.message.reply_markup) !== JSON.stringify(paginatedView.keyboard)) {
+        editMessageText(paginatedView.text, paginatedView.keyboard, chatId, messageId, config);
     }
+
   } catch (err) {
-    handleCentralizedError(err, `Daftar VM Paginasi (${listType}: ${itemName})`, config);
+    const itemNameForError = update.callback_query.sessionData ? update.callback_query.sessionData.itemName : 'N/A';
+    const listTypeForError = update.callback_query.sessionData ? update.callback_query.sessionData.listType : 'N/A';
+    handleCentralizedError(err, `Daftar VM Paginasi (${listTypeForError}: ${itemNameForError})`, config);
   }
 }
 
 /**
- * [REFACTORED v3.8.2 - "Koki"] Menjalankan tugas ekspor.
- * Kini memiliki penanganan error yang akan memberitahu pengguna jika terjadi kegagalan.
+ * [REFACTORED v4.2.2 - SMART EXECUTOR] Mengeksekusi pekerjaan ekspor.
+ * Fungsi ini sekarang cerdas dan dapat menangani berbagai jenis pekerjaan:
+ * - Berdasarkan 'searchTerm' dari /cekvm.
+ * - Berdasarkan 'listType' dan 'itemName' dari daftar Cluster/Datastore.
  */
 function executeExportJob(jobData) {
-  // --- [PERBAIKAN UTAMA DI SINI] ---
-  const { searchTerm, config, userData, chatId } = jobData; // Ambil chatId dari jobData
-  try {
-    console.log(`Menjalankan pekerjaan ekspor untuk pencarian: "${searchTerm}"`);
+  const { config, userData, chatId } = jobData;
+  let searchResults;
+  let fileName;
 
-    const { headers, results } = searchVmOnSheet(searchTerm, config);
-    const vmNameHeader = config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_NAME];
-    
-    // Panggil exportResultsToSheet yang akan mengirim pesan sukses
-    exportResultsToSheet(headers, results, `Pencarian VM '${searchTerm}'`, config, userData, vmNameHeader);
-  } catch(e) {
-    console.error(`Gagal mengeksekusi pekerjaan ekspor. Data: ${JSON.stringify(jobData)}. Error: ${e.message}`);
-    // Jika terjadi error, kirim pesan kegagalan ke pengguna di chat yang benar.
-    const failMessage = `🔴 Maaf, terjadi kesalahan saat memproses file ekspor Anda untuk pencarian "<b>${escapeHtml(searchTerm)}</b>".\n\n<code>Penyebab: ${escapeHtml(e.message)}</code>`;
-    kirimPesanTelegram(failMessage, config, 'HTML', null, chatId);
+  // Logika cerdas untuk menentukan metode pencarian
+  if (jobData.listType) {
+    const { listType, itemName } = jobData;
+    const searchFunction = listType === 'cluster' ? searchVmsByCluster : searchVmsByDatastore;
+    searchResults = searchFunction(itemName, config);
+    const friendlyListType = listType.charAt(0).toUpperCase() + listType.slice(1);
+    fileName = `Ekspor VM di ${friendlyListType} - ${itemName}`;
+  } else if (jobData.searchTerm) {
+    const { searchTerm } = jobData;
+    searchResults = searchVmOnSheet(searchTerm, config);
+    fileName = `Ekspor Hasil Pencarian - ${searchTerm}`;
+  } else {
+    throw new Error("Data pekerjaan ekspor tidak valid. 'searchTerm' atau 'listType' tidak ditemukan.");
   }
+
+  const { headers, results } = searchResults;
+
+  if (results.length === 0) {
+    kirimPesanTelegram(`ℹ️ Tidak ada data untuk diekspor.`, config, 'HTML', null, chatId);
+    return;
+  }
+
+  const spreadsheet = SpreadsheetApp.create(fileName);
+  const sheet = spreadsheet.getActiveSheet();
+  sheet.appendRow(headers);
+  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#d9ead3');
+  sheet.setFrozenRows(1);
+  
+  sheet.getRange(2, 1, results.length, headers.length).setValues(results);
+  SpreadsheetApp.flush();
+
+  const fileUrl = spreadsheet.getUrl();
+  const fileId = spreadsheet.getId();
+  const exportFolderId = config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR_ID];
+  
+  if (exportFolderId) {
+    try {
+      const file = DriveApp.getFileById(fileId);
+      const exportFolder = DriveApp.getFolderById(exportFolderId);
+      file.moveTo(exportFolder);
+    } catch (e) {
+      console.error(`Gagal memindahkan file ekspor ke folder. Error: ${e.message}`);
+    }
+  }
+
+  const pesan = `✅ File ekspor Anda siap!\n\n` +
+                `<b>Nama File:</b> ${escapeHtml(fileName)}\n` +
+                `<a href="${fileUrl}">Buka di Google Sheets</a>`;
+
+  kirimPesanTelegram(pesan, config, 'HTML', null, chatId);
+}
+
+/**
+ * [NEW v4.2.0] Memproses antrean pekerjaan ekspor.
+ * Fungsi ini dirancang untuk dijalankan oleh trigger berbasis waktu. Ia akan memeriksa
+ * PropertiesService untuk setiap pekerjaan ekspor yang tertunda dan mengeksekusinya.
+ */
+function processExportQueue() {
+  const properties = PropertiesService.getUserProperties();
+  const allKeys = properties.getKeys();
+  const jobKeys = allKeys.filter(key => key.startsWith('export_job_'));
+
+  if (jobKeys.length > 0) {
+    console.log(`Ditemukan ${jobKeys.length} pekerjaan ekspor dalam antrean. Memulai proses...`);
+  }
+
+  for (const key of jobKeys) {
+    let jobData;
+    try {
+      const jobString = properties.getProperty(key);
+      if (jobString) {
+        jobData = JSON.parse(jobString);
+        
+        // Panggil fungsi eksekutor yang sudah ada
+        executeExportJob(jobData);
+      }
+    } catch (e) {
+      console.error(`Gagal memproses pekerjaan ekspor dengan kunci ${key}. Error: ${e.message}`);
+      // Jika terjadi error saat eksekusi, kirim notifikasi ke pengguna
+      if (jobData && jobData.config && jobData.chatId) {
+          const failMessage = `🔴 Maaf, terjadi kesalahan saat memproses file ekspor Anda untuk pencarian "<b>${escapeHtml(jobData.searchTerm || 'Tidak Dikenal')}</b>".\n\n<code>Penyebab: ${escapeHtml(e.message)}</code>`;
+          kirimPesanTelegram(failMessage, jobData.config, 'HTML', null, jobData.chatId);
+      }
+    } finally {
+      // Selalu hapus properti setelah diproses untuk mencegah eksekusi ganda
+      properties.deleteProperty(key);
+      console.log(`Pekerjaan dengan kunci ${key} telah selesai diproses dan dihapus dari antrean.`);
+    }
+  }
+}
+
+/**
+ * [HELPER v4.4.0] Mengumpulkan semua data sumber yang diperlukan untuk analisis migrasi.
+ * Fungsi ini mengisolasi semua operasi pembacaan dari Google Sheets.
+ * @param {object} config Objek konfigurasi yang aktif.
+ * @returns {object} Objek yang berisi data yang telah diproses: { allDatastores, allVms, vmHeaders, migrationConfig }.
+ */
+function _gatherMigrationDataSource(config) {
+    const K = KONSTANTA.KUNCI_KONFIG;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1. Mengambil Data Datastore
+    const dsSheet = ss.getSheetByName(config[K.SHEET_DS]);
+    if (!dsSheet) throw new Error(`Sheet datastore '${config[K.SHEET_DS]}' tidak ditemukan.`);
+    const dsHeaders = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
+    const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
+    const dsCapGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
+    const dsProvGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
+    const dsCapTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_TB]);
+    const dsProvTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_TB]);
+
+    if ([dsNameIndex, dsCapGbIndex, dsProvGbIndex, dsCapTbIndex, dsProvTbIndex].includes(-1)) {
+        throw new Error("Satu atau lebih header penting (Name, Capacity/Provisioned GB/TB) tidak ditemukan di sheet Datastore.");
+    }
+    const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
+
+    // 2. Mengambil Logika Migrasi
+    const migrationConfig = getMigrationConfig(ss.getSheetByName(config[K.SHEET_LOGIKA_MIGRASI]));
+
+    // 3. Memproses Data Datastore
+    const allDatastores = dsData.map(row => {
+        const dsName = row[dsNameIndex];
+        const capacityGb = parseLocaleNumber(row[dsCapGbIndex]);
+        const provisionedGb = parseLocaleNumber(row[dsProvGbIndex]);
+        const capacityTb = parseLocaleNumber(row[dsCapTbIndex]);
+        const provisionedTb = parseLocaleNumber(row[dsProvTbIndex]);
+        const dsInfo = getDsInfo(dsName, migrationConfig);
+        return {
+            name: dsName, capacityGb, provisionedGb, capacityTb, provisionedTb,
+            freeSpace: capacityGb - provisionedGb,
+            utilization: capacityGb > 0 ? (provisionedGb / capacityGb * 100) : 0,
+            cluster: dsInfo.cluster,
+            type: dsInfo.type,
+            environment: getEnvironmentFromDsName(dsName, config[K.MAP_ENV])
+        };
+    });
+
+    // 4. Mengambil Data VM
+    const vmSheet = ss.getSheetByName(config[K.SHEET_VM]);
+    if (!vmSheet) throw new Error(`Sheet VM '${config[K.SHEET_VM]}' tidak ditemukan.`);
+    const vmHeaders = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
+    const allVms = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
+
+    return { allDatastores, allVms, vmHeaders, migrationConfig };
+}
+
+/**
+ * [HELPER v4.4.0] Mesin inti yang membangun rencana migrasi untuk satu datastore.
+ * @param {object} sourceDsInfo Informasi datastore sumber yang over-provisioned.
+ * @param {Array} allDatastores Array semua objek datastore.
+ * @param {Array} allVms Array semua data VM mentah.
+ * @param {Array} vmHeaders Array header untuk data VM.
+ * @param {Map} migrationConfig Peta konfigurasi aturan migrasi.
+ * @param {object} config Objek konfigurasi yang aktif.
+ * @returns {Map} Peta (Map) yang berisi rencana migrasi. Kuncinya adalah nama DS tujuan, nilainya adalah array VM yang akan dipindahkan.
+ */
+function _buildMigrationPlan(sourceDsInfo, allDatastores, allVms, vmHeaders, migrationConfig, config) {
+    const K = KONSTANTA.KUNCI_KONFIG;
+    const migrationTargetGb = sourceDsInfo.provisionedGb - sourceDsInfo.capacityGb;
+    
+    // Indeks header VM
+    const vmNameIndex = vmHeaders.indexOf(config[K.HEADER_VM_NAME]);
+    const vmProvGbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_GB]);
+    const vmStateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
+    const vmCritIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
+    const vmDsColumnIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
+    const skorKritikalitas = config[K.SKOR_KRITIKALITAS] || {};
+
+    let datastoresInCluster = JSON.parse(JSON.stringify(allDatastores.filter(ds => ds.cluster === sourceDsInfo.cluster)));
+
+    let candidatePool = allVms
+        .filter(row => row[vmDsColumnIndex] === sourceDsInfo.name)
+        .map(row => ({
+            name: row[vmNameIndex],
+            provisionedGb: parseLocaleNumber(row[vmProvGbIndex]),
+            state: row[vmStateIndex],
+            criticality: row[vmCritIndex],
+        }));
+
+    const migrationPlan = new Map();
+    let totalMigrated = 0;
+    const MAX_MIGRATION_LOOPS = 50;
+    let loopCount = 0;
+
+    while (totalMigrated < migrationTargetGb && candidatePool.length > 0 && loopCount < MAX_MIGRATION_LOOPS) {
+        loopCount++;
+        let bestMove = { vmIndex: -1, destDsName: null, efficiencyScore: -Infinity };
+
+        for (let i = 0; i < candidatePool.length; i++) {
+            const vm = candidatePool[i];
+            const sourceDs = datastoresInCluster.find(ds => ds.name === sourceDsInfo.name);
+            const recipients = datastoresInCluster.filter(ds => ds.name !== sourceDs.name && vm.provisionedGb <= ds.freeSpace);
+            if (recipients.length === 0) continue;
+            
+            for (const destDs of recipients) {
+                const isValidMove = findBestDestination(sourceDs, vm.provisionedGb, [destDs], migrationConfig, config);
+                if (!isValidMove || isValidMove.error) continue;
+                
+                let benefitScore = 1;
+                if (String(vm.state || '').toLowerCase().includes('off')) benefitScore += 10000;
+                if (String(vm.name || '').toLowerCase().includes('unused')) benefitScore += 5000;
+                const critScore = skorKritikalitas[String(vm.criticality || '').toUpperCase().trim()] || 0;
+                benefitScore += (10 - critScore) * 100;
+                
+                const sizeDifference = Math.abs(vm.provisionedGb - (migrationTargetGb - totalMigrated));
+                const cost = 1 + sizeDifference;
+                const efficiencyScore = benefitScore / cost;
+                
+                if (efficiencyScore > bestMove.efficiencyScore) {
+                    bestMove = { vmIndex: i, destDsName: destDs.name, efficiencyScore: efficiencyScore };
+                }
+            }
+        }
+
+        if (bestMove.vmIndex !== -1) {
+            const vmToMove = candidatePool[bestMove.vmIndex];
+            if (!migrationPlan.has(bestMove.destDsName)) {
+                migrationPlan.set(bestMove.destDsName, []);
+            }
+            migrationPlan.get(bestMove.destDsName).push(vmToMove);
+            totalMigrated += vmToMove.provisionedGb;
+            const destDs = datastoresInCluster.find(ds => ds.name === bestMove.destDsName);
+            destDs.freeSpace -= vmToMove.provisionedGb;
+            candidatePool.splice(bestMove.vmIndex, 1);
+        } else {
+            break; // Keluar dari loop jika tidak ada lagi langkah yang bisa diambil
+        }
+    }
+    return migrationPlan;
 }

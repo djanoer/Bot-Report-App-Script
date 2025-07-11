@@ -124,10 +124,11 @@ function handleCentralizedError(errorObject, context, config) {
 }
 
 /**
- * [REFACTORED v3.6.0] Membuat tampilan berhalaman (pesan teks dan keyboard) secara generik.
- * Kini mendukung penambahan konten header kustom di atas daftar.
+ * [REFACTORED v4.1.0 - ROBUST SESSION] Membuat tampilan berhalaman (pesan teks dan keyboard) secara generik.
+ * Kini sepenuhnya menggunakan mekanisme Session ID untuk menangani callback data yang kompleks dan aman.
+ * Fungsi ini tidak lagi menerima 'navCallbackPrefix', melainkan objek 'callbackInfo' yang lebih deskriptif.
  */
-function createPaginatedView({ allItems, page, title, headerContent = null, formatEntryCallback, navCallbackPrefix, exportCallbackData = null, entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES }) {
+function createPaginatedView({ allItems, page, title, headerContent = null, formatEntryCallback, callbackInfo, entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES }) {
   const totalEntries = allItems.length;
   if (totalEntries === 0) {
     let emptyText = `ℹ️ ${title}\n\n`;
@@ -147,10 +148,9 @@ function createPaginatedView({ allItems, page, title, headerContent = null, form
 
   const listContent = pageEntries.map((item, index) => {
     return `${startIndex + index + 1}. ${formatEntryCallback(item)}`;
-  }).join('\n\n'); // Beri sedikit jarak antar entri
+  }).join('\n\n');
 
   let text = "";
-  // Tambahkan konten header jika ada
   if (headerContent) {
       text += headerContent + "\n";
   }
@@ -158,27 +158,42 @@ function createPaginatedView({ allItems, page, title, headerContent = null, form
   text += `<i>Menampilkan <b>${startIndex + 1}-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
   text += `------------------------------------\n\n`;
   text += listContent;
-  
-  text += '\u200B'; // Karakter spasi tanpa lebar untuk mencegah Telegram memotong teks
+  text += '\u200B';
 
   const keyboardRows = [];
   const navigationButtons = [];
   
+  // ==================== PERUBAHAN UTAMA DI SINI ====================
+  // Membuat sesi untuk navigasi dan ekspor.
+  // Data konteks (seperti searchTerm) akan disuntikkan oleh fungsi pemanggil.
+  const createSessionForPage = (targetPage) => {
+    const sessionData = { 
+        ...callbackInfo.context, // Menyalin semua konteks (cth: searchTerm, itemName)
+        page: targetPage,
+    };
+    return createCallbackSession(sessionData); 
+  };
+  
   if (page > 1) {
-    navigationButtons.push({ text: '⬅️ Prev', callback_data: `${navCallbackPrefix}_${page - 1}` });
+    const prevSessionId = createSessionForPage(page - 1);
+    navigationButtons.push({ text: '⬅️ Prev', callback_data: `${callbackInfo.navPrefix}${prevSessionId}` });
   }
   if (totalPages > 1) {
     navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: KONSTANTA.CALLBACK.IGNORE });
   }
   if (page < totalPages) {
-    navigationButtons.push({ text: 'Next ➡️', callback_data: `${navCallbackPrefix}_${page + 1}` });
+    const nextSessionId = createSessionForPage(page + 1);
+    navigationButtons.push({ text: 'Next ➡️', callback_data: `${callbackInfo.navPrefix}${nextSessionId}` });
   }
   
   if(navigationButtons.length > 0) keyboardRows.push(navigationButtons);
   
-  if (exportCallbackData) {
-    keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: exportCallbackData }]);
+  if (callbackInfo.exportPrefix) {
+    // Sesi untuk ekspor bisa berisi semua item ID jika perlu, atau hanya query-nya
+    const exportSessionId = createSessionForPage(1); // Ekspor selalu dari halaman 1
+    keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: `${callbackInfo.exportPrefix}${exportSessionId}` }]);
   }
+  // ==================== AKHIR PERUBAHAN ====================
   
   return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
@@ -453,16 +468,18 @@ function readLargeDataFromCache(keyPrefix) {
 }
 
 /**
- * [FUNGSI BARU v3.7.0] Membuat sesi callback sementara di cache.
- * Menyimpan data konteks (seperti nama cluster & PK asal) dan mengembalikan ID unik.
- * @param {object} dataToStore - Objek yang berisi data yang perlu disimpan.
- * @returns {string} ID unik (seperti "nomor resi") untuk sesi ini.
+ * [REFACTORED v4.3.0] Membuat sesi callback sementara di cache.
+ * Durasi cache sekarang diambil dari file konstanta terpusat.
  */
 function createCallbackSession(dataToStore) {
   const cache = CacheService.getScriptCache();
-  const sessionId = Utilities.getUuid().substring(0, 8); // Membuat ID unik 8 karakter yang ringkas
-  // Simpan sesi selama 15 menit (900 detik), lebih dari cukup untuk pengguna menekan tombol.
-  cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), 900); 
+  const sessionId = Utilities.getUuid().substring(0, 8);
+  
+  // ==================== PERUBAHAN UTAMA DI SINI ====================
+  // Menggunakan konstanta, bukan angka hardcoded 900
+  cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), KONSTANTA.LIMIT.SESSION_TIMEOUT_SECONDS); 
+  // =============================================================
+  
   console.log(`Sesi callback dibuat dengan ID: ${sessionId}`);
   return sessionId;
 }
