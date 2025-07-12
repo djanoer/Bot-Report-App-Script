@@ -526,8 +526,8 @@ function kirimMenuEkspor(config) {
 // =====================================================================
 
 /**
- * [REFACTORED v4.3.0] Fungsi kini menjadi satu-satunya pusat untuk semua pekerjaan harian
- * dengan alur yang bersih, berurutan, dan tidak redundan.
+ * [REFACTOR v1.1.0] Fungsi kini menjadi pusat untuk semua pekerjaan harian
+ * dengan alur yang bersih dan efisien melalui Data Dependency Injection.
  */
 function runDailyJobs() {
   console.log("Memulai pekerjaan harian via trigger...");
@@ -535,11 +535,18 @@ function runDailyJobs() {
   // Membaca state sekali di awal menggunakan metode terpusat
   const { config } = getBotState();
 
-  // Langkah 1: Jalankan sinkronisasi dan kirim laporan operasional
+  // Langkah 1: Jalankan sinkronisasi dan kirim laporan operasional.
+  // Fungsi ini sudah menangani sinkronisasi data terbaru.
   syncDanBuatLaporanHarian(false, "TRIGGER HARIAN", config); 
   
-  // Langkah 2: Jalankan pemeriksaan kondisi dan kirim laporannya
-  jalankanPemeriksaanAmbangBatas(config);
+  console.log("Mengambil data terpusat untuk proses pemeriksaan...");
+  // Ambil data VM dan Datastore HANYA SEKALI setelah sinkronisasi selesai.
+  const dsSheetData = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
+  const vmSheetData = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+
+  // Langkah 2: Jalankan pemeriksaan kondisi dengan menyuntikkan data yang sudah diambil.
+  // Parameter kedua (kirimNotifikasi) tetap true, dan kita tambahkan dua parameter data.
+  jalankanPemeriksaanAmbangBatas(config, true, dsSheetData, vmSheetData);
   
   console.log("Pekerjaan harian via trigger selesai.");
 }

@@ -358,39 +358,32 @@ function deleteVmNote(vmPrimaryKey) {
 }
 
 /**
- * [REFACTORED v4.1.9 - HISTORY FIX] Memformat detail VM menjadi pesan yang siap kirim.
- * Tombol Riwayat VM sekarang secara benar menggunakan arsitektur sesi.
+ * [FINAL v1.2.4] Memformat detail VM menjadi pesan yang siap kirim.
+ * Versi ini menyempurnakan tata letak untuk bagian tiket agar lebih rapi dan simetris.
  */
 function formatVmDetail(row, headers, config) {
   const K = KONSTANTA.KUNCI_KONFIG;
 
-  const indices = {
-    pk: headers.indexOf(config[K.HEADER_VM_PK]),
-    name: headers.indexOf(config[K.HEADER_VM_NAME]),
-    ip: headers.indexOf(config[K.HEADER_VM_IP]),
-    state: headers.indexOf(config[K.HEADER_VM_STATE]),
-    uptime: headers.indexOf(config[K.HEADER_VM_UPTIME]),
-    cpu: headers.indexOf(config[K.HEADER_VM_CPU]),
-    memory: headers.indexOf(config[K.HEADER_VM_MEMORY]),
-    provGb: headers.indexOf(config[K.HEADER_VM_PROV_GB]),
-    cluster: headers.indexOf(config[K.HEADER_VM_CLUSTER]),
-    datastore: headers.indexOf(config[K.VM_DS_COLUMN_HEADER]),
-    kritikalitas: headers.indexOf(config[K.HEADER_VM_KRITIKALITAS]),
-    kelompokApp: headers.indexOf(config[K.HEADER_VM_KELOMPOK_APP]),
-    devOps: headers.indexOf(config[K.HEADER_VM_DEV_OPS]),
-    guestOs: headers.indexOf(config[K.HEADER_VM_GUEST_OS]),
-    vcenter: headers.indexOf(config[K.HEADER_VM_VCENTER])
-  };
-
-  for (const key in indices) {
-    if (indices[key] === -1) {
-      throw new Error(`Header untuk '${key}' tidak ditemukan. Periksa konfigurasi nama header.`);
-    }
+  const requiredHeaders = [
+    K.HEADER_VM_PK, K.HEADER_VM_NAME, K.HEADER_VM_IP, K.HEADER_VM_STATE,
+    K.HEADER_VM_UPTIME, K.HEADER_VM_CPU, K.HEADER_VM_MEMORY, K.HEADER_VM_PROV_GB,
+    K.HEADER_VM_CLUSTER, K.VM_DS_COLUMN_HEADER, K.HEADER_VM_KRITIKALITAS,
+    K.HEADER_VM_KELOMPOK_APP, K.HEADER_VM_DEV_OPS, K.HEADER_VM_GUEST_OS,
+    K.HEADER_VM_VCENTER, K.HEADER_VM_NO_TIKET
+  ];
+  
+  const indices = {};
+  for(const headerName of requiredHeaders) {
+      indices[headerName] = headers.indexOf(config[headerName]);
+      if(indices[headerName] === -1 && headerName !== K.HEADER_VM_NO_TIKET) {
+          throw new Error(`Header untuk '${config[headerName]}' (didefinisikan oleh konstanta '${headerName}') tidak ditemukan.`);
+      }
   }
 
-  const normalizedPk = normalizePrimaryKey(row[indices.pk]);
-  const clusterName = row[indices.cluster];
-  const datastoreName = row[indices.datastore];
+  const normalizedPk = normalizePrimaryKey(row[indices[K.HEADER_VM_PK]]);
+  const vmName = row[indices[K.HEADER_VM_NAME]];
+  const clusterName = row[indices[K.HEADER_VM_CLUSTER]];
+  const datastoreName = row[indices[K.VM_DS_COLUMN_HEADER]];
   const vmNote = getVmNote(normalizedPk, config);
 
   const addDetail = (value, icon, label, isCode = false) => {
@@ -403,18 +396,18 @@ function formatVmDetail(row, headers, config) {
   
   let pesan = "🖥️  <b>Detail Virtual Machine</b>\n\n";
   pesan += "<b>Informasi Umum</b>\n";
-  pesan += addDetail(row[indices.name], '🏷️', 'Nama VM', true);
+  pesan += addDetail(vmName, '🏷️', 'Nama VM', true);
   pesan += addDetail(normalizedPk, '🔑', 'Primary Key', true);
-  pesan += addDetail(row[indices.ip], '🌐', 'IP Address', true);
-  const stateValue = row[indices.state] || '';
+  pesan += addDetail(row[indices[K.HEADER_VM_IP]], '🌐', 'IP Address', true);
+  const stateValue = row[indices[K.HEADER_VM_STATE]] || '';
   const stateIcon = stateValue.toLowerCase().includes('on') ? '🟢' : '🔴';
   pesan += addDetail(stateValue, stateIcon, 'Status');
-  pesan += addDetail(`${row[indices.uptime]} hari`, '⏳', 'Uptime');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_UPTIME]]} hari`, '⏳', 'Uptime');
 
   pesan += "\n<b>Sumber Daya & Kapasitas</b>\n";
-  pesan += addDetail(`${row[indices.cpu]} vCPU`, '⚙️', 'CPU');
-  pesan += addDetail(`${row[indices.memory]} GB`, '🧠', 'Memory');
-  pesan += addDetail(`${row[indices.provGb]} GB`, '💽', 'Provisioned');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_CPU]]} vCPU`, '⚙️', 'CPU');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_MEMORY]]} GB`, '🧠', 'Memory');
+  pesan += addDetail(`${row[indices[K.HEADER_VM_PROV_GB]]} GB`, '💽', 'Provisioned');
   
   pesan += addDetail(clusterName, '☁️', 'Cluster');
   pesan += addDetail(datastoreName, '🗄️', 'Datastore');
@@ -423,14 +416,37 @@ function formatVmDetail(row, headers, config) {
   
   pesan += "\n<b>Konfigurasi & Manajemen</b>\n";
   pesan += addDetail(environment, '🌍', 'Environment');
-  pesan += addDetail(row[indices.kritikalitas], '🔥', 'Kritikalitas BIA');
-  pesan += addDetail(row[indices.kelompokApp], '📦', 'Aplikasi BIA');
-  pesan += addDetail(row[indices.devOps], '👥', 'DEV/OPS');
-  pesan += addDetail(row[indices.guestOs], '🐧', 'Guest OS');
-  pesan += addDetail(row[indices.vcenter], '🏢', 'vCenter');
+  pesan += addDetail(row[indices[K.HEADER_VM_KRITIKALITAS]], '🔥', 'Kritikalitas BIA');
+  pesan += addDetail(row[indices[K.HEADER_VM_KELOMPOK_APP]], '📦', 'Aplikasi BIA');
+  pesan += addDetail(row[indices[K.HEADER_VM_DEV_OPS]], '👥', 'DEV/OPS');
+  pesan += addDetail(row[indices[K.HEADER_VM_GUEST_OS]], '🐧', 'Guest OS');
+  pesan += addDetail(row[indices[K.HEADER_VM_VCENTER]], '🏢', 'vCenter');
 
   pesan += `\n--------------------------------------------------\n`;
-  pesan += `📝  <b>Catatan untuk VM ini:</b>\n`;
+  
+  // Bagian Tiket Provisioning
+  pesan += `🎫  <b>Tiket Provisioning:</b>\n`;
+  const noTiketProvisioning = indices[K.HEADER_VM_NO_TIKET] !== -1 ? row[indices[K.HEADER_VM_NO_TIKET]] : '';
+  if (noTiketProvisioning) {
+      pesan += `   - <code>${escapeHtml(noTiketProvisioning)}</code>\n`;
+  } else {
+      pesan += `   - <i>Tidak ada nomor tiket provisioning yang tercatat.</i>\n`;
+  }
+
+  // Bagian Tiket Terkait (Aktif)
+  pesan += `\n🎟️  <b>Tiket CPR Utilisasi (Aktif):</b>\n`;
+  const activeTickets = findActiveTicketsByVmName(vmName, config);
+  if (activeTickets.length > 0) {
+      activeTickets.forEach(ticket => {
+          pesan += `   - <code>${escapeHtml(ticket.id)}</code>: ${escapeHtml(ticket.name)} (${escapeHtml(ticket.status)})\n`;
+      });
+  } else {
+      pesan += `   - <i>Tidak ada tiket utilisasi aktif yang ditemukan.</i>`;
+  }
+  
+  pesan += `\n--------------------------------------------------\n`;
+
+  pesan += `\n📝  <b>Catatan untuk VM ini:</b>\n`;
   if (vmNote) {
     const noteText = vmNote['Isi Catatan'] || '<i>(Catatan kosong)</i>';
     const updatedBy = vmNote['Nama User Update'] || 'tidak diketahui';
@@ -440,17 +456,13 @@ function formatVmDetail(row, headers, config) {
   } else {
     pesan += `_Tidak ada catatan untuk VM ini._\n`;
   }
-  pesan += `--------------------------------------------------\n`;
 
   const keyboardRows = [];
   const K_NOTE = KONSTANTA.CALLBACK_CATATAN;
   const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
   const K_HISTORY = KONSTANTA.CALLBACK_HISTORY;
 
-  // ==================== PERUBAHAN UTAMA DI SINI ====================
-  // Tombol Riwayat VM sekarang membuat sesi yang valid.
   const historySessionId = createCallbackSession({ pk: normalizedPk });
-  // ==================== AKHIR PERUBAHAN ====================
 
   const firstRowButtons = [];
   firstRowButtons.push({ text: '📜 Riwayat VM', callback_data: `${K_HISTORY.PREFIX}${historySessionId}` });
@@ -620,9 +632,9 @@ function handleVmSearchInteraction(update, config, userData) {
 }
 
 /**
- * [REVISED v4.3.4 - EXPORT ENABLED] Menangani interaksi untuk riwayat.
- * Fungsi ini sekarang sepenuhnya mendukung aksi ekspor, membuat pekerjaan yang benar,
- * dan menyimpannya ke antrean untuk diproses.
+ * [FINAL v1.2.10] Menangani interaksi untuk riwayat.
+ * Versi ini menambahkan tombol "Kembali" pada pesan "Riwayat Tidak Ditemukan"
+ * untuk meningkatkan pengalaman pengguna (UX).
  */
 function handleHistoryInteraction(update, config, userData) {
   const userEvent = update.callback_query;
@@ -630,15 +642,12 @@ function handleHistoryInteraction(update, config, userData) {
   const isCallback = !!userEvent.id;
   
   try {
-    // ==================== PERUBAHAN UTAMA DI SINI ====================
-    // Logika untuk menangani aksi ekspor
     if (userEvent.action === KONSTANTA.PAGINATION_ACTIONS.EXPORT) {
         answerCallbackQuery(userEvent.id, config, "Menambahkan ke antrean...");
         
-        // Membuat jobData yang spesifik untuk riwayat
         const jobData = { 
-            jobType: 'history', // Menandai ini sebagai pekerjaan ekspor riwayat
-            context: sessionData, // Mengirim seluruh konteks (pk atau timeframe)
+            jobType: 'history',
+            context: sessionData,
             config: config, 
             userData: userData, 
             chatId: userEvent.message.chat.id 
@@ -650,7 +659,6 @@ function handleHistoryInteraction(update, config, userData) {
         kirimPesanTelegram(`✅ Permintaan ekspor Anda untuk "<b>${escapeHtml(title)}</b>" telah ditambahkan ke antrean.`, config, 'HTML', null, userEvent.message.chat.id);
         return;
     }
-    // ==================== AKHIR PERUBAHAN ====================
 
     const page = sessionData.page || 1;
     let logsToShow, logHeaders, title, headerContent;
@@ -661,9 +669,11 @@ function handleHistoryInteraction(update, config, userData) {
         logsToShow = result.history;
         logHeaders = result.headers;
         title = `Riwayat Perubahan untuk ${escapeHtml(pk)}`;
+        const profileAnalysis = analyzeVmProfile(logsToShow, logHeaders, config);
         headerContent = `<b>📜 Riwayat Perubahan untuk VM</b>\n` +
                           `<b>Nama:</b> ${escapeHtml(result.vmName)}\n` +
-                          `<b>PK:</b> <code>${escapeHtml(pk)}</code>`;
+                          `<b>PK:</b> <code>${escapeHtml(pk)}</code>\n\n` +
+                          `${profileAnalysis}`;
     } else {
         const todayStartDate = new Date();
         todayStartDate.setHours(0, 0, 0, 0);
@@ -675,10 +685,23 @@ function handleHistoryInteraction(update, config, userData) {
     }
 
     if (logsToShow.length === 0) {
-      const message = sessionData.pk 
-          ? `ℹ️ Tidak ditemukan riwayat perubahan untuk VM dengan PK: <code>${escapeHtml(sessionData.pk)}</code>`
-          : `✅ Tidak ada aktivitas perubahan data yang tercatat hari ini.`;
-      isCallback ? editMessageText(message, null, userEvent.message.chat.id, userEvent.message.message_id, config) : kirimPesanTelegram(message, config, 'HTML', null, userEvent.chat.id);
+      let message;
+      let keyboard = null;
+
+      if (sessionData.pk) {
+          message = `ℹ️ <b>Analisis Riwayat:</b>\nTidak ada aktivitas perubahan yang tercatat untuk VM dengan PK: <code>${escapeHtml(sessionData.pk)}</code>`;
+          // Buat tombol kembali
+          keyboard = {
+              inline_keyboard: [[
+                  { text: '⬅️ Kembali ke Detail VM', callback_data: `${KONSTANTA.CALLBACK_CEKVM.BACK_TO_DETAIL_PREFIX}${sessionData.pk}` }
+              ]]
+          };
+      } else {
+          message = `✅ Tidak ada aktivitas perubahan data yang tercatat hari ini.`;
+      }
+      
+      // Edit pesan dengan teks baru DAN tombol kembali (jika ada)
+      isCallback ? editMessageText(message, keyboard, userEvent.message.chat.id, userEvent.message.message_id, config) : kirimPesanTelegram(message, config, 'HTML', keyboard, userEvent.chat.id);
       return;
     }
 
@@ -2195,4 +2218,71 @@ function _buildMigrationPlan(sourceDsInfo, allDatastores, allVms, vmHeaders, mig
         }
     }
     return migrationPlan;
+}
+
+/**
+ * [BARU v1.2.0] Menganalisis log historis sebuah VM untuk membuat profil perilaku.
+ * @param {Array} history - Array berisi semua baris log untuk satu VM.
+ * @param {Array} headers - Array header untuk baris log.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {string} Pesan ringkasan analisis yang sudah diformat HTML.
+ */
+function analyzeVmProfile(history, headers, config) {
+  if (!history || history.length === 0) {
+    return ""; // Tidak ada riwayat untuk dianalisis
+  }
+
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+  const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
+  const detailIndex = headers.indexOf(config[K.HEADER_LOG_DETAIL]);
+  const timestampIndex = headers.indexOf(config[K.HEADER_LOG_TIMESTAMP]);
+
+  let modificationCount = 0;
+  let recentModificationCount = 0;
+  const modifiedColumns = {};
+
+  history.forEach(log => {
+    const action = log[actionIndex];
+    const timestamp = new Date(log[timestampIndex]);
+
+    if (action === 'MODIFIKASI') {
+      modificationCount++;
+      if (timestamp > ninetyDaysAgo) {
+        recentModificationCount++;
+      }
+      
+      const detail = log[detailIndex] || '';
+      const columnNameMatch = detail.match(/'([^']+)'/);
+      if (columnNameMatch) {
+        const columnName = columnNameMatch[1];
+        modifiedColumns[columnName] = (modifiedColumns[columnName] || 0) + 1;
+      }
+    }
+  });
+
+  let mostModifiedColumn = null;
+  let maxMods = 0;
+  for (const col in modifiedColumns) {
+    if (modifiedColumns[col] > maxMods) {
+      maxMods = modifiedColumns[col];
+      mostModifiedColumn = col;
+    }
+  }
+
+  let profileMessage = "<b>Analisis Profil VM:</b>\n";
+  profileMessage += `• <b>Frekuensi Perubahan:</b> Total <code>${modificationCount}</code> modifikasi tercatat.\n`;
+  if (modificationCount > 0) {
+      profileMessage += `  └ <code>${recentModificationCount}</code> di antaranya terjadi dalam 90 hari terakhir.\n`;
+  }
+  
+  if (mostModifiedColumn) {
+    profileMessage += `• <b>Stabilitas Konfigurasi:</b> Kolom '<code>${mostModifiedColumn}</code>' adalah yang paling sering diubah (${maxMods} kali).\n`;
+  } else {
+    profileMessage += `• <b>Stabilitas Konfigurasi:</b> Konfigurasi terpantau stabil.\n`;
+  }
+
+  return profileMessage + "\n";
 }

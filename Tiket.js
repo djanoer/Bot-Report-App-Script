@@ -298,3 +298,62 @@ function parseTicketId(url) {
   const parts = url.split('/');
   return parts.pop() || 'N/A';
 }
+
+/**
+ * [FINAL v1.2.9 - DEFINITIVE FIX] Mencari semua tiket aktif yang relevan.
+ * Memperbaiki bug fatal di mana skrip mencari kunci konstanta, bukan nilainya.
+ * @param {string} vmName - Nama VM yang sedang diperiksa dari sheet Data VM.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {Array} Array berisi objek tiket yang relevan.
+ */
+function findActiveTicketsByVmName(vmName, config) {
+  const relevantTickets = [];
+  if (!vmName) {
+    return relevantTickets;
+  }
+
+  try {
+    const { ticketData, headers } = getLocalTicketData(config);
+    if (ticketData.length === 0) {
+      return relevantTickets;
+    }
+
+    const K = KONSTANTA.KUNCI_KONFIG;
+    
+    // Mencari nilai dari konstanta di dalam objek config, bukan nama konstantanya.
+    const nameIndex = headers.indexOf(config[K.HEADER_TIKET_NAMA_VM]);
+    const statusIndex = headers.indexOf(config[K.HEADER_TIKET_STATUS]);
+    const linkIndex = headers.indexOf(config[K.HEADER_TIKET_LINK]);
+    
+    if (nameIndex === -1 || statusIndex === -1 || linkIndex === -1) {
+      // Sekarang kita bisa percaya pada warning ini jika muncul lagi.
+      console.warn("Satu atau lebih header tiket penting tidak cocok antara sheet 'Tiket' dan 'Konfigurasi'.");
+      return relevantTickets;
+    }
+
+    const searchedVmNameClean = vmName.toLowerCase().trim();
+
+    ticketData.forEach(row => {
+      // Menggunakan logika yang sudah kita sepakati: 'contains'
+      const ticketVmNameClean = String(row[nameIndex] || '').toLowerCase().trim();
+      
+      if (ticketVmNameClean && ticketVmNameClean.includes(searchedVmNameClean)) {
+        const ticketStatus = String(row[statusIndex] || '').toLowerCase().trim();
+        
+        // Menggunakan logika status BUKAN 'done'
+        if (ticketStatus && ticketStatus !== 'done') {
+          relevantTickets.push({
+            id: parseTicketId(row[linkIndex] || ''),
+            name: String(row[nameIndex]).trim(),
+            status: String(row[statusIndex]).trim()
+          });
+        }
+      }
+    });
+
+  } catch (e) {
+    console.error(`Gagal mencari tiket terkait untuk VM "${vmName}". Error: ${e.message}`);
+  }
+  
+  return relevantTickets;
+}
