@@ -7,31 +7,38 @@
 function jalankanPemeriksaanDatastore(config) {
   console.log("Memulai pemeriksaan perubahan datastore...");
   try {
-    const sheetName = config['NAMA_SHEET_DATASTORE'];
+    const sheetName = config["NAMA_SHEET_DATASTORE"];
     if (!sheetName) {
       console.warn("Pemeriksaan datastore dibatalkan: 'NAMA_SHEET_DATASTORE' tidak diatur di Konfigurasi.");
       return null;
     }
 
     const archiveFileName = KONSTANTA.NAMA_FILE.ARSIP_DS;
-    const primaryKeyHeader = config['HEADER_DATASTORE_NAME'];
+    const primaryKeyHeader = config["HEADER_DATASTORE_NAME"];
 
     // --- AWAL MODIFIKASI: Membaca kolom pantau dari konfigurasi ---
     // Membaca dari kunci baru yang kita definisikan
     const kolomDsUntukDipantau = config[KONSTANTA.KUNCI_KONFIG.KOLOM_PANTAU_DS] || [];
     // Mengubahnya menjadi format yang dimengerti oleh processDataChanges
-    const columnsToTrack = kolomDsUntukDipantau.map(namaKolom => ({ nama: namaKolom }));
+    const columnsToTrack = kolomDsUntukDipantau.map((namaKolom) => ({ nama: namaKolom }));
 
     if (columnsToTrack.length === 0) {
-        console.warn("Pemeriksaan datastore dilewati: 'KOLOM_PANTAU_DATASTORE' tidak diatur atau kosong di Konfigurasi.");
-        return null;
+      console.warn("Pemeriksaan datastore dilewati: 'KOLOM_PANTAU_DATASTORE' tidak diatur atau kosong di Konfigurasi.");
+      return null;
     }
 
     console.log(`Memantau perubahan pada sheet: '${sheetName}'`);
-    console.log(`Kolom datastore yang dipantau: '${kolomDsUntukDipantau.join(', ')}'`);
+    console.log(`Kolom datastore yang dipantau: '${kolomDsUntukDipantau.join(", ")}'`);
     // --- AKHIR MODIFIKASI ---
 
-    const logEntriesToAdd = processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader, columnsToTrack, KONSTANTA.NAMA_ENTITAS.DATASTORE);
+    const logEntriesToAdd = processDataChanges(
+      config,
+      sheetName,
+      archiveFileName,
+      primaryKeyHeader,
+      columnsToTrack,
+      KONSTANTA.NAMA_ENTITAS.DATASTORE
+    );
 
     if (logEntriesToAdd.length > 0) {
       const pesanNotifikasi = `🔔 Terdeteksi ${logEntriesToAdd.length} perubahan pada infrastruktur ${KONSTANTA.NAMA_ENTITAS.DATASTORE}. Silakan cek /cekhistory untuk detail.`;
@@ -61,29 +68,33 @@ function getDatastoreDetails(dsName, config) {
   if (!dsSheet) throw new Error(`Sheet datastore '${config[K.SHEET_DS]}' tidak ditemukan.`);
 
   const dsHeaders = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-  
+
   const requiredHeaders = {
     dsName: config[K.DS_NAME_HEADER],
     capacityGb: config[K.HEADER_DS_CAPACITY_GB],
     provisionedGb: config[K.HEADER_DS_PROV_DS_GB],
     capacityTb: config[K.HEADER_DS_CAPACITY_TB], // Menggunakan kunci yang sudah benar
-    provisionedTb: config[K.HEADER_DS_PROV_DS_TB]
+    provisionedTb: config[K.HEADER_DS_PROV_DS_TB],
   };
 
   const indices = {};
   for (const key in requiredHeaders) {
     if (!requiredHeaders[key]) {
-        throw new Error(`Kunci konfigurasi untuk '${key}' tidak ditemukan. Pastikan semua kunci HEADER_DS... telah diatur di sheet Konfigurasi.`);
+      throw new Error(
+        `Kunci konfigurasi untuk '${key}' tidak ditemukan. Pastikan semua kunci HEADER_DS... telah diatur di sheet Konfigurasi.`
+      );
     }
     indices[key] = dsHeaders.indexOf(requiredHeaders[key]);
     if (indices[key] === -1) {
-      throw new Error(`Header '${requiredHeaders[key]}' tidak ditemukan di sheet Datastore atau tidak diatur dengan benar di Konfigurasi.`);
+      throw new Error(
+        `Header '${requiredHeaders[key]}' tidak ditemukan di sheet Datastore atau tidak diatur dengan benar di Konfigurasi.`
+      );
     }
   }
   // --- [AKHIR VALIDASI] ---
 
   const allDsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
-  const dsRow = allDsData.find(row => String(row[indices.dsName] || '').toLowerCase() === dsName.toLowerCase());
+  const dsRow = allDsData.find((row) => String(row[indices.dsName] || "").toLowerCase() === dsName.toLowerCase());
 
   if (!dsRow) return null;
 
@@ -95,7 +106,7 @@ function getDatastoreDetails(dsName, config) {
     const vmDsIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
     if (vmDsIndex !== -1) {
       const allVmData = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
-      vmCount = allVmData.filter(row => String(row[vmDsIndex] || '') === dsName).length;
+      vmCount = allVmData.filter((row) => String(row[vmDsIndex] || "") === dsName).length;
     }
   }
 
@@ -104,9 +115,11 @@ function getDatastoreDetails(dsName, config) {
   const provisionedGb = parseLocaleNumber(dsRow[indices.provisionedGb]);
   const capacityTb = parseLocaleNumber(dsRow[indices.capacityTb]);
   const provisionedTb = parseLocaleNumber(dsRow[indices.provisionedTb]);
-  
-  const usagePercent = capacityGb > 0 ? (provisionedGb / capacityGb * 100) : 0;
-  const migrationConfig = getMigrationConfig(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_LOGIKA_MIGRASI]));
+
+  const usagePercent = capacityGb > 0 ? (provisionedGb / capacityGb) * 100 : 0;
+  const migrationConfig = getMigrationConfig(
+    SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_LOGIKA_MIGRASI])
+  );
 
   return {
     name: dsName,
@@ -119,6 +132,6 @@ function getDatastoreDetails(dsName, config) {
     provisionedTb: provisionedTb,
     freeTb: capacityTb - provisionedTb,
     usagePercent: usagePercent,
-    vmCount: vmCount
+    vmCount: vmCount,
   };
 }

@@ -182,6 +182,7 @@ const KONSTANTA = {
     DISTRIBUSI_VM: "/distribusi_vm",
     CEK_KONDISI: "/cek_kondisi",
     SIMULASI: "/simulasi",
+    GRAFIK: "/grafik",
   },
 
   // String yang sering digunakan

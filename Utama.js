@@ -329,6 +329,47 @@ const commandHandlers = {
       }
     }
   },
+  [KONSTANTA.PERINTAH_BOT.GRAFIK]: (update, config) => {
+    const args = update.message.text.split(" ");
+    const tipeGrafik = (args[1] || "").toLowerCase();
+
+    if (!tipeGrafik || (tipeGrafik !== "kritikalitas" && tipeGrafik !== "environment")) {
+      kirimPesanTelegram(
+        "Format perintah tidak valid. Gunakan:\n" +
+          "<code>/grafik kritikalitas</code>\n" +
+          "<code>/grafik environment</code>",
+        config,
+        "HTML"
+      );
+      return;
+    }
+
+    let statusMessageId = null;
+    try {
+      const sentMessage = kirimPesanTelegram("🎨 Membuat grafik, harap tunggu...", config, "HTML");
+      if (sentMessage && sentMessage.ok) {
+        statusMessageId = sentMessage.result.message_id;
+      }
+
+      const chartBlob = buatGrafikDistribusi(tipeGrafik, config);
+
+      if (chartBlob) {
+        const caption = `Berikut adalah grafik distribusi VM berdasarkan <b>${tipeGrafik}</b>.`;
+        kirimFotoTelegram(chartBlob, caption, config);
+        // Hapus pesan "membuat grafik..." setelah berhasil
+        if (statusMessageId) {
+          callTelegramApi("deleteMessage", { chat_id: config.TELEGRAM_CHAT_ID, message_id: statusMessageId }, config);
+        }
+      } else {
+        throw new Error("Gagal membuat objek gambar grafik.");
+      }
+    } catch (e) {
+      handleCentralizedError(e, `Perintah /grafik`, config);
+      if (statusMessageId) {
+        editMessageText("❌ Gagal membuat grafik.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    }
+  },
 };
 
 /**
@@ -621,13 +662,17 @@ function doPost(e) {
         if (commandFunction) {
           commandFunction(update, config, userDataAuth);
         } else {
-          kirimPesanTelegram(
-            `❌ Perintah <code>${escapeHtml(commandParts[0])}</code> tidak dikenal.\n\nGunakan ${
-              KONSTANTA.PERINTAH_BOT.INFO
-            } untuk melihat daftar perintah.`,
-            config,
-            "HTML"
-          );
+          // === AWAL BLOK PERBAIKAN PENGALAMAN PENGGUNA ===
+          const closestCommand = findClosestCommand(command);
+          let errorMessage = `❓ Perintah <code>${escapeHtml(command)}</code> tidak ditemukan.`;
+
+          if (closestCommand) {
+            errorMessage += `\n\nMungkin maksud Anda: <b>${closestCommand}</b>`;
+          } else {
+            errorMessage += `\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah yang valid.`;
+          }
+          kirimPesanTelegram(errorMessage, config, "HTML");
+          // === AKHIR BLOK PERBAIKAN PENGALAMAN PENGGUNA ===
         }
       } catch (err) {
         throw new Error(`[${contextForError}] ${err.message}`);
@@ -641,8 +686,8 @@ function doPost(e) {
 }
 
 /**
- * [FUNGSI BARU]
- * Mengirim pesan bantuan (/info) yang dinamis menggunakan konstanta.
+ * [FINAL v1.3.1] Mengirim pesan bantuan (/info) yang dinamis dan lengkap.
+ * Versi ini mencakup semua perintah baru yang telah diimplementasikan.
  */
 function kirimPesanInfo(config) {
   const K = KONSTANTA.PERINTAH_BOT;
@@ -650,44 +695,145 @@ function kirimPesanInfo(config) {
     "<b>Bot Laporan Infrastruktur</b>\n\n" +
     "Berikut adalah daftar perintah yang tersedia:\n\n" +
     "📊 <b>Laporan & Analisis</b>\n" +
-    `<code>${K.LAPORAN}</code> - Membuat laporan harian (tanpa sinkronisasi).\n` +
-    `<code>${K.SYNC_LAPORAN}</code> - Sinkronisasi data & buat laporan.\n` +
-    `<code>${K.CEK_KONDISI}</code> - Cek kondisi sistem saat ini.\n` +
-    `<code>${K.DISTRIBUSI_VM}</code> - Laporan VM per kritikalitas & environment.\n` +
-    `<code>${K.PROVISIONING}</code> - Laporan alokasi resource infrastruktur.\n` +
-    `<code>${K.MIGRASI_CHECK}</code> - Analisis dan rekomendasi migrasi.\n` +
-    `<code>${K.CEK_TIKET}</code> - Buka laporan monitoring tiket.\n\n` +
-    "🔍 <b>Pencarian & Riwayat</b>\n" +
-    `<code>${K.CEK_VM} [IP/Nama/UUID]</code> - Cari VM berdasarkan IP/Nama/UUID.\n` +
-    `<code>${K.CEK_HISTORY}</code> - Tampilkan log perubahan hari ini.\n` +
-    `<code>${K.HISTORY} [PK]</code> - Tampilkan riwayat lengkap sebuah VM.\n\n` +
-    "🛠️ <b>Utilitas & Bantuan</b>\n" +
-    `<code>${K.EXPORT}</code> - Menu ekspor data ke Sheet.\n` +
-    `<code>${K.DAFTAR} [email]</code> - Registrasi atau minta hak akses.\n` +
-    `<code>${K.ARSIPKAN_LOG}</code> - Jalankan pengarsipan log manual.\n` +
-    `<code>${K.CLEAR_CACHE}</code> - Bersihkan cache hak akses pengguna.\n` +
+    `<code>${K.LAPORAN}</code> - Laporan operasional harian instan.\n` +
+    `<code>${K.CEK_KONDISI}</code> - Analisis kondisi & anomali sistem.\n` +
+    `<code>${K.DISTRIBUSI_VM}</code> - Laporan distribusi aset VM.\n` +
+    `<code>${K.PROVISIONING}</code> - Laporan detail alokasi sumber daya.\n` +
+    `<code>${K.GRAFIK} [environment/kritikalitas]</code> - Tampilkan grafik visual distribusi aset.\n\n` +
+    "🔍 <b>Investigasi & Riwayat</b>\n" +
+    `<code>${K.CEK_VM} [Nama/IP/PK]</code> - Cari detail VM.\n` +
+    `<code>${K.CEK_HISTORY}</code> - Riwayat perubahan data hari ini.\n` +
+    `<code>${K.HISTORY} [PK]</code> - Lacak riwayat lengkap sebuah VM.\n\n` +
+    "🛠️ <b>Perencanaan & Operasional</b>\n" +
+    `<code>${K.SIMULASI} [cleanup/migrasi]</code> - Jalankan skenario perencanaan.\n` +
+    `<code>${K.CEK_TIKET}</code> - Buka menu monitoring tiket.\n` +
+    `<code>${K.MIGRASI_CHECK}</code> - Analisis & rekomendasi migrasi.\n\n` +
+    "⚙️ <b>Utilitas & Bantuan</b>\n" +
+    `<code>${K.EXPORT}</code> - Buka menu ekspor data ke Google Sheet.\n` +
+    `<code>${K.DAFTAR} [email]</code> - Minta hak akses untuk menggunakan bot.\n` +
     `<code>${K.INFO}</code> - Tampilkan pesan bantuan ini.`;
+
   kirimPesanTelegram(infoPesan, config, "HTML");
 }
 
-// ===== FILE: Utama.js =====
-
+/**
+ * [FINAL v1.3.1] Membuat menu kustom di UI Spreadsheet saat dibuka.
+ * Versi ini menambahkan sub-menu khusus "Menu Admin" untuk perintah-perintah
+ * yang bersifat administratif dan pemeliharaan.
+ */
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("⚙️ Menu Bot")
-    .addItem("1. Jalankan Pekerjaan Harian Sekarang", "runDailyJobs")
-    .addItem("2. Jalankan Laporan Migrasi Saja", "jalankanLaporanMigrasiDariMenu") // Menggunakan fungsi wrapper
+    // Menu untuk pengguna umum atau tes cepat
+    .addItem("1. Jalankan Laporan Migrasi Saja", "jalankanLaporanMigrasiDariMenu")
     .addSeparator()
-    .addItem("3. Hapus Cache Bot (State)", "clearBotStateCache")
-    .addItem("4. Tes Koneksi ke Telegram", "tesKoneksiTelegram")
-    .addSeparator()
+
+    // Sub-menu khusus untuk Administrator Bot
     .addSubMenu(
       SpreadsheetApp.getUi()
-        .createMenu("🛠️ Setup Awal")
+        .createMenu("⚙️ Menu Admin")
+        .addItem("Jalankan Sinkronisasi & Laporan Penuh", "runDailyJobsWithUiFeedback") // Menggunakan fungsi wrapper
+        .addItem("Jalankan Pengarsipan Log Manual", "runArchivingWithUiFeedback") // Menggunakan fungsi wrapper
+        .addItem("Bersihkan Cache Bot (State & Akses)", "clearBotStateCacheWithUiFeedback")
+    ) // Menggunakan fungsi wrapper
+    .addSeparator()
+
+    // Sub-menu untuk setup dan diagnostik
+    .addSubMenu(
+      SpreadsheetApp.getUi()
+        .createMenu("🛠️ Setup & Diagnostik")
+        .addItem("Tes Koneksi ke Telegram", "tesKoneksiTelegram")
         .addItem("SETUP: Set Token (Interaktif)", "setupSimpanTokenInteraktif")
-        .addItem("SETUP: Set Webhook (Jalankan setelah token di-set)", "setWebhook")
+        .addItem("SETUP: Set Webhook", "setWebhook")
     )
     .addToUi();
+}
+
+// === FUNGSI-FUNGSI WRAPPER UNTUK UI FEEDBACK ===
+
+/**
+ * [WRAPPER] Menjalankan runDailyJobs dan memberikan feedback ke UI Spreadsheet.
+ */
+function runDailyJobsWithUiFeedback() {
+  SpreadsheetApp.getUi().alert(
+    "Memulai Proses...",
+    "Sinkronisasi penuh dan pembuatan laporan sedang berjalan di latar belakang. Proses ini mungkin memakan waktu beberapa menit.",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  try {
+    syncDanBuatLaporanHarian(false, "MANUAL_DARI_MENU");
+    SpreadsheetApp.getUi().alert(
+      "Sukses!",
+      "Proses sinkronisasi dan laporan penuh telah berhasil dijalankan.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("Gagal!", `Terjadi kesalahan: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+/**
+ * [WRAPPER] Menjalankan cekDanArsipkanLogJikaPenuh dan memberikan feedback ke UI.
+ */
+function runArchivingWithUiFeedback() {
+  SpreadsheetApp.getUi().alert(
+    "Memulai Proses...",
+    "Pengecekan dan pengarsipan log sedang berjalan...",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  try {
+    const resultMessage = cekDanArsipkanLogJikaPenuh();
+    SpreadsheetApp.getUi().alert("Proses Selesai", resultMessage, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("Gagal!", `Terjadi kesalahan: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+/**
+ * [WRAPPER] Menjalankan clearBotStateCache dan memberikan feedback ke UI.
+ */
+function clearBotStateCacheWithUiFeedback() {
+  const isCleared = clearBotStateCache();
+  if (isCleared) {
+    SpreadsheetApp.getUi().alert(
+      "Sukses!",
+      "Cache state bot (konfigurasi & hak akses) telah berhasil dibersihkan.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } else {
+    SpreadsheetApp.getUi().alert(
+      "Gagal!",
+      "Gagal membersihkan cache. Periksa log untuk detail.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * [WRAPPER] Menjalankan laporan migrasi dan memberikan feedback ke UI.
+ * (Fungsi ini sudah ada sebelumnya, hanya dipindahkan agar berkelompok)
+ */
+function jalankanLaporanMigrasiDariMenu() {
+  SpreadsheetApp.getUi().alert(
+    "Memulai Proses...",
+    "Analisis rekomendasi migrasi sedang berjalan di latar belakang...",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  try {
+    const laporan = jalankanRekomendasiMigrasi();
+    kirimPesanTelegram(laporan, bacaKonfigurasi(), "HTML");
+    SpreadsheetApp.getUi().alert(
+      "Terkirim!",
+      "Laporan analisis migrasi telah dikirim ke Telegram.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } catch (e) {
+    SpreadsheetApp.getUi().alert(
+      "Gagal!",
+      `Gagal membuat laporan migrasi. Error: ${e.message}`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
 }
 
 function kirimMenuEkspor(config) {

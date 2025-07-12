@@ -8,13 +8,15 @@ function bersihkanFileEksporTua(config) {
   console.log("Memulai proses pembersihan file ekspor lama...");
   try {
     if (!config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR]) {
-      console.warn(`Proses pembersihan dibatalkan: ${KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR} tidak diatur di Konfigurasi.`);
+      console.warn(
+        `Proses pembersihan dibatalkan: ${KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR} tidak diatur di Konfigurasi.`
+      );
       return;
     }
 
     const folder = DriveApp.getFolderById(config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR]);
     const files = folder.getFiles();
-    const oneDayAgo = new Date(new Date().getTime() - (1 * 24 * 60 * 60 * 1000));
+    const oneDayAgo = new Date(new Date().getTime() - 1 * 24 * 60 * 60 * 1000);
 
     let deleteCount = 0;
     while (files.hasNext()) {
@@ -25,13 +27,13 @@ function bersihkanFileEksporTua(config) {
         deleteCount++;
       }
     }
-    
+
     if (deleteCount > 0) {
       console.log(`Pembersihan selesai. ${deleteCount} file telah dipindahkan ke sampah.`);
     } else {
       console.log("Pembersihan selesai. Tidak ada file lama yang perlu dihapus.");
     }
-  } catch(e) {
+  } catch (e) {
     console.error(`Gagal menjalankan pembersihan file lama. Error: ${e.message}`);
   }
 }
