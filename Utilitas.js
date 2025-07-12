@@ -1,7 +1,7 @@
 // ===== FILE: Utilitas.gs =====
 
 function escapeHtml(text) {
-  if (typeof text !== 'string') text = String(text);
+  if (typeof text !== "string") text = String(text);
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
@@ -11,23 +11,25 @@ function escapeHtml(text) {
  * Perilakunya sekarang 100% dikontrol oleh daftar KOLOM_YANG_DIPANTAU.
  */
 function computeVmHash(vmObject) {
-  if (!vmObject) return ''; 
-  
+  if (!vmObject) return "";
+
   // Tidak ada lagi penghapusan kunci 'Uptime' secara paksa.
   // Objek sekarang digunakan apa adanya sesuai dengan yang dibuat oleh processDataChanges.
   const objectForHashing = { ...vmObject };
-  
+
   const sortedKeys = Object.keys(objectForHashing).sort();
-  
-  const dataString = sortedKeys.map(key => {
+
+  const dataString = sortedKeys
+    .map((key) => {
       const value = objectForHashing[key];
       // Jika nilai adalah string literal "#N/A", perlakukan seperti sel kosong.
-      return (String(value || '').trim() === '#N/A') ? '' : value; 
-  }).join('||');
-  
+      return String(value || "").trim() === "#N/A" ? "" : value;
+    })
+    .join("||");
+
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, dataString);
-  
-  return digest.map(byte => (byte + 0x100).toString(16).substring(1)).join('');
+
+  return digest.map((byte) => (byte + 0x100).toString(16).substring(1)).join("");
 }
 
 /**
@@ -37,14 +39,14 @@ function computeVmHash(vmObject) {
  * @returns {object} Objek berisi { cluster: '...', type: '...' }.
  */
 function getDsInfo(dsName, migrationConfig) {
-  if (typeof dsName !== 'string') return { cluster: null, type: null };
+  if (typeof dsName !== "string") return { cluster: null, type: null };
 
   const clusterMatch = dsName.match(/(CL\d+)/i);
   const cluster = clusterMatch ? clusterMatch[1].toUpperCase() : null;
 
   let type = null;
   const knownTypes = Array.from(migrationConfig.keys()).sort((a, b) => b.length - a.length);
-  
+
   for (const knownType of knownTypes) {
     if (dsName.includes(knownType)) {
       const rule = migrationConfig.get(knownType);
@@ -75,7 +77,7 @@ function showUiFeedback(title, message) {
  * @returns {string|null} Nama lingkungan atau null.
  */
 function getEnvironmentFromDsName(dsName, environmentMap) {
-  if (typeof dsName !== 'string' || !environmentMap) return null;
+  if (typeof dsName !== "string" || !environmentMap) return null;
 
   // Urutkan kunci dari yang paling panjang agar tidak salah cocok (misal: 'LNV' vs '108LNV')
   const keywords = Object.keys(environmentMap).sort((a, b) => b.length - a.length);
@@ -85,7 +87,7 @@ function getEnvironmentFromDsName(dsName, environmentMap) {
       return environmentMap[keyword]; // Kembalikan nama environment resmi
     }
   }
-  
+
   return null; // Bukan environment khusus
 }
 
@@ -96,10 +98,10 @@ function getEnvironmentFromDsName(dsName, environmentMap) {
  * @returns {string} Primary Key yang sudah bersih tanpa sufiks lokasi.
  */
 function normalizePrimaryKey(pk) {
-  if (typeof pk !== 'string' || !pk) return '';
+  if (typeof pk !== "string" || !pk) return "";
   // Menghapus '-VC' diikuti oleh angka di akhir string.
   // Pola ini fleksibel untuk menangani -VC01, -VC02, -VC10, dst.
-  return pk.replace(/-VC\d+$/i, '').trim();
+  return pk.replace(/-VC\d+$/i, "").trim();
 }
 
 /**
@@ -109,7 +111,9 @@ function normalizePrimaryKey(pk) {
  */
 function handleCentralizedError(errorObject, context, config) {
   // 1. Catat log teknis yang detail untuk developer (tidak berubah)
-  const errorMessageTechnical = `[ERROR di ${context}] ${errorObject.message}\nStack: ${errorObject.stack || 'Tidak tersedia'}`;
+  const errorMessageTechnical = `[ERROR di ${context}] ${errorObject.message}\nStack: ${
+    errorObject.stack || "Tidak tersedia"
+  }`;
   console.error(errorMessageTechnical);
 
   // 2. Kirim pesan yang lebih detail ke pengguna untuk debugging
@@ -118,8 +122,8 @@ function handleCentralizedError(errorObject, context, config) {
     userFriendlyMessage += `<b>Konteks:</b> ${context}\n`;
     // [MODIFIKASI PENTING] Tambahkan pesan error asli ke notifikasi
     userFriendlyMessage += `<b>Detail Error Teknis:</b>\n<pre>${escapeHtml(errorObject.message)}</pre>`;
-    
-    kirimPesanTelegram(userFriendlyMessage, config, 'HTML');
+
+    kirimPesanTelegram(userFriendlyMessage, config, "HTML");
   }
 }
 
@@ -128,12 +132,20 @@ function handleCentralizedError(errorObject, context, config) {
  * Kini sepenuhnya menggunakan mekanisme Session ID untuk menangani callback data yang kompleks dan aman.
  * Fungsi ini tidak lagi menerima 'navCallbackPrefix', melainkan objek 'callbackInfo' yang lebih deskriptif.
  */
-function createPaginatedView({ allItems, page, title, headerContent = null, formatEntryCallback, callbackInfo, entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES }) {
+function createPaginatedView({
+  allItems,
+  page,
+  title,
+  headerContent = null,
+  formatEntryCallback,
+  callbackInfo,
+  entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES,
+}) {
   const totalEntries = allItems.length;
   if (totalEntries === 0) {
     let emptyText = `ℹ️ ${title}\n\n`;
     if (headerContent) {
-        emptyText = headerContent + `\n` + emptyText;
+      emptyText = headerContent + `\n` + emptyText;
     }
     emptyText += `Tidak ada data yang ditemukan.`;
     return { text: emptyText, keyboard: null };
@@ -146,55 +158,64 @@ function createPaginatedView({ allItems, page, title, headerContent = null, form
   const endIndex = Math.min(startIndex + entriesPerPage, totalEntries);
   const pageEntries = allItems.slice(startIndex, endIndex);
 
-  const listContent = pageEntries.map((item, index) => {
-    return `${startIndex + index + 1}. ${formatEntryCallback(item)}`;
-  }).join('\n\n');
+  const listContent = pageEntries
+    .map((item, index) => {
+      return `${startIndex + index + 1}. ${formatEntryCallback(item)}`;
+    })
+    .join("\n\n");
 
   let text = "";
   if (headerContent) {
-      text += headerContent + "\n";
+    text += headerContent + "\n";
   }
-  
-  text += `<i>Menampilkan <b>${startIndex + 1}-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
+
+  text += `<i>Menampilkan <b>${
+    startIndex + 1
+  }-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
   text += `------------------------------------\n\n`;
   text += listContent;
-  text += '\u200B';
+  text += "\u200B";
 
   const keyboardRows = [];
   const navigationButtons = [];
-  
+
   // ==================== PERUBAHAN UTAMA DI SINI ====================
   // Membuat sesi untuk navigasi dan ekspor.
   // Data konteks (seperti searchTerm) akan disuntikkan oleh fungsi pemanggil.
   const createSessionForPage = (targetPage) => {
-    const sessionData = { 
-        ...callbackInfo.context, // Menyalin semua konteks (cth: searchTerm, itemName)
-        page: targetPage,
+    const sessionData = {
+      ...callbackInfo.context, // Menyalin semua konteks (cth: searchTerm, itemName)
+      page: targetPage,
     };
-    return createCallbackSession(sessionData); 
+    return createCallbackSession(sessionData);
   };
-  
+
   if (page > 1) {
     const prevSessionId = createSessionForPage(page - 1);
-    navigationButtons.push({ text: '⬅️ Prev', callback_data: `${callbackInfo.navPrefix}${prevSessionId}` });
+    navigationButtons.push({ text: "⬅️ Prev", callback_data: `${callbackInfo.navPrefix}${prevSessionId}` });
   }
   if (totalPages > 1) {
     navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: KONSTANTA.CALLBACK.IGNORE });
   }
   if (page < totalPages) {
     const nextSessionId = createSessionForPage(page + 1);
-    navigationButtons.push({ text: 'Next ➡️', callback_data: `${callbackInfo.navPrefix}${nextSessionId}` });
+    navigationButtons.push({ text: "Next ➡️", callback_data: `${callbackInfo.navPrefix}${nextSessionId}` });
   }
-  
-  if(navigationButtons.length > 0) keyboardRows.push(navigationButtons);
-  
+
+  if (navigationButtons.length > 0) keyboardRows.push(navigationButtons);
+
   if (callbackInfo.exportPrefix) {
     // Sesi untuk ekspor bisa berisi semua item ID jika perlu, atau hanya query-nya
     const exportSessionId = createSessionForPage(1); // Ekspor selalu dari halaman 1
-    keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: `${callbackInfo.exportPrefix}${exportSessionId}` }]);
+    keyboardRows.push([
+      {
+        text: `📄 Ekspor Semua ${totalEntries} Hasil`,
+        callback_data: `${callbackInfo.exportPrefix}${exportSessionId}`,
+      },
+    ]);
   }
   // ==================== AKHIR PERUBAHAN ====================
-  
+
   return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
 
@@ -221,7 +242,7 @@ function getBotState() {
   }
 
   const cache = CacheService.getScriptCache();
-  const CACHE_KEY = 'BOT_STATE_V2'; // Gunakan kunci baru
+  const CACHE_KEY = "BOT_STATE_V2"; // Gunakan kunci baru
   const CACHE_DURATION_SECONDS = 21600; // Cache untuk 6 jam
 
   // 2. Coba ambil dari cache.
@@ -245,12 +266,12 @@ function getBotState() {
   console.log("State tidak ditemukan di memori atau cache. Membaca ulang dari Spreadsheet...");
   const config = bacaKonfigurasi(); // Fungsi bacaKonfigurasi tetap ada
   const userAccessMap = new Map();
-  
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetHakAkses = ss.getSheetByName(KONSTANTA.NAMA_SHEET.HAK_AKSES);
   if (sheetHakAkses && sheetHakAkses.getLastRow() > 1) {
     const dataAkses = sheetHakAkses.getRange(2, 1, sheetHakAkses.getLastRow() - 1, 3).getValues();
-    dataAkses.forEach(row => {
+    dataAkses.forEach((row) => {
       const userId = String(row[0]);
       const email = row[2];
       if (userId && email) {
@@ -262,14 +283,14 @@ function getBotState() {
   // Gabungkan semua menjadi satu objek state
   const newState = {
     config: config,
-    userAccessMap: userAccessMap
+    userAccessMap: userAccessMap,
   };
-  
+
   // Simpan state baru ke cache untuk eksekusi berikutnya.
   // Perlu mengubah Map menjadi array agar bisa disimpan sebagai JSON.
   const stateToCache = {
-      ...newState,
-      userAccessMap: Array.from(newState.userAccessMap.entries())
+    ...newState,
+    userAccessMap: Array.from(newState.userAccessMap.entries()),
   };
   cache.put(CACHE_KEY, JSON.stringify(stateToCache), CACHE_DURATION_SECONDS);
 
@@ -284,7 +305,7 @@ function getBotState() {
 function clearBotStateCache() {
   try {
     const cache = CacheService.getScriptCache();
-    cache.remove('BOT_STATE_V2');
+    cache.remove("BOT_STATE_V2");
     botState = null; // Hapus juga dari memori
     console.log("Cache state bot berhasil dihapus.");
     return true;
@@ -303,29 +324,29 @@ function clearBotStateCache() {
  */
 function parseLocaleNumber(numberString) {
   // Jika sudah berupa angka, langsung kembalikan
-  if (typeof numberString === 'number') {
+  if (typeof numberString === "number") {
     return numberString;
   }
   // Jika bukan string, ubah menjadi string
-  if (typeof numberString !== 'string') {
+  if (typeof numberString !== "string") {
     numberString = String(numberString);
   }
 
   // 1. Bersihkan semua karakter non-numerik kecuali titik, koma, dan tanda minus.
-  let cleaned = numberString.replace(/[^0-9.,-]/g, '');
+  let cleaned = numberString.replace(/[^0-9.,-]/g, "");
 
-  const lastComma = cleaned.lastIndexOf(',');
-  const lastDot = cleaned.lastIndexOf('.');
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
 
   // 2. Tentukan format berdasarkan pemisah desimal terakhir
   // Jika koma adalah pemisah terakhir, atau satu-satunya pemisah, asumsikan format Eropa
   if (lastComma > -1 && lastComma > lastDot) {
     // Hapus semua titik (pemisah ribuan), lalu ganti koma desimal dengan titik
-    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
   } else {
     // Asumsikan format US/standar. Cukup hapus koma (pemisah ribuan).
     // Titik desimal (jika ada) akan di-handle oleh parseFloat.
-    cleaned = cleaned.replace(/,/g, '');
+    cleaned = cleaned.replace(/,/g, "");
   }
 
   // 3. Lakukan parseFloat pada string yang sudah bersih.
@@ -341,7 +362,7 @@ function parseLocaleNumber(numberString) {
 function setUserState(userId, stateObject) {
   const cache = CacheService.getScriptCache();
   // Simpan status untuk pengguna ini selama 10 menit.
-  cache.put(`user_state_${userId}`, JSON.stringify(stateObject), 600); 
+  cache.put(`user_state_${userId}`, JSON.stringify(stateObject), 600);
 }
 
 /**
@@ -356,7 +377,7 @@ function getUserState(userId) {
 
   if (stateJSON) {
     // Setelah status diambil, langsung hapus agar tidak digunakan lagi.
-    cache.remove(stateKey); 
+    cache.remove(stateKey);
     return JSON.parse(stateJSON);
   }
   return null;
@@ -372,7 +393,7 @@ function getUserState(userId) {
 function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
   const cache = CacheService.getScriptCache();
   const manifestKey = `${keyPrefix}_manifest`;
-  
+
   // Hapus cache lama terlebih dahulu untuk memastikan invalidasi yang bersih
   let oldManifest;
   try {
@@ -380,10 +401,12 @@ function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
     if (oldManifestJSON) {
       oldManifest = JSON.parse(oldManifestJSON);
     }
-  } catch(e) {
-    console.warn(`Gagal mem-parse manifest cache lama untuk prefix "${keyPrefix}". Mungkin sudah tidak ada. Error: ${e.message}`);
+  } catch (e) {
+    console.warn(
+      `Gagal mem-parse manifest cache lama untuk prefix "${keyPrefix}". Mungkin sudah tidak ada. Error: ${e.message}`
+    );
   }
-  
+
   if (oldManifest && oldManifest.totalChunks) {
     const keysToRemove = [manifestKey];
     for (let i = 0; i < oldManifest.totalChunks; i++) {
@@ -406,7 +429,7 @@ function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
   // Siapkan manifest dan semua potongan data untuk disimpan
   const manifest = { totalChunks: chunks.length };
   const itemsToCache = {
-    [manifestKey]: JSON.stringify(manifest)
+    [manifestKey]: JSON.stringify(manifest),
   };
   chunks.forEach((chunk, index) => {
     itemsToCache[`${keyPrefix}_chunk_${index}`] = chunk;
@@ -429,12 +452,12 @@ function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
 function readLargeDataFromCache(keyPrefix) {
   const cache = CacheService.getScriptCache();
   const manifestKey = `${keyPrefix}_manifest`;
-  
+
   try {
     const manifestJSON = cache.get(manifestKey);
     if (!manifestJSON) {
       console.log(`Cache manifest untuk prefix "${keyPrefix}" tidak ditemukan (cache miss).`);
-      return null; 
+      return null;
     }
 
     const manifest = JSON.parse(manifestJSON);
@@ -460,7 +483,6 @@ function readLargeDataFromCache(keyPrefix) {
 
     console.log(`Data berhasil direkonstruksi dari ${totalChunks} potongan cache.`);
     return JSON.parse(reconstructedString);
-
   } catch (e) {
     console.error(`Gagal membaca atau mem-parse data cache dengan prefix "${keyPrefix}". Error: ${e.message}`);
     return null; // Cache miss karena error
@@ -474,12 +496,12 @@ function readLargeDataFromCache(keyPrefix) {
 function createCallbackSession(dataToStore) {
   const cache = CacheService.getScriptCache();
   const sessionId = Utilities.getUuid().substring(0, 8);
-  
+
   // ==================== PERUBAHAN UTAMA DI SINI ====================
   // Menggunakan konstanta, bukan angka hardcoded 900
-  cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), KONSTANTA.LIMIT.SESSION_TIMEOUT_SECONDS); 
+  cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), KONSTANTA.LIMIT.SESSION_TIMEOUT_SECONDS);
   // =============================================================
-  
+
   console.log(`Sesi callback dibuat dengan ID: ${sessionId}`);
   return sessionId;
 }
@@ -517,7 +539,7 @@ function _getSheetData(sheetName) {
   }
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
-  
+
   if (!sheet) {
     console.error(`Sheet dengan nama "${sheetName}" tidak ditemukan.`);
     return { headers: [], dataRows: [] };
@@ -526,9 +548,9 @@ function _getSheetData(sheetName) {
   if (sheet.getLastRow() < 1) {
     return { headers: [], dataRows: [] }; // Sheet kosong
   }
-  
+
   const allData = sheet.getDataRange().getValues();
   const headers = allData.shift() || []; // Ambil baris pertama sebagai header, atau array kosong jika tidak ada
-  
+
   return { headers: headers, dataRows: allData };
 }
