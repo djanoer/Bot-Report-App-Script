@@ -1,8 +1,8 @@
 // ===== FILE: Pembersih.gs =====
 
 /**
- * [REFACTORED v4.3.0] Membersihkan file ekspor lama.
- * Fungsi ini sekarang menerima objek config, bukan membacanya sendiri.
+ * [FINAL v1.8.1] Membersihkan file ekspor lama.
+ * Logika tidak berubah, disertakan untuk kelengkapan file.
  */
 function bersihkanFileEksporTua(config) {
   console.log("Memulai proses pembersihan file ekspor lama...");
@@ -35,5 +35,139 @@ function bersihkanFileEksporTua(config) {
     }
   } catch (e) {
     console.error(`Gagal menjalankan pembersihan file lama. Error: ${e.message}`);
+  }
+}
+
+/**
+ * [BARU v1.6.0] FUNGSI PENGARSIPAN UTAMA UNTUK LOG STORAGE
+ * Memindahkan log storage lama ke file JSON dan membersihkan sheet.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {string} Pesan hasil proses pengarsipan.
+ */
+function jalankanPengarsipanLogStorageKeJson(config) {
+  const sheetName = "Log Storage Historis";
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetLog = ss.getSheetByName(sheetName);
+
+  if (!sheetLog || sheetLog.getLastRow() <= 1) {
+    return `ℹ️ Tidak ada data di "${sheetName}" yang bisa diarsipkan.`;
+  }
+
+  const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ID_ARSIP_LOG_STORAGE];
+  if (!FOLDER_ARSIP_ID) {
+    throw new Error("Folder ID untuk arsip log storage belum diatur di Konfigurasi.");
+  }
+  const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
+
+  const dataRange = sheetLog.getDataRange();
+  const allLogData = dataRange.getValues();
+  const headers = allLogData.shift(); // Ambil header
+
+  if (allLogData.length === 0) {
+    return `ℹ️ Tidak ada baris data di "${sheetName}" untuk diarsipkan.`;
+  }
+
+  // Ubah data menjadi format objek JSON
+  const jsonData = allLogData.map((row) => {
+    const obj = {};
+    headers.forEach((header, index) => {
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+
+  try {
+    const timezone = ss.getSpreadsheetTimeZone();
+    const timestamp = Utilities.formatDate(new Date(), timezone, "yyyy-MM-dd_HH-mm-ss");
+    const namaFileArsip = `Arsip_Log_Storage - ${timestamp}.json`;
+    const jsonString = JSON.stringify(jsonData, null, 2);
+
+    folderArsip.createFile(namaFileArsip, jsonString, MimeType.PLAIN_TEXT);
+
+    // Hapus semua data kecuali baris header
+    sheetLog.getRange(2, 1, sheetLog.getLastRow() - 1, sheetLog.getLastColumn()).clearContent();
+
+    const pesanSukses = `✅ Pengarsipan log storage berhasil.\n\nSebanyak ${allLogData.length} baris telah dipindahkan ke file "${namaFileArsip}".`;
+    console.log(pesanSukses);
+    return pesanSukses;
+  } catch (e) {
+    const pesanGagal = `❌ Gagal melakukan pengarsipan log storage. Error: ${e.message}`;
+    console.error(pesanGagal + `\nStack: ${e.stack}`);
+    throw new Error(pesanGagal);
+  }
+}
+
+/**
+ * [PINDAH & REFACTOR v1.8.1] Memeriksa Log Perubahan dan memicu pengarsipan jika perlu.
+ * Menggunakan ambang batas dari konfigurasi terpusat.
+ */
+function cekDanArsipkanLogJikaPenuh(config = null) {
+  const activeConfig = config || bacaKonfigurasi();
+  const BATAS_BARIS = (activeConfig.SYSTEM_LIMITS && activeConfig.SYSTEM_LIMITS.LOG_CHANGE_ARCHIVE_THRESHOLD) || 2000;
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
+
+    if (!sheetLog) {
+      const errorMsg = "Sheet 'Log Perubahan' tidak ditemukan. Pengecekan dibatalkan.";
+      console.error(errorMsg);
+      return `❌ Gagal: ${errorMsg}`;
+    }
+
+    const jumlahBaris = sheetLog.getLastRow();
+    console.log(`Pengecekan jumlah baris log perubahan: ${jumlahBaris} baris.`);
+
+    if (jumlahBaris > BATAS_BARIS) {
+      console.log(`Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan...`);
+      return jalankanPengarsipanLogKeJson(activeConfig);
+    } else {
+      const feedbackMsg = `ℹ️ Pengarsipan log perubahan belum diperlukan. Jumlah baris saat ini adalah ${jumlahBaris}, masih di bawah ambang batas ${BATAS_BARIS} baris.`;
+      console.log(feedbackMsg);
+      return feedbackMsg;
+    }
+  } catch (e) {
+    const errorMsg = `❌ Gagal saat memeriksa log perubahan untuk pengarsipan: ${e.message}`;
+    console.error(errorMsg);
+    return errorMsg;
+  }
+}
+
+/**
+ * [FINAL v1.8.1] Memeriksa Log Storage dan memicu pengarsipan jika perlu.
+ * Menggunakan ambang batas dari konfigurasi terpusat.
+ */
+function cekDanArsipkanLogStorageJikaPenuh(config = null) {
+  const activeConfig = config || bacaKonfigurasi();
+  const BATAS_BARIS = (activeConfig.SYSTEM_LIMITS && activeConfig.SYSTEM_LIMITS.LOG_STORAGE_ARCHIVE_THRESHOLD) || 2000;
+
+  try {
+    const sheetName = "Log Storage Historis";
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetLog = ss.getSheetByName(sheetName);
+
+    if (!sheetLog) {
+      const errorMsg = `Sheet "${sheetName}" tidak ditemukan. Pengecekan dibatalkan.`;
+      console.error(errorMsg);
+      return `❌ Gagal: ${errorMsg}`;
+    }
+
+    const jumlahBaris = sheetLog.getLastRow();
+    console.log(`Pengecekan jumlah baris log storage: ${jumlahBaris} baris.`);
+
+    if (jumlahBaris > BATAS_BARIS) {
+      console.log(
+        `Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan log storage...`
+      );
+      return jalankanPengarsipanLogStorageKeJson(activeConfig);
+    } else {
+      const feedbackMsg = `ℹ️ Pengarsipan log storage belum diperlukan. Jumlah baris saat ini adalah ${jumlahBaris}, masih di bawah ambang batas ${BATAS_BARIS} baris.`;
+      console.log(feedbackMsg);
+      return feedbackMsg;
+    }
+  } catch (e) {
+    const errorMsg = `❌ Gagal saat memeriksa log storage untuk pengarsipan: ${e.message}`;
+    console.error(errorMsg);
+    return errorMsg;
   }
 }

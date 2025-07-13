@@ -1,12 +1,12 @@
 // ===== FILE: Konfigurasi.gs =====
 
 /**
- * [REFACTORED v3.5.0 - FINAL & KONSISTEN] Membaca dan mem-parsing seluruh konfigurasi.
- * Kini secara benar memproses SEMUA kunci yang relevan sebagai array.
+ * [FINAL v1.8.1] Membaca dan mem-parsing seluruh konfigurasi.
+ * Versi ini menambahkan kemampuan untuk membaca objek SYSTEM_LIMITS.
  */
 function bacaKonfigurasi() {
   try {
-    const K = KONSTANTA.KUNCI_KONFIG; // Standarisasi menggunakan alias 'K'
+    const K = KONSTANTA.KUNCI_KONFIG;
     const config = {};
     const properties = PropertiesService.getScriptProperties();
     config.TELEGRAM_BOT_TOKEN = properties.getProperty("TELEGRAM_BOT_TOKEN");
@@ -22,7 +22,6 @@ function bacaKonfigurasi() {
 
     const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
 
-    // Definisikan semua kunci yang nilainya harus diubah menjadi Array.
     const arrayKeys = [
       K.KOLOM_PANTAU,
       K.KOLOM_PANTAU_DS,
@@ -32,7 +31,7 @@ function bacaKonfigurasi() {
       K.KRITIKALITAS_PANTAU,
     ];
 
-    const jsonKeys = [K.MAP_ENV, K.SKOR_KRITIKALITAS];
+    const jsonKeys = [K.MAP_ENV, K.SKOR_KRITIKALITAS, K.MAP_ALIAS_STORAGE, K.MAP_KAPASITAS_STORAGE, K.SYSTEM_LIMITS];
 
     data.forEach((row) => {
       const key = row[0];
@@ -45,7 +44,6 @@ function bacaKonfigurasi() {
             throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}. Periksa format di sheet Konfigurasi.`);
           }
         } else if (arrayKeys.includes(key)) {
-          // Logika ini sekarang akan berlaku untuk semua kunci di dalam arrayKeys.
           config[key] = value
             ? String(value)
                 .split(",")

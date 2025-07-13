@@ -389,9 +389,8 @@ function updateTop5(topArray, newItem) {
 }
 
 /**
- * [REFACTORED v4.3.2 - CRITICAL FIX] Menganalisis tren perubahan dari log.
- * Memperbaiki bug 'Cannot read properties of undefined (reading 'ACTION')' dengan
- * menggunakan referensi konstanta yang benar dari objek config.
+ * [FINAL v1.8.1] Menganalisis tren perubahan dari log.
+ * Menggunakan ambang batas aktivitas dari konfigurasi terpusat.
  */
 function analisisTrenPerubahan(startDate, config) {
   const K = KONSTANTA.KUNCI_KONFIG;
@@ -405,28 +404,19 @@ function analisisTrenPerubahan(startDate, config) {
     };
   }
 
-  // Menggunakan referensi yang BENAR dari objek 'config'
   const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
   const timestampIndex = headers.indexOf(config[K.HEADER_LOG_TIMESTAMP]);
-
   if (actionIndex === -1 || timestampIndex === -1) {
     throw new Error("Header 'Action' atau 'Timestamp' tidak ditemukan di log.");
   }
 
-  const counts = {
-    PENAMBAHAN: 0,
-    MODIFIKASI: 0,
-    PENGHAPUSAN: 0,
-  };
-
+  const counts = { PENAMBAHAN: 0, MODIFIKASI: 0, PENGHAPUSAN: 0 };
   const activityByDay = {};
-
   logs.forEach((log) => {
     const action = log[actionIndex];
     if (counts.hasOwnProperty(action)) {
       counts[action]++;
     }
-
     const date = new Date(log[timestampIndex]).toISOString().split("T")[0];
     activityByDay[date] = (activityByDay[date] || 0) + 1;
   });
@@ -445,8 +435,9 @@ function analisisTrenPerubahan(startDate, config) {
   const days = Object.keys(activityByDay);
   if (days.length > 1) {
     const avgChanges = totalChanges / days.length;
+    const highActivityThreshold = (config.SYSTEM_LIMITS && config.SYSTEM_LIMITS.HIGH_ACTIVITY_THRESHOLD) || 50;
     const highActivityDays = days.filter(
-      (day) => activityByDay[day] > avgChanges * 2 && activityByDay[day] > KONSTANTA.LIMIT.HIGH_ACTIVITY_THRESHOLD
+      (day) => activityByDay[day] > avgChanges * 2 && activityByDay[day] > highActivityThreshold
     );
     if (highActivityDays.length > 0) {
       anomalyMessage = `⚠️ Terdeteksi anomali aktivitas pada tanggal: <b>${highActivityDays.join(", ")}</b>.`;

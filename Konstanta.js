@@ -64,6 +64,14 @@ const KONSTANTA = {
     BACK_TO_DETAIL_PREFIX: "cekvm_back_to_detail_",
   },
 
+  // Callback data pendaftaran
+  CALLBACK_DAFTAR: {
+    PREFIX: "register_",
+    APPROVE_USER: "register_approve_user_",
+    APPROVE_ADMIN: "register_approve_admin_",
+    REJECT: "register_reject_",
+  },
+
   // Aksi spesifik untuk pagination
   PAGINATION_ACTIONS: {
     NAVIGATE: "nav",
@@ -96,6 +104,7 @@ const KONSTANTA = {
     SKOR_KRITIKALITAS: "SKOR_KRITIKALITAS",
     KOLOM_PANTAU_DS: "KOLOM_PANTAU_DATASTORE",
     LOG_TOLERANCE_PROV_GB: "LOG_TOLERANCE_PROV_GB",
+    FOLDER_ID_ARSIP_LOG_STORAGE: "FOLDER_ID_ARSIP_LOG_STORAGE",
 
     HEADER_VM_PK: "HEADER_VM_PK",
     HEADER_VM_NAME: "HEADER_VM_NAME",
@@ -115,6 +124,9 @@ const KONSTANTA = {
     HEADER_VM_ENVIRONMENT: "HEADER_VM_ENVIRONMENT",
     HEADER_VM_NO_TIKET: "HEADER_VM_NO_TIKET",
     HEADER_VM_HOSTS: "HEADER_VM_HOSTS",
+    MAP_ALIAS_STORAGE: "MAP_ALIAS_STORAGE",
+    MAP_KAPASITAS_STORAGE: "MAP_KAPASITAS_STORAGE",
+    SYSTEM_LIMITS: "SYSTEM_LIMITS",
 
     HEADER_DS_CAPACITY_GB: "HEADER_DS_CAPACITY_GB",
     HEADER_DS_CAPACITY_TB: "HEADER_DS_CAPACITY_TB",
@@ -154,16 +166,6 @@ const KONSTANTA = {
     DATASTORE: "Datastore",
   },
 
-  // Batas dan nilai default
-  LIMIT: {
-    PAGINATION_ENTRIES: 15,
-    LOG_ARCHIVE_THRESHOLD: 1000,
-    LOCK_TIMEOUT_MS: 10000, // Timeout untuk script lock
-    // Ambang batas untuk deteksi aktivitas tinggi/anomali dalam satu periode laporan
-    HIGH_ACTIVITY_THRESHOLD: 50,
-    SESSION_TIMEOUT_SECONDS: 900, // Durasi 15 menit untuk session callback
-  },
-
   // Nama perintah bot
   PERINTAH_BOT: {
     DAFTAR: "/daftar",
@@ -183,10 +185,14 @@ const KONSTANTA = {
     CEK_KONDISI: "/cek_kondisi",
     SIMULASI: "/simulasi",
     GRAFIK: "/grafik",
+    LOG_REPORT: "/log_report",
   },
 
   // String yang sering digunakan
   UI_STRINGS: {
     SEPARATOR: "\n--------------------------------------------------\n",
   },
+
+  // Perintah yang hanya bisa diakses oleh Admin
+  PERINTAH_ADMIN: ["/sync_laporan", "/arsipkanlog", "/clearcache"],
 };

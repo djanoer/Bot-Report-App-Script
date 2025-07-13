@@ -1,13 +1,14 @@
 // ===== FILE: ManajemenData.gs =====
 
 /**
- * [MODIFIKASI FINAL v3.4.0] Menjadi pusat untuk semua pekerjaan harian.
- * Kini terintegrasi dengan sistem caching (invalidasi dan cache warming).
+ * [FINAL v1.8.1] Menjadi pusat untuk semua pekerjaan harian.
+ * Menggunakan timeout lock dari konfigurasi terpusat.
  */
 function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI", config = null) {
   const activeConfig = config || bacaKonfigurasi();
   const lock = LockService.getScriptLock();
-  const lockAcquired = lock.tryLock(KONSTANTA.LIMIT.LOCK_TIMEOUT_MS);
+  const lockTimeout = (activeConfig.SYSTEM_LIMITS && activeConfig.SYSTEM_LIMITS.LOCK_TIMEOUT_MS) || 10000;
+  const lockAcquired = lock.tryLock(lockTimeout);
 
   if (!lockAcquired) {
     console.log("Proses sinkronisasi sudah berjalan, permintaan saat ini dibatalkan.");
@@ -284,11 +285,9 @@ function getVmNote(vmPrimaryKey, config) {
 }
 
 /**
- * [FUNGSI BARU v3.3.0] Menyimpan (Create) atau memperbarui (Update) catatan untuk sebuah VM.
- * @param {string} vmPrimaryKey - Primary Key dari VM.
- * @param {string} noteText - Teks catatan yang baru.
- * @param {object} userData - Objek data pengguna yang sedang berinteraksi.
- * @returns {boolean} True jika berhasil, false jika gagal.
+ * [FINAL v1.9.1] Menyimpan (Create) atau memperbarui (Update) catatan untuk sebuah VM.
+ * Versi ini menambahkan sanitasi input dengan menambahkan kutip tunggal di awal teks
+ * untuk mencegah serangan Formula Injection.
  */
 function saveOrUpdateVmNote(vmPrimaryKey, noteText, userData) {
   const sheetName = KONSTANTA.NAMA_SHEET.CATATAN_VM;
@@ -316,16 +315,20 @@ function saveOrUpdateVmNote(vmPrimaryKey, noteText, userData) {
   const timestamp = new Date();
   const userName = userData.firstName || "Pengguna";
 
+  // Tambahkan kutip tunggal di awal untuk menetralkan potensi formula.
+  // Ini memastikan Google Sheets selalu memperlakukannya sebagai teks biasa.
+  const sanitizedNoteText = "'" + noteText;
+
   try {
     if (rowIndexToUpdate > -1) {
       // --- UPDATE ---
-      // Urutan kolom: Isi Catatan, Timestamp Update, Nama User Update
-      sheet.getRange(rowIndexToUpdate, pkIndex + 2, 1, 3).setValues([[noteText, timestamp, userName]]);
+      // Gunakan teks yang sudah aman (sanitizedNoteText)
+      sheet.getRange(rowIndexToUpdate, pkIndex + 2, 1, 3).setValues([[sanitizedNoteText, timestamp, userName]]);
       console.log(`Catatan untuk VM ${vmPrimaryKey} berhasil diperbarui oleh ${userName}.`);
     } else {
       // --- CREATE ---
-      // Urutan kolom: VM Primary Key, Isi Catatan, Timestamp Update, Nama User Update
-      sheet.appendRow([vmPrimaryKey, noteText, timestamp, userName]);
+      // Gunakan teks yang sudah aman (sanitizedNoteText)
+      sheet.appendRow([vmPrimaryKey, sanitizedNoteText, timestamp, userName]);
       console.log(`Catatan baru untuk VM ${vmPrimaryKey} berhasil dibuat oleh ${userName}.`);
     }
     return true;
@@ -495,7 +498,7 @@ function formatVmDetail(row, headers, config) {
   const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
   const K_HISTORY = KONSTANTA.CALLBACK_HISTORY;
 
-  const historySessionId = createCallbackSession({ pk: normalizedPk });
+  const historySessionId = createCallbackSession({ pk: normalizedPk }, config);
 
   const firstRowButtons = [];
   firstRowButtons.push({ text: "📜 Riwayat VM", callback_data: `${K_HISTORY.PREFIX}${historySessionId}` });
@@ -510,11 +513,11 @@ function formatVmDetail(row, headers, config) {
 
   const secondRowButtons = [];
   if (clusterName) {
-    const clusterSessionId = createCallbackSession({ itemName: clusterName, originPk: normalizedPk });
+    const clusterSessionId = createCallbackSession({ itemName: clusterName, originPk: normalizedPk }, config);
     secondRowButtons.push({ text: `⚙️ VM di Cluster`, callback_data: `${K_CEKVM.CLUSTER_PREFIX}${clusterSessionId}` });
   }
   if (datastoreName) {
-    const datastoreSessionId = createCallbackSession({ itemName: datastoreName, originPk: normalizedPk });
+    const datastoreSessionId = createCallbackSession({ itemName: datastoreName, originPk: normalizedPk }, config);
     secondRowButtons.push({ text: `🗄️ Detail DS`, callback_data: `${K_CEKVM.DATASTORE_PREFIX}${datastoreSessionId}` });
   }
   if (secondRowButtons.length > 0) {
@@ -683,6 +686,7 @@ function handleVmSearchInteraction(update, config, userData) {
       title: `Hasil Pencarian untuk "${escapeHtml(searchTerm)}"`,
       formatEntryCallback: formatVmEntry,
       callbackInfo: callbackInfo,
+      config: config,
     });
 
     if (isCallback) {
@@ -845,6 +849,7 @@ function handleHistoryInteraction(update, config, userData) {
       headerContent: headerContent,
       formatEntryCallback: formatHistoryEntry,
       callbackInfo: callbackInfo,
+      config: config,
     });
 
     if (sessionData.pk && keyboard) {
@@ -1722,43 +1727,6 @@ function jalankanPengarsipanLogKeJson(config) {
 }
 
 /**
- * FUNGSI PENGECЕK (Setelah Perbaikan Logika Threshold & Return Value)
- * Tugasnya adalah memeriksa jumlah baris dan mengembalikan pesan hasilnya.
- */
-function cekDanArsipkanLogJikaPenuh(config = null) {
-  const activeConfig = config || bacaKonfigurasi();
-  const BATAS_BARIS = activeConfig.LOG_ARCHIVE_THRESHOLD || KONSTANTA.LIMIT.LOG_ARCHIVE_THRESHOLD;
-
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheetLog = ss.getSheetByName(KONSTANTA.NAMA_SHEET.LOG_PERUBAHAN);
-
-    if (!sheetLog) {
-      const errorMsg = "Sheet 'Log Perubahan' tidak ditemukan. Pengecekan dibatalkan.";
-      console.error(errorMsg);
-      return `❌ Gagal: ${errorMsg}`; // Mengembalikan pesan error
-    }
-
-    const jumlahBaris = sheetLog.getLastRow();
-    console.log(`Pengecekan jumlah baris log: ${jumlahBaris} baris.`);
-
-    if (jumlahBaris > BATAS_BARIS) {
-      console.log(`Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan...`);
-      // Jalankan pengarsipan dan kembalikan pesannya
-      return jalankanPengarsipanLogKeJson(activeConfig);
-    } else {
-      const feedbackMsg = `ℹ️ Pengarsipan belum diperlukan. Jumlah baris log saat ini adalah ${jumlahBaris}, masih di bawah ambang batas ${BATAS_BARIS} baris.`;
-      console.log(feedbackMsg);
-      return feedbackMsg; // Mengembalikan pesan info
-    }
-  } catch (e) {
-    const errorMsg = `❌ Gagal saat memeriksa log untuk pengarsipan: ${e.message}`;
-    console.error(errorMsg);
-    return errorMsg; // Mengembalikan pesan error
-  }
-}
-
-/**
  * [REFACTORED v4.3.1 - CRITICAL FIX] Memproses perubahan data untuk VM atau Datastore.
  * Memperbaiki bug fatal 'Cannot read properties of undefined' dengan menggunakan referensi
  * yang benar dari objek config untuk mendapatkan nama header dinamis.
@@ -2198,6 +2166,7 @@ function handlePaginatedVmList(update, config, userData) {
       headerContent: headerContent,
       formatEntryCallback: formatVmEntry,
       callbackInfo: callbackInfo,
+      config: config,
     });
 
     if (originPk && paginatedView.keyboard) {

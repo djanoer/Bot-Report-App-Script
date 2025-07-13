@@ -128,9 +128,8 @@ function handleCentralizedError(errorObject, context, config) {
 }
 
 /**
- * [REFACTORED v4.1.0 - ROBUST SESSION] Membuat tampilan berhalaman (pesan teks dan keyboard) secara generik.
- * Kini sepenuhnya menggunakan mekanisme Session ID untuk menangani callback data yang kompleks dan aman.
- * Fungsi ini tidak lagi menerima 'navCallbackPrefix', melainkan objek 'callbackInfo' yang lebih deskriptif.
+ * [FINAL v1.8.1] Membuat tampilan berhalaman secara generik.
+ * Menggunakan jumlah entri dari konfigurasi terpusat.
  */
 function createPaginatedView({
   allItems,
@@ -139,8 +138,9 @@ function createPaginatedView({
   headerContent = null,
   formatEntryCallback,
   callbackInfo,
-  entriesPerPage = KONSTANTA.LIMIT.PAGINATION_ENTRIES,
+  config,
 }) {
+  const entriesPerPage = (config.SYSTEM_LIMITS && config.SYSTEM_LIMITS.PAGINATION_ENTRIES) || 15;
   const totalEntries = allItems.length;
   if (totalEntries === 0) {
     let emptyText = `ℹ️ ${title}\n\n`;
@@ -179,15 +179,12 @@ function createPaginatedView({
   const keyboardRows = [];
   const navigationButtons = [];
 
-  // ==================== PERUBAHAN UTAMA DI SINI ====================
-  // Membuat sesi untuk navigasi dan ekspor.
-  // Data konteks (seperti searchTerm) akan disuntikkan oleh fungsi pemanggil.
   const createSessionForPage = (targetPage) => {
     const sessionData = {
-      ...callbackInfo.context, // Menyalin semua konteks (cth: searchTerm, itemName)
+      ...callbackInfo.context,
       page: targetPage,
     };
-    return createCallbackSession(sessionData);
+    return createCallbackSession(sessionData, config);
   };
 
   if (page > 1) {
@@ -205,8 +202,7 @@ function createPaginatedView({
   if (navigationButtons.length > 0) keyboardRows.push(navigationButtons);
 
   if (callbackInfo.exportPrefix) {
-    // Sesi untuk ekspor bisa berisi semua item ID jika perlu, atau hanya query-nya
-    const exportSessionId = createSessionForPage(1); // Ekspor selalu dari halaman 1
+    const exportSessionId = createSessionForPage(1);
     keyboardRows.push([
       {
         text: `📄 Ekspor Semua ${totalEntries} Hasil`,
@@ -214,7 +210,6 @@ function createPaginatedView({
       },
     ]);
   }
-  // ==================== AKHIR PERUBAHAN ====================
 
   return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
@@ -264,18 +259,20 @@ function getBotState() {
 
   // 3. Jika tidak ada di memori atau cache, baca dari Spreadsheet (fallback).
   console.log("State tidak ditemukan di memori atau cache. Membaca ulang dari Spreadsheet...");
-  const config = bacaKonfigurasi(); // Fungsi bacaKonfigurasi tetap ada
+  const config = bacaKonfigurasi();
   const userAccessMap = new Map();
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetHakAkses = ss.getSheetByName(KONSTANTA.NAMA_SHEET.HAK_AKSES);
   if (sheetHakAkses && sheetHakAkses.getLastRow() > 1) {
-    const dataAkses = sheetHakAkses.getRange(2, 1, sheetHakAkses.getLastRow() - 1, 3).getValues();
+    const dataAkses = sheetHakAkses.getRange(2, 1, sheetHakAkses.getLastRow() - 1, 4).getValues();
     dataAkses.forEach((row) => {
       const userId = String(row[0]);
       const email = row[2];
+      const role = row[3];
       if (userId && email) {
-        userAccessMap.set(userId, { email: email });
+        // Simpan email dan role
+        userAccessMap.set(userId, { email: email, role: role });
       }
     });
   }
@@ -490,17 +487,15 @@ function readLargeDataFromCache(keyPrefix) {
 }
 
 /**
- * [REFACTORED v4.3.0] Membuat sesi callback sementara di cache.
- * Durasi cache sekarang diambil dari file konstanta terpusat.
+ * [FINAL v1.8.1] Membuat sesi callback sementara di cache.
+ * Menggunakan durasi timeout dari konfigurasi terpusat.
  */
-function createCallbackSession(dataToStore) {
+function createCallbackSession(dataToStore, config) {
   const cache = CacheService.getScriptCache();
   const sessionId = Utilities.getUuid().substring(0, 8);
 
-  // ==================== PERUBAHAN UTAMA DI SINI ====================
-  // Menggunakan konstanta, bukan angka hardcoded 900
-  cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), KONSTANTA.LIMIT.SESSION_TIMEOUT_SECONDS);
-  // =============================================================
+  const timeout = (config.SYSTEM_LIMITS && config.SYSTEM_LIMITS.SESSION_TIMEOUT_SECONDS) || 900;
+  cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), timeout);
 
   console.log(`Sesi callback dibuat dengan ID: ${sessionId}`);
   return sessionId;

@@ -197,17 +197,24 @@ const commandHandlers = {
   [KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG]: (update, config) => {
     let statusMessageId = null;
     try {
-      const sentMessage = kirimPesanTelegram("⏳ Memeriksa kondisi log untuk pengarsipan...", config, "HTML");
+      const sentMessage = kirimPesanTelegram("⏳ Memeriksa kondisi kedua log untuk pengarsipan...", config, "HTML");
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
 
-      const resultMessage = cekDanArsipkanLogJikaPenuh(config);
+      // Jalankan pengarsipan untuk kedua jenis log
+      const resultLogPerubahan = cekDanArsipkanLogJikaPenuh(config);
+      const resultLogStorage = cekDanArsipkanLogStorageJikaPenuh(config);
+
+      // Susun laporan gabungan
+      let finalReport = "<b>Laporan Status Pengarsipan Manual</b>\n\n";
+      finalReport += `• <b>Log Perubahan VM:</b>\n  └ <i>${resultLogPerubahan}</i>\n\n`;
+      finalReport += `• <b>Log Storage Historis:</b>\n  └ <i>${resultLogStorage}</i>`;
 
       if (statusMessageId) {
-        editMessageText(resultMessage, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        editMessageText(finalReport, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
       } else {
-        kirimPesanTelegram(resultMessage, config, "HTML");
+        kirimPesanTelegram(finalReport, config, "HTML");
       }
     } catch (e) {
       const errorMessage = `🔴 Terjadi kesalahan kritis saat menjalankan pengarsipan: ${e.message}`;
@@ -370,12 +377,50 @@ const commandHandlers = {
       }
     }
   },
+  [KONSTANTA.PERINTAH_BOT.LOG_REPORT]: (update, config) => {
+    const repliedToMessage = update.message.reply_to_message;
+    if (!repliedToMessage || !repliedToMessage.text) {
+      kirimPesanTelegram(
+        "❌ Perintah ini harus digunakan dengan cara me-reply (membalas) pesan laporan storage yang ingin Anda catat.",
+        config,
+        "HTML"
+      );
+      return;
+    }
+
+    const textBlock = repliedToMessage.text;
+    let statusMessageId = null;
+    try {
+      const sentMessage = kirimPesanTelegram("🧠 Menganalisis & menyimpan data, harap tunggu...", config, "HTML");
+      if (sentMessage && sentMessage.ok) {
+        statusMessageId = sentMessage.result.message_id;
+      }
+
+      const result = processAndLogReport(textBlock, config);
+
+      if (result.success) {
+        const successMessage = `✅ Data untuk storage <b>${escapeHtml(result.storageName)}</b> telah berhasil dicatat.`;
+        editMessageText(successMessage, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    } catch (e) {
+      handleCentralizedError(e, `Perintah /log_report`, config);
+      if (statusMessageId) {
+        editMessageText(
+          `⚠️ Gagal memproses laporan.\n\nPenyebab: <i>${e.message}</i>`,
+          null,
+          config.TELEGRAM_CHAT_ID,
+          statusMessageId,
+          config
+        );
+      }
+    }
+  },
 };
 
 /**
- * [REFACTORED v4.3.3 - DEFINITIVE HISTORY ROUTER] Fungsi utama yang menangani semua permintaan dari Telegram.
- * Memperbaiki bug paginasi pada halaman riwayat dengan menerapkan metode pengecekan
- * prefix 'startsWith' yang lebih kuat dan tidak rapuh.
+ * [FINAL v1.7.2] Fungsi utama yang menangani semua permintaan dari Telegram.
+ * Memperbaiki bug fatal "K is not defined" dengan menggunakan alias variabel
+ * yang benar (K_DAFTAR) di dalam blok logika persetujuan pendaftaran.
  */
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) {
@@ -432,12 +477,52 @@ function doPost(e) {
         const K_CEKVM = KONSTANTA.CALLBACK_CEKVM;
         const K_NOTE = KONSTANTA.CALLBACK_CATATAN;
         const K_HISTORY = KONSTANTA.CALLBACK_HISTORY;
+        const K_DAFTAR = KONSTANTA.CALLBACK_DAFTAR;
         const K_PAGINATE = KONSTANTA.PAGINATION_ACTIONS;
 
         const sessionCallbackRegex = /^([a-z_]+_)([a-zA-Z0-9]{8})$/;
         const match = callbackData.match(sessionCallbackRegex);
 
-        if (match) {
+        if (callbackData.startsWith(K_DAFTAR.PREFIX)) {
+          const adminData = userAccessMap.get(String(userEvent.from.id));
+          if (!adminData || (adminData.role || "User").toLowerCase() !== "admin") {
+            answerCallbackQuery(callbackQueryId, config, "Hanya Admin yang dapat melakukan aksi ini.");
+          } else {
+            let action = "";
+            let sessionId = "";
+
+            if (callbackData.startsWith(K_DAFTAR.APPROVE_USER)) {
+              action = "approve_user";
+              sessionId = callbackData.replace(K_DAFTAR.APPROVE_USER, "");
+            } else if (callbackData.startsWith(K_DAFTAR.APPROVE_ADMIN)) {
+              action = "approve_admin";
+              sessionId = callbackData.replace(K_DAFTAR.APPROVE_ADMIN, "");
+            } else if (callbackData.startsWith(K_DAFTAR.REJECT)) {
+              action = "reject";
+              sessionId = callbackData.replace(K_DAFTAR.REJECT, "");
+            }
+
+            const sessionData = getCallbackSession(sessionId);
+            if (sessionData) {
+              const resultMessage = handleUserApproval(sessionData, action, adminData, config);
+              editMessageText(
+                userEvent.message.text + `\n\n------------------------------------\n${resultMessage}`,
+                null,
+                chatId,
+                messageId,
+                config
+              );
+            } else {
+              editMessageText(
+                userEvent.message.text + "\n\n⚠️ Sesi persetujuan ini telah kedaluwarsa atau tidak valid.",
+                null,
+                chatId,
+                messageId,
+                config
+              );
+            }
+          }
+        } else if (match) {
           const prefix = match[1];
           const sessionId = match[2];
           const sessionData = getCallbackSession(sessionId);
@@ -617,29 +702,70 @@ function doPost(e) {
         const command = commandParts[0].toLowerCase().split("@")[0];
 
         if (command === KONSTANTA.PERINTAH_BOT.DAFTAR) {
-          const existingUserData = userAccessMap.get(String(userEvent.from.id));
+          const existingUserData = getBotState().userAccessMap.get(String(userEvent.from.id));
           if (existingUserData && existingUserData.email) {
-            kirimPesanTelegram(`Halo ${escapeHtml(userEvent.from.first_name)}, Anda sudah terdaftar.`, config, "HTML");
-          } else {
-            const email = commandParts[1];
-            if (!email || !email.includes("@") || !email.includes(".")) {
-              kirimPesanTelegram(`Format salah. Gunakan:\n<code>/daftar email.anda@domain.com</code>`, config, "HTML");
-            } else {
-              let notifPesan = `<b>🔔 Permintaan Pendaftaran Baru</b>\n\n<b>Nama:</b> ${escapeHtml(
-                userEvent.from.first_name
-              )}\n<b>Username:</b> ${
-                userEvent.from.username ? "@" + userEvent.from.username : "N/A"
-              }\n<b>User ID:</b> <code>${userEvent.from.id}</code>\n<b>Email:</b> <code>${escapeHtml(email)}</code>`;
-              kirimPesanTelegram(notifPesan, config, "HTML");
-              kirimPesanTelegram(
-                `Terima kasih, ${escapeHtml(userEvent.from.first_name)}. Permintaan Anda telah diteruskan.`,
-                config,
-                "HTML",
-                null,
-                userEvent.chat.id
-              );
-            }
+            kirimPesanTelegram(
+              `Halo ${escapeHtml(userEvent.from.first_name)}, Anda sudah terdaftar.`,
+              config,
+              "HTML",
+              null,
+              userEvent.chat.id
+            );
+            return HtmlService.createHtmlOutput("OK");
           }
+
+          const email = commandParts[1];
+          if (!email || !email.includes("@") || !email.includes(".")) {
+            kirimPesanTelegram(
+              `Format salah. Gunakan:\n<code>/daftar email.anda@domain.com</code>`,
+              config,
+              "HTML",
+              null,
+              userEvent.chat.id
+            );
+            return HtmlService.createHtmlOutput("OK");
+          }
+
+          // Buat sesi untuk menyimpan data pendaftar
+          const sessionData = {
+            userId: userEvent.from.id,
+            firstName: userEvent.from.first_name,
+            username: userEvent.from.username || "N/A",
+            email: email,
+          };
+          const sessionId = createCallbackSession(sessionData);
+
+          // Buat keyboard interaktif
+          const K = KONSTANTA.CALLBACK_DAFTAR;
+          const keyboard = {
+            inline_keyboard: [
+              [
+                { text: "✅ Setujui sebagai User", callback_data: `${K.APPROVE_USER}${sessionId}` },
+                { text: "👑 Jadikan Admin", callback_data: `${K.APPROVE_ADMIN}${sessionId}` },
+              ],
+              [{ text: "❌ Tolak Pendaftaran", callback_data: `${K.REJECT}${sessionId}` }],
+            ],
+          };
+
+          // Kirim notifikasi ke admin (grup)
+          let notifPesan = `<b>🔔 Permintaan Pendaftaran Baru</b>\n\n`;
+          notifPesan += `<b>Nama:</b> ${escapeHtml(sessionData.firstName)}\n`;
+          notifPesan += `<b>Username:</b> @${sessionData.username}\n`;
+          notifPesan += `<b>User ID:</b> <code>${sessionData.userId}</code>\n`;
+          notifPesan += `<b>Email:</b> <code>${escapeHtml(sessionData.email)}</code>`;
+          kirimPesanTelegram(notifPesan, config, "HTML", keyboard);
+
+          // Kirim konfirmasi ke pendaftar
+          kirimPesanTelegram(
+            `Terima kasih, ${escapeHtml(
+              sessionData.firstName
+            )}. Permintaan Anda telah diteruskan ke administrator untuk persetujuan.`,
+            config,
+            "HTML",
+            null,
+            userEvent.chat.id
+          );
+
           return HtmlService.createHtmlOutput("OK");
         }
 
@@ -660,9 +786,21 @@ function doPost(e) {
 
         const commandFunction = commandHandlers[command];
         if (commandFunction) {
-          commandFunction(update, config, userDataAuth);
+          const isAdminCommand = KONSTANTA.PERINTAH_ADMIN.includes(command);
+          // Ambil peran dari sheet "Hak Akses". Jika kolom Role kosong, anggap sebagai 'User'.
+          const userRole = userDataAuth.role || "User";
+
+          if (isAdminCommand && userRole.toLowerCase() !== "admin") {
+            kirimPesanTelegram(
+              `❌ Maaf, perintah <code>${escapeHtml(command)}</code> hanya dapat diakses oleh Admin.`,
+              config,
+              "HTML"
+            );
+          } else {
+            // Jika bukan perintah admin, atau jika pengguna adalah admin, jalankan perintah.
+            commandFunction(update, config, userDataAuth);
+          }
         } else {
-          // === AWAL BLOK PERBAIKAN PENGALAMAN PENGGUNA ===
           const closestCommand = findClosestCommand(command);
           let errorMessage = `❓ Perintah <code>${escapeHtml(command)}</code> tidak ditemukan.`;
 
@@ -672,7 +810,6 @@ function doPost(e) {
             errorMessage += `\n\nGunakan ${KONSTANTA.PERINTAH_BOT.INFO} untuk melihat daftar perintah yang valid.`;
           }
           kirimPesanTelegram(errorMessage, config, "HTML");
-          // === AKHIR BLOK PERBAIKAN PENGALAMAN PENGGUNA ===
         }
       } catch (err) {
         throw new Error(`[${contextForError}] ${err.message}`);
@@ -732,10 +869,11 @@ function onOpen() {
     .addSubMenu(
       SpreadsheetApp.getUi()
         .createMenu("⚙️ Menu Admin")
-        .addItem("Jalankan Sinkronisasi & Laporan Penuh", "runDailyJobsWithUiFeedback") // Menggunakan fungsi wrapper
-        .addItem("Jalankan Pengarsipan Log Manual", "runArchivingWithUiFeedback") // Menggunakan fungsi wrapper
+        .addItem("Jalankan Sinkronisasi & Laporan Penuh", "runDailyJobsWithUiFeedback")
+        .addItem("Jalankan Pengarsipan Log Perubahan VM & DS", "runChangeLogArchivingWithUiFeedback")
+        .addItem("Jalankan Pengarsipan Log Storage", "runStorageLogArchivingWithUiFeedback")
         .addItem("Bersihkan Cache Bot (State & Akses)", "clearBotStateCacheWithUiFeedback")
-    ) // Menggunakan fungsi wrapper
+    )
     .addSeparator()
 
     // Sub-menu untuk setup dan diagnostik
@@ -773,16 +911,33 @@ function runDailyJobsWithUiFeedback() {
 }
 
 /**
- * [WRAPPER] Menjalankan cekDanArsipkanLogJikaPenuh dan memberikan feedback ke UI.
+ * [WRAPPER] Mengganti nama agar lebih spesifik untuk Log Perubahan.
  */
-function runArchivingWithUiFeedback() {
+function runChangeLogArchivingWithUiFeedback() {
   SpreadsheetApp.getUi().alert(
     "Memulai Proses...",
-    "Pengecekan dan pengarsipan log sedang berjalan...",
+    "Pengecekan dan pengarsipan Log Perubahan sedang berjalan...",
     SpreadsheetApp.getUi().ButtonSet.OK
   );
   try {
-    const resultMessage = cekDanArsipkanLogJikaPenuh();
+    const resultMessage = cekDanArsipkanLogJikaPenuh(); // Fungsi lama
+    SpreadsheetApp.getUi().alert("Proses Selesai", resultMessage, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("Gagal!", `Terjadi kesalahan: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+/**
+ * [WRAPPER BARU v1.6.0] Menjalankan pengarsipan Log Storage dan memberikan feedback ke UI.
+ */
+function runStorageLogArchivingWithUiFeedback() {
+  SpreadsheetApp.getUi().alert(
+    "Memulai Proses...",
+    "Pengecekan dan pengarsipan Log Storage sedang berjalan...",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  try {
+    const resultMessage = cekDanArsipkanLogStorageJikaPenuh(); // Fungsi BARU
     SpreadsheetApp.getUi().alert("Proses Selesai", resultMessage, SpreadsheetApp.getUi().ButtonSet.OK);
   } catch (e) {
     SpreadsheetApp.getUi().alert("Gagal!", `Terjadi kesalahan: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
@@ -910,14 +1065,25 @@ function runMonthlyReport() {
   console.log("Laporan bulanan via trigger selesai.");
 }
 
+/**
+ * [FINAL v1.6.0] Menjalankan semua pekerjaan pembersihan dan pengarsipan.
+ * Versi ini menambahkan panggilan untuk mengarsipkan "Log Storage Historis"
+ * secara otomatis.
+ */
 function runCleanupAndArchivingJobs() {
   console.log("Memulai pekerjaan pembersihan dan arsip via trigger...");
 
   // Membaca state sekali di awal menggunakan metode terpusat
   const { config } = getBotState();
 
+  // Tugas 1: Membersihkan file ekspor yang sudah tua
   bersihkanFileEksporTua(config);
+
+  // Tugas 2: Memeriksa dan mengarsipkan Log Perubahan VM jika penuh
   cekDanArsipkanLogJikaPenuh(config);
+
+  // Tugas 3: Memeriksa dan mengarsipkan Log Storage Historis jika penuh
+  cekDanArsipkanLogStorageJikaPenuh(config);
 
   console.log("Pekerjaan pembersihan dan arsip via trigger selesai.");
 }
