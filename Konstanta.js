@@ -8,6 +8,7 @@ const KONSTANTA = {
     LOG_PERUBAHAN: "Log Perubahan",
     LOGIKA_MIGRASI: "Logika Migrasi",
     CATATAN_VM: "Catatan VM",
+    RULE_PROVISIONING: "Rule Provisioning",
   },
 
   // Callback data untuk tombol
@@ -186,6 +187,7 @@ const KONSTANTA = {
     SIMULASI: "/simulasi",
     GRAFIK: "/grafik",
     LOG_REPORT: "/log_report",
+    REKOMENDASI_SETUP: "/rekomendasi_setup",
   },
 
   // String yang sering digunakan

@@ -608,3 +608,35 @@ function findClosestCommand(wrongCommand) {
 
   return closestCommand;
 }
+
+/**
+ * [BARU v2.1.1] Fungsi khusus untuk mendapatkan info storage dari nama datastore.
+ * Digunakan oleh mesin rekomendasi untuk mencocokkan nama DS dengan alias storage.
+ * @param {string} dsName - Nama datastore yang akan di-parse.
+ * @param {Map} aliasMap - Objek pemetaan dari Konfigurasi (MAP_ALIAS_STORAGE).
+ * @returns {object} Objek berisi { cluster: '...', storageType: '...' }.
+ */
+function getStorageInfoFromDsName(dsName, aliasMap) {
+  if (typeof dsName !== "string" || !aliasMap) return { cluster: null, storageType: null };
+
+  // Ekstrak nama cluster (contoh: CL01)
+  const clusterMatch = dsName.match(/(CL\d+)/i);
+  const cluster = clusterMatch ? clusterMatch[1].toUpperCase() : null;
+
+  // Cari alias storage yang cocok
+  let storageType = null;
+  // Urutkan kunci dari yang terpanjang agar tidak salah cocok
+  const storageKeys = Object.keys(aliasMap).sort((a, b) => b.length - a.length);
+
+  for (const key of storageKeys) {
+    const aliases = aliasMap[key];
+    const isMatch = aliases.some((alias) => dsName.toUpperCase().includes(alias.toUpperCase()));
+    if (isMatch) {
+      // Gunakan alias pertama sebagai tipe storage utama
+      storageType = aliases[0];
+      break;
+    }
+  }
+
+  return { cluster: cluster, storageType: storageType };
+}

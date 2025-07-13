@@ -1,6 +1,37 @@
 // ===== FILE: Konfigurasi.gs =====
 
 /**
+ * [BARU v2.1.0] Membaca aturan penempatan dinamis dari sheet "Rule Provisioning".
+ * @returns {Array<object>} Array berisi objek aturan yang sudah terstruktur.
+ */
+function bacaAturanPenempatan() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KONSTANTA.NAMA_SHEET.RULE_PROVISIONING);
+  if (!sheet || sheet.getLastRow() < 2) {
+    console.error("Sheet 'Rule Provisioning' tidak ditemukan atau kosong.");
+    return [];
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data.shift().map((h) => h.toLowerCase()); // Ambil header & ubah ke huruf kecil
+
+  const rules = data.map((row) => {
+    const rule = {};
+    headers.forEach((header, index) => {
+      const cellValue = row[index];
+      // Ubah string yang dipisahkan koma menjadi array yang sudah di-trim
+      if (typeof cellValue === "string" && cellValue.includes(",")) {
+        rule[header] = cellValue.split(",").map((item) => item.trim());
+      } else {
+        rule[header] = cellValue;
+      }
+    });
+    return rule;
+  });
+
+  return rules;
+}
+
+/**
  * [FINAL v1.8.1] Membaca dan mem-parsing seluruh konfigurasi.
  * Versi ini menambahkan kemampuan untuk membaca objek SYSTEM_LIMITS.
  */

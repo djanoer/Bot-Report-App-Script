@@ -415,6 +415,63 @@ const commandHandlers = {
       }
     }
   },
+  [KONSTANTA.PERINTAH_BOT.REKOMENDASI_SETUP]: (update, config) => {
+    const text = update.message.text;
+
+    // Dapatkan seluruh string argumen setelah perintah
+    const argString = text.substring(text.indexOf(" ") + 1);
+
+    const requirements = {};
+    // Regex untuk mencocokkan pasangan key=value, di mana value bisa mengandung spasi
+    const argRegex = /(\w+)=(".*?"|[^=\s].*?(?=\s+\w+=|$))/g;
+    let match;
+
+    while ((match = argRegex.exec(argString)) !== null) {
+      const key = match[1].toLowerCase().trim();
+      // Hapus tanda kutip jika ada dan trim spasi
+      const value = match[2].trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "");
+      requirements[key] = value;
+    }
+
+    // Validasi input
+    if (
+      !requirements.cpu ||
+      !requirements.memory ||
+      !requirements.disk ||
+      !requirements.kritikalitas ||
+      !requirements.io
+    ) {
+      kirimPesanTelegram(
+        "Format perintah tidak valid. Pastikan semua parameter ada.\n\n" +
+          '<b>Contoh:</b>\n<code>/rekomendasi_setup cpu=4 memory=8 disk=100 kritikalitas="Very High" io=normal</code>\n' +
+          "<i>(Gunakan tanda kutip untuk nilai dengan spasi)</i>",
+        config,
+        "HTML"
+      );
+      return;
+    }
+
+    let statusMessageId = null;
+    try {
+      const sentMessage = kirimPesanTelegram("🧠 Menganalisis environment & mencari lokasi terbaik...", config, "HTML");
+      if (sentMessage && sentMessage.ok) {
+        statusMessageId = sentMessage.result.message_id;
+      }
+
+      const resultMessage = dapatkanRekomendasiPenempatan(requirements, config);
+
+      if (statusMessageId) {
+        editMessageText(resultMessage, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      } else {
+        kirimPesanTelegram(resultMessage, config, "HTML");
+      }
+    } catch (e) {
+      handleCentralizedError(e, `Perintah /rekomendasi_setup`, config);
+      if (statusMessageId) {
+        editMessageText("❌ Gagal memproses rekomendasi.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+      }
+    }
+  },
 };
 
 /**
