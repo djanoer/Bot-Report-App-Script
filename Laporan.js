@@ -671,3 +671,90 @@ function generateClusterAnalysis(clusterName, config) {
     return analysis;
   }
 }
+
+/**
+ * [FINAL v3.3.1] Fungsi utama untuk menghasilkan laporan utilisasi storage.
+ * Versi ini memperbaiki dua bug kritis:
+ * 1. Menambahkan pengurutan data historis untuk memastikan data yang diambil selalu yang terbaru.
+ * 2. Menyempurnakan logika pencarian untuk menangani storage dengan banyak alias (seperti VSPA & COM).
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {string} Pesan laporan lengkap yang sudah diformat HTML.
+ */
+function generateStorageUtilizationReport(config) {
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const capacityMap = config[K.MAP_KAPASITAS_STORAGE] || {};
+  const thresholds = config[K.STORAGE_UTILIZATION_THRESHOLDS] || { warning: 75, critical: 90 };
+  const storageAliases = Object.keys(capacityMap);
+
+  if (storageAliases.length === 0) {
+    return "ℹ️ Tidak ada data kapasitas storage yang terdefinisi di Konfigurasi.";
+  }
+
+  const { headers, data: logs } = getCombinedStorageLogs(config, 7);
+  if (logs.length === 0) {
+    return "ℹ️ Tidak ada data log storage yang ditemukan untuk dianalisis.";
+  }
+
+  const nameIndex = headers.indexOf("Storage Alias");
+  const usageIndex = headers.indexOf("Usage (TB)");
+  const timestampIndex = headers.indexOf("Timestamp");
+
+  if (nameIndex === -1 || usageIndex === -1 || timestampIndex === -1) {
+    return "❌ Gagal: Header penting (Storage Alias, Usage (TB), Timestamp) tidak ditemukan di log.";
+  }
+
+  // Pastikan log diurutkan dari yang paling baru ke yang paling lama. Ini sangat krusial.
+  logs.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
+
+  let reportMessage = "📊 <b>Ringkasan Utilisasi Storage</b>\n";
+  reportMessage += "<i>Data berdasarkan catatan terakhir yang diterima.</i>\n\n";
+  reportMessage += "------------------------------------\n";
+
+  storageAliases.forEach((aliasUtama) => {
+    // Dapatkan semua kemungkinan alias untuk storage ini dari konfigurasi
+    const aliasMap = config[K.MAP_ALIAS_STORAGE] || {};
+    const reportKey = Object.keys(aliasMap).find((key) => aliasMap[key].includes(aliasUtama));
+    const semuaAliasTerkait = reportKey ? aliasMap[reportKey] : [aliasUtama];
+
+    // Cari entri log pertama yang cocok dengan SALAH SATU dari alias terkait
+    const lastEntry = logs.find((row) => {
+      const logAliases = (row[nameIndex] || "").split(",").map((a) => a.trim());
+      return logAliases.some((logAlias) => semuaAliasTerkait.includes(logAlias));
+    });
+
+    const totalCapacity = capacityMap[aliasUtama];
+
+    if (!lastEntry) {
+      reportMessage += `\n⚪️ <b>${aliasUtama}</b>\n   <i>(Tidak ada data log ditemukan)</i>\n`;
+      return;
+    }
+
+    const currentUsage = parseFloat(lastEntry[usageIndex]) || 0;
+    const percentage = totalCapacity > 0 ? (currentUsage / totalCapacity) * 100 : 0;
+
+    let statusEmoji = "🟢";
+    if (percentage >= thresholds.critical) {
+      statusEmoji = "🔴";
+    } else if (percentage >= thresholds.warning) {
+      statusEmoji = "🟡";
+    }
+
+    reportMessage += `\n${statusEmoji} <b>${aliasUtama}</b> <code>(${percentage.toFixed(1)}%)</code>\n`;
+    reportMessage += `${createProgressBar(percentage)}\n`;
+    reportMessage += `<code>${currentUsage.toFixed(1)} / ${totalCapacity} TB</code>\n`;
+  });
+
+  return reportMessage;
+}
+
+/**
+ * [FINAL v3.3.1] Membuat progress bar visual berbasis teks.
+ * Tidak ada perubahan pada fungsi ini, namun disertakan untuk kelengkapan.
+ */
+function createProgressBar(percentage, barLength = 10) {
+  const filledCount = Math.round((percentage / 100) * barLength);
+  const emptyCount = barLength - filledCount;
+  const filledPart = "█".repeat(filledCount);
+  const emptyPart = "░".repeat(emptyCount);
+  return `[${filledPart}${emptyPart}]`;
+}

@@ -1,9 +1,102 @@
 // ===== FILE: Rekomendasi.gs =====
 
+// ====================================================================
+// BAGIAN 1: FUNGSI UNTUK ALUR PERCAKAPAN TERPANDU
+// ====================================================================
+
+/**
+ * [FINAL v3.1.3] Memulai alur percakapan terpandu untuk rekomendasi setup.
+ * @param {string} chatId - ID chat tempat percakapan dimulai.
+ * @param {string} userId - ID pengguna yang memulai percakapan.
+ * @param {object} config - Objek konfigurasi bot.
+ */
+function mulaiPercakapanRekomendasi(chatId, userId, config) {
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const kritikalitasString = config[K.KATEGORI_KRITIKALITAS] || "Critical,Very High,High,Medium,Low";
+  const kritikalitasOptions = kritikalitasString.split(",").map((item) => item.trim());
+
+  const keyboardRows = [];
+  kritikalitasOptions.forEach((opt) => {
+    keyboardRows.push([{ text: opt, callback_data: `${KONSTANTA.CALLBACK_REKOMENDASI.PILIH_KRITIKALITAS}${opt}` }]);
+  });
+  keyboardRows.push([{ text: "❌ Batal", callback_data: KONSTANTA.CALLBACK_REKOMENDASI.BATAL }]);
+
+  const keyboard = { inline_keyboard: keyboardRows };
+
+  const pesan =
+    "Baik, mari kita konfigurasikan VM baru.\n\n" +
+    "<b>Langkah 1 dari 3:</b> Silakan pilih tingkat kritikalitas VM:\n\n" +
+    "<i>Jika kritikalitas yang Anda inginkan tidak ada di daftar, silakan ketik langsung.</i>";
+
+  const sentMessage = kirimPesanTelegram(pesan, config, "HTML", keyboard, chatId);
+
+  if (sentMessage && sentMessage.ok) {
+    setUserState(userId, {
+      action: "AWAITING_REKOMENDASI_KRITIKALITAS",
+      messageId: sentMessage.result.message_id,
+      chatId: sentMessage.result.chat.id,
+      requirements: {},
+    });
+  }
+}
+
+/**
+ * [FINAL v3.1.3] Menampilkan pertanyaan kedua (Profil I/O).
+ */
+function tampilkanPertanyaanIo(userId, messageId, chatId, config, requirements) {
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "High", callback_data: `${KONSTANTA.CALLBACK_REKOMENDASI.PILIH_IO}high` }],
+      [{ text: "Normal", callback_data: `${KONSTANTA.CALLBACK_REKOMENDASI.PILIH_IO}normal` }],
+      [{ text: "❌ Batal", callback_data: KONSTANTA.CALLBACK_REKOMENDASI.BATAL }],
+    ],
+  };
+
+  const pesan =
+    `✅ Kritikalitas: <b>${escapeHtml(requirements.kritikalitas)}</b>\n\n` +
+    "<b>Langkah 2 dari 3:</b> Sekarang, pilih profil I/O yang dibutuhkan:";
+
+  editMessageText(pesan, keyboard, chatId, messageId, config);
+
+  setUserState(userId, {
+    action: "AWAITING_REKOMENDASI_IO",
+    messageId: messageId,
+    chatId: chatId,
+    requirements: requirements,
+  });
+}
+
+/**
+ * [FINAL v3.1.3] Menampilkan pertanyaan terakhir (Spesifikasi Teknis).
+ */
+function tampilkanPertanyaanSpek(userId, messageId, chatId, config, requirements) {
+  const keyboard = {
+    inline_keyboard: [[{ text: "❌ Batal", callback_data: KONSTANTA.CALLBACK_REKOMENDASI.BATAL }]],
+  };
+
+  const pesan =
+    `✅ Kritikalitas: <b>${escapeHtml(requirements.kritikalitas)}</b>\n` +
+    `✅ Profil I/O: <b>${escapeHtml(requirements.io)}</b>\n\n` +
+    "<b>Langkah 3 dari 3:</b> Terakhir, silakan masukkan kebutuhan CPU, Memori (GB), dan Disk (GB) dalam format:\n\n" +
+    "<code>CPU RAM DISK</code>\n\n" +
+    "Contoh: <code>8 16 100</code>";
+
+  editMessageText(pesan, keyboard, chatId, messageId, config);
+
+  setUserState(userId, {
+    action: "AWAITING_REKOMENDASI_SPEK",
+    messageId: messageId,
+    chatId: chatId,
+    requirements: requirements,
+  });
+}
+
+// ====================================================================
+// BAGIAN 2: FUNGSI UNTUK MESIN REKOMENDASI (v3.0.3)
+// ====================================================================
+
 /**
  * [FINAL v3.0.3] Fungsi orkestrator utama untuk mendapatkan rekomendasi penempatan VM.
- * Arsitektur dirombak total untuk menggunakan sumber kebenaran yang tepat (peta Datastore -> Cluster)
- * dan memastikan logika penyaringan berjalan dengan akurat.
  */
 function dapatkanRekomendasiPenempatan(requirements, config) {
   try {
@@ -17,9 +110,7 @@ function dapatkanRekomendasiPenempatan(requirements, config) {
       return `ℹ️ Tidak ditemukan aturan penempatan yang cocok untuk Kritikalitas "${requirements.kritikalitas}".`;
     }
 
-    // === INTI PERBAIKAN: Buat peta hubungan Datastore ke Cluster ===
     const dsToClusterMap = buildDatastoreToClusterMap(allVmData, vmHeaders, config);
-
     const { validCandidates, rejected } = filterLokasiByPolicy(
       requirements,
       applicableRule,
@@ -47,8 +138,7 @@ function dapatkanRekomendasiPenempatan(requirements, config) {
 }
 
 /**
- * [BARU v3.0.3] Membangun peta hubungan antara Datastore dan Cluster dari sheet Data VM.
- * @returns {Map<string, string>} Peta di mana kuncinya adalah nama Datastore dan nilainya adalah nama Cluster.
+ * [HELPER v3.1.3] Membangun peta hubungan antara Datastore dan Cluster.
  */
 function buildDatastoreToClusterMap(allVmData, vmHeaders, config) {
   const dsToClusterMap = new Map();
@@ -72,45 +162,7 @@ function buildDatastoreToClusterMap(allVmData, vmHeaders, config) {
 }
 
 /**
- * [HELPER v3.0.2] Mencari aturan yang berlaku dengan logika fallback yang "tahan banting".
- */
-function findApplicableRule(req, allRules) {
-  const reqKritikalitasLower = req.kritikalitas.toLowerCase();
-  const reqIoLower = req.io.toLowerCase();
-
-  const findMatch = (rule, checkIo) => {
-    const ruleKritikalitasLower = (String(rule["kritikalitas"]) || "").toLowerCase();
-    if (!ruleKritikalitasLower) return false;
-
-    const kritikalitasMatch = ruleKritikalitasLower.startsWith(reqKritikalitasLower);
-    if (!kritikalitasMatch) return false;
-
-    if (checkIo) {
-      const ruleIoLower = (String(rule["ioprofile"]) || "").toLowerCase();
-      return ruleIoLower.startsWith(reqIoLower);
-    }
-    return String(rule["ioprofile"]) === "*";
-  };
-
-  let applicableRule = allRules.find((rule) => findMatch(rule, true));
-
-  if (!applicableRule) {
-    console.log(
-      `Aturan spesifik untuk IO '${reqIoLower}' tidak ditemukan. Mencari aturan fallback dengan IO Profile '*'.`
-    );
-    applicableRule = allRules.find((rule) => findMatch(rule, false));
-  }
-
-  if (!applicableRule) {
-    console.log(`Aturan untuk kritikalitas '${reqKritikalitasLower}' tidak ditemukan. Mencari aturan 'default'.`);
-    applicableRule = allRules.find((rule) => (String(rule["kritikalitas"]) || "").toLowerCase() === "default");
-  }
-
-  return applicableRule;
-}
-
-/**
- * [HELPER v3.0.2] Menghitung total beban alokasi di setiap cluster.
+ * [HELPER v3.1.3] Menghitung total beban alokasi di setiap cluster.
  */
 function calculateClusterLoad(allVmData, vmHeaders, config) {
   const clusterLoad = new Map();
@@ -134,8 +186,7 @@ function calculateClusterLoad(allVmData, vmHeaders, config) {
 }
 
 /**
- * [REFACTOR v3.0.3] Menyaring lokasi berdasarkan kebijakan overcommit.
- * Kini menggunakan dsToClusterMap untuk validasi yang akurat.
+ * [HELPER v3.1.3] Menyaring lokasi berdasarkan kebijakan overcommit.
  */
 function filterLokasiByPolicy(
   req,
@@ -212,7 +263,65 @@ function filterLokasiByPolicy(
 }
 
 /**
- * [HELPER v3.0.2] Mendapatkan semua cluster target berdasarkan aturan prioritas.
+ * [HELPER v3.1.3] Mencari datastore di dalam cluster yang lolos.
+ */
+function findDatastoresInCluster(clusterName, req, rule, config, allDsData, dsHeaders, dsToClusterMap) {
+  const aliasMap = config[KONSTANTA.KUNCI_KONFIG.MAP_ALIAS_STORAGE] || {};
+  const dsNameIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
+  const dsCapGbIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_DS_CAPACITY_GB]);
+  const dsProvGbIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_DS_PROV_DS_GB]);
+
+  const p1Storage = getRuleAsArray(rule, "storageprioritas1");
+  const p2Storage = getRuleAsArray(rule, "storageprioritas2");
+
+  const filterByStorageTier = (dsName, tiers) => {
+    if (!tiers || tiers.length === 0 || tiers.includes("*")) return true;
+    const { storageType } = getStorageInfoFromDsName(dsName, aliasMap);
+    return storageType && tiers.some((tier) => storageType.toUpperCase().includes(tier.toUpperCase()));
+  };
+
+  const checkCapacity = (dsRow) => {
+    const freeSpace = (parseFloat(dsRow[dsCapGbIndex]) || 0) - (parseFloat(dsRow[dsProvGbIndex]) || 0);
+    return freeSpace >= req.disk;
+  };
+
+  const getValidDatastores = (dsPool, tiers) => {
+    return dsPool
+      .filter((dsRow) => {
+        const dsName = dsRow[dsNameIndex];
+        const actualCluster = dsToClusterMap.get(dsName);
+        return actualCluster === clusterName && filterByStorageTier(dsName, tiers) && checkCapacity(dsRow);
+      })
+      .map((dsRow) => ({
+        vcenter: rule["vcentertarget"],
+        clusterName: clusterName,
+        dsName: dsRow[dsNameIndex],
+        freeSpaceGB: (parseFloat(dsRow[dsCapGbIndex]) || 0) - (parseFloat(dsRow[dsProvGbIndex]) || 0),
+      }));
+  };
+
+  let kandidat = getValidDatastores(allDsData, p1Storage);
+  if (kandidat.length === 0 && p2Storage.length > 0) {
+    kandidat = getValidDatastores(allDsData, p2Storage);
+  }
+
+  return kandidat;
+}
+
+/**
+ * [HELPER v3.1.3] Mencari aturan yang berlaku dengan logika fallback.
+ */
+function findApplicableRule(req, allRules) {
+  const reqKritikalitasLower = req.kritikalitas.toLowerCase();
+  let rule = allRules.find((r) => String(r["kritikalitas"]).toLowerCase().startsWith(reqKritikalitasLower));
+  if (!rule) {
+    rule = allRules.find((r) => String(r["kritikalitas"]).toLowerCase() === "default");
+  }
+  return rule;
+}
+
+/**
+ * [HELPER v3.1.3] Mendapatkan semua cluster target berdasarkan aturan prioritas.
  */
 function getAllTargetClusters(rule, allVmData, vmHeaders, config) {
   const K = KONSTANTA.KUNCI_KONFIG;
@@ -242,7 +351,7 @@ function getAllTargetClusters(rule, allVmData, vmHeaders, config) {
 }
 
 /**
- * [HELPER v3.0.2] Helper untuk membaca aturan sebagai array yang aman.
+ * [HELPER v3.1.3] Helper untuk membaca aturan sebagai array yang aman.
  */
 function getRuleAsArray(rule, ruleName) {
   const value = rule[ruleName];
@@ -256,55 +365,7 @@ function getRuleAsArray(rule, ruleName) {
 }
 
 /**
- * [REFACTOR v3.0.3] Mencari datastore di dalam cluster yang lolos.
- * Kini menggunakan dsToClusterMap untuk mencocokkan cluster dengan benar.
- */
-function findDatastoresInCluster(clusterName, req, rule, config, allDsData, dsHeaders, dsToClusterMap) {
-  const aliasMap = config[KONSTANTA.KUNCI_KONFIG.MAP_ALIAS_STORAGE] || {};
-  const dsNameIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
-  const dsCapGbIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_DS_CAPACITY_GB]);
-  const dsProvGbIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_DS_PROV_DS_GB]);
-
-  const p1Storage = getRuleAsArray(rule, "storageprioritas1");
-  const p2Storage = getRuleAsArray(rule, "storageprioritas2");
-
-  const filterByStorageTier = (dsName, tiers) => {
-    if (!tiers || tiers.length === 0 || tiers.includes("*")) return true;
-    const { storageType } = getStorageInfoFromDsName(dsName, aliasMap);
-    return storageType && tiers.some((tier) => storageType.toUpperCase().includes(tier.toUpperCase()));
-  };
-
-  const checkCapacity = (dsRow) => {
-    const freeSpace = (parseFloat(dsRow[dsCapGbIndex]) || 0) - (parseFloat(dsRow[dsProvGbIndex]) || 0);
-    return freeSpace >= req.disk;
-  };
-
-  const getValidDatastores = (dsPool, tiers) => {
-    return dsPool
-      .filter((dsRow) => {
-        const dsName = dsRow[dsNameIndex];
-        // Menggunakan peta untuk mendapatkan nama cluster yang benar
-        const actualCluster = dsToClusterMap.get(dsName);
-        return actualCluster === clusterName && filterByStorageTier(dsName, tiers) && checkCapacity(dsRow);
-      })
-      .map((dsRow) => ({
-        vcenter: rule["vcentertarget"],
-        clusterName: clusterName,
-        dsName: dsRow[dsNameIndex],
-        freeSpaceGB: (parseFloat(dsRow[dsCapGbIndex]) || 0) - (parseFloat(dsRow[dsProvGbIndex]) || 0),
-      }));
-  };
-
-  let kandidat = getValidDatastores(allDsData, p1Storage);
-  if (kandidat.length === 0 && p2Storage.length > 0) {
-    kandidat = getValidDatastores(allDsData, p2Storage);
-  }
-
-  return kandidat;
-}
-
-/**
- * [FINAL v3.0.2] Memberikan skor pada kandidat yang lolos.
+ * [HELPER v3.1.3] Memberikan skor pada kandidat yang lolos.
  */
 function skorLokasiKandidat(kandidat, config, allVmData, vmHeaders) {
   const clusterLoad = calculateClusterLoad(allVmData, vmHeaders, config);
@@ -327,7 +388,7 @@ function skorLokasiKandidat(kandidat, config, allVmData, vmHeaders) {
 }
 
 /**
- * [FINAL v3.0.2] Memformat pesan rekomendasi sukses.
+ * [HELPER v3.1.3] Memformat pesan rekomendasi sukses.
  */
 function formatPesanRekomendasi(kandidatTerbaik, req, rejected, rule) {
   const kritikalitasTampil = rule["kritikalitas"] || req.kritikalitas;
@@ -359,7 +420,7 @@ function formatPesanRekomendasi(kandidatTerbaik, req, rejected, rule) {
 }
 
 /**
- * [FINAL v3.0.2] Memformat pesan saat tidak ada kandidat yang ditemukan.
+ * [HELPER v3.1.3] Memformat pesan saat tidak ada kandidat yang ditemukan.
  */
 function formatPesanGagal(req, rejected, rule) {
   let pesan = `ℹ️ <b>Analisis Penempatan Tidak Berhasil</b>\n\n`;
@@ -394,7 +455,7 @@ function formatPesanGagal(req, rejected, rule) {
 }
 
 /**
- * [BARU v3.0.2] Helper untuk menerjemahkan kode alasan menjadi teks yang kaya.
+ * [HELPER v3.1.3] Menerjemahkan kode alasan menjadi teks yang kaya.
  */
 function getReasonText(rejection) {
   switch (rejection.reason) {
@@ -414,7 +475,7 @@ function getReasonText(rejection) {
 }
 
 /**
- * [BARU v3.0.2] Helper untuk membuat teks rekomendasi yang cerdas.
+ * [HELPER v3.1.3] Membuat teks rekomendasi yang cerdas.
  */
 function getRecommendationText(rejection, rule) {
   switch (rejection.reason) {

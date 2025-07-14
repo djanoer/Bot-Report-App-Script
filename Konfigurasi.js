@@ -78,8 +78,8 @@ function bacaKebijakanCluster() {
 }
 
 /**
- * [FINAL v1.8.1] Membaca dan mem-parsing seluruh konfigurasi.
- * Versi ini menambahkan kemampuan untuk membaca objek SYSTEM_LIMITS.
+ * [FINAL v3.3.0] Membaca dan mem-parsing seluruh konfigurasi.
+ * Versi ini menambahkan kemampuan untuk membaca objek STORAGE_UTILIZATION_THRESHOLDS.
  */
 function bacaKonfigurasi() {
   try {
@@ -108,7 +108,14 @@ function bacaKonfigurasi() {
       K.KRITIKALITAS_PANTAU,
     ];
 
-    const jsonKeys = [K.MAP_ENV, K.SKOR_KRITIKALITAS, K.MAP_ALIAS_STORAGE, K.MAP_KAPASITAS_STORAGE, K.SYSTEM_LIMITS];
+    const jsonKeys = [
+      K.MAP_ENV,
+      K.SKOR_KRITIKALITAS,
+      K.MAP_ALIAS_STORAGE,
+      K.MAP_KAPASITAS_STORAGE,
+      K.SYSTEM_LIMITS,
+      K.STORAGE_UTILIZATION_THRESHOLDS,
+    ];
 
     data.forEach((row) => {
       const key = row[0];

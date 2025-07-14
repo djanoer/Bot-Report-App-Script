@@ -643,3 +643,15 @@ function getStorageInfoFromDsName(dsName, aliasMap) {
   }
   return { cluster: cluster, storageType: storageType };
 }
+
+/**
+ * [BARU v3.1.2 - KRUSIAL] Menghapus state (status percakapan) seorang pengguna dari cache.
+ * Fungsi ini dipanggil setelah sebuah percakapan selesai atau dibatalkan.
+ * @param {string} userId - ID pengguna yang state-nya akan dihapus.
+ */
+function clearUserState(userId) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `user_state_${userId}`;
+  cache.remove(cacheKey);
+  console.log(`State untuk pengguna ${userId} telah berhasil dihapus.`);
+}

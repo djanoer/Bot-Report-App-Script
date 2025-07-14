@@ -179,3 +179,65 @@ function countDatastoresForStorage(storageReportName, config) {
   console.log(`Ditemukan ${matchCount} datastore untuk alias [${aliases.join(", ")}]`);
   return matchCount;
 }
+
+/**
+ * [BARU v3.2.0] Menggabungkan data dari sheet "Log Storage Historis" aktif
+ * dengan semua file arsip JSON yang relevan.
+ * @param {object} config - Objek konfigurasi bot.
+ * @param {number} days - Jumlah hari ke belakang untuk diambil datanya.
+ * @returns {object} Objek berisi { headers: Array, data: Array }.
+ */
+function getCombinedStorageLogs(config, days = 30) {
+  const allLogs = [];
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const sheetName = "Log Storage Historis";
+
+  // 1. Baca data dari sheet aktif
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  let headers = [];
+  if (sheet && sheet.getLastRow() > 1) {
+    const data = sheet.getDataRange().getValues();
+    headers = data.shift(); // Ambil header
+    allLogs.push(...data);
+  } else if (sheet) {
+    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  }
+
+  // 2. Baca data dari file arsip
+  const folderId = config[K.FOLDER_ID_ARSIP_LOG_STORAGE];
+  if (folderId) {
+    try {
+      const folder = DriveApp.getFolderById(folderId);
+      const files = folder.getFilesByType(MimeType.PLAIN_TEXT);
+      while (files.hasNext()) {
+        const file = files.next();
+        if (file.getName().startsWith("Arsip_Log_Storage")) {
+          const content = file.getBlob().getDataAsString();
+          const archivedData = JSON.parse(content);
+          // Ubah dari array objek menjadi array array
+          const dataAsArray = archivedData.map((obj) => headers.map((header) => obj[header]));
+          allLogs.push(...dataAsArray);
+        }
+      }
+    } catch (e) {
+      console.error(`Gagal membaca arsip log storage: ${e.message}`);
+    }
+  }
+
+  // 3. Filter data berdasarkan rentang tanggal
+  const timestampIndex = headers.indexOf("Timestamp");
+  if (timestampIndex === -1) {
+    console.error("Header 'Timestamp' tidak ditemukan di log storage.");
+    return { headers: headers, data: [] };
+  }
+
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const filteredLogs = allLogs.filter((row) => {
+    const timestamp = new Date(row[timestampIndex]);
+    return timestamp >= startDate;
+  });
+
+  return { headers: headers, data: filteredLogs };
+}
