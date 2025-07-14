@@ -610,22 +610,26 @@ function findClosestCommand(wrongCommand) {
 }
 
 /**
- * [BARU v2.1.1] Fungsi khusus untuk mendapatkan info storage dari nama datastore.
- * Digunakan oleh mesin rekomendasi untuk mencocokkan nama DS dengan alias storage.
+ * [FINAL v3.0.3 - KRUSIAL] Fungsi khusus untuk mendapatkan info storage dari nama datastore.
+ * Versi ini menggunakan Regular Expression yang lebih cerdas dan fleksibel untuk
+ * mengekstrak nama cluster dengan berbagai format secara andal.
  * @param {string} dsName - Nama datastore yang akan di-parse.
- * @param {Map} aliasMap - Objek pemetaan dari Konfigurasi (MAP_ALIAS_STORAGE).
+ * @param {object} aliasMap - Objek pemetaan dari Konfigurasi (MAP_ALIAS_STORAGE).
  * @returns {object} Objek berisi { cluster: '...', storageType: '...' }.
  */
 function getStorageInfoFromDsName(dsName, aliasMap) {
   if (typeof dsName !== "string" || !aliasMap) return { cluster: null, storageType: null };
 
-  // Ekstrak nama cluster (contoh: CL01)
-  const clusterMatch = dsName.match(/(CL\d+)/i);
-  const cluster = clusterMatch ? clusterMatch[1].toUpperCase() : null;
+  // === AWAL BLOK PERBAIKAN UTAMA ===
+  // Regex baru yang lebih fleksibel: mencari pola kata-kata yang diakhiri dengan CL##
+  // Contoh: akan cocok dengan "TBN-COM-LNV-CL02" dan juga "COM-CL01"
+  const clusterMatch = dsName.match(/((?:\w+-)*CL\d+)/i);
+  const cluster = clusterMatch ? clusterMatch[0].toUpperCase() : null;
+  // === AKHIR BLOK PERBAIKAN UTAMA ===
 
   // Cari alias storage yang cocok
   let storageType = null;
-  // Urutkan kunci dari yang terpanjang agar tidak salah cocok
+  // Urutkan kunci dari yang terpanjang agar tidak salah cocok (misal: "VSPA" sebelum "VSP")
   const storageKeys = Object.keys(aliasMap).sort((a, b) => b.length - a.length);
 
   for (const key of storageKeys) {
@@ -637,6 +641,5 @@ function getStorageInfoFromDsName(dsName, aliasMap) {
       break;
     }
   }
-
   return { cluster: cluster, storageType: storageType };
 }

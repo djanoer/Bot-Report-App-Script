@@ -417,23 +417,17 @@ const commandHandlers = {
   },
   [KONSTANTA.PERINTAH_BOT.REKOMENDASI_SETUP]: (update, config) => {
     const text = update.message.text;
-
-    // Dapatkan seluruh string argumen setelah perintah
     const argString = text.substring(text.indexOf(" ") + 1);
-
     const requirements = {};
-    // Regex untuk mencocokkan pasangan key=value, di mana value bisa mengandung spasi
     const argRegex = /(\w+)=(".*?"|[^=\s].*?(?=\s+\w+=|$))/g;
     let match;
 
     while ((match = argRegex.exec(argString)) !== null) {
       const key = match[1].toLowerCase().trim();
-      // Hapus tanda kutip jika ada dan trim spasi
       const value = match[2].trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "");
-      requirements[key] = value;
+      requirements[key] = key === "cpu" || key === "memory" || key === "disk" ? parseInt(value, 10) : value;
     }
 
-    // Validasi input
     if (
       !requirements.cpu ||
       !requirements.memory ||

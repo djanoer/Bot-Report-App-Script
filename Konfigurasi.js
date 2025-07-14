@@ -1,34 +1,80 @@
 // ===== FILE: Konfigurasi.gs =====
 
 /**
- * [BARU v2.1.0] Membaca aturan penempatan dinamis dari sheet "Rule Provisioning".
- * @returns {Array<object>} Array berisi objek aturan yang sudah terstruktur.
+ * [FINAL v3.0.2] Membaca aturan penempatan dinamis dari sheet "Rule Provisioning".
+ * Versi ini menerapkan normalisasi header (menjadi huruf kecil, tanpa spasi)
+ * untuk memastikan konsistensi dan mencegah error.
  */
 function bacaAturanPenempatan() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KONSTANTA.NAMA_SHEET.RULE_PROVISIONING);
+  const rules = [];
+
   if (!sheet || sheet.getLastRow() < 2) {
     console.error("Sheet 'Rule Provisioning' tidak ditemukan atau kosong.");
-    return [];
+    return rules;
   }
 
   const data = sheet.getDataRange().getValues();
-  const headers = data.shift().map((h) => h.toLowerCase()); // Ambil header & ubah ke huruf kecil
+  // Ambil header dan normalisasikan: ubah ke huruf kecil, hapus semua spasi
+  const headers = data.shift().map((h) => h.toLowerCase().replace(/\s+/g, ""));
 
-  const rules = data.map((row) => {
+  data.forEach((row) => {
+    // Abaikan baris kosong
+    if (row.every((cell) => cell === "")) return;
+
     const rule = {};
     headers.forEach((header, index) => {
       const cellValue = row[index];
-      // Ubah string yang dipisahkan koma menjadi array yang sudah di-trim
+      // Gunakan header yang sudah dinormalisasi sebagai kunci
       if (typeof cellValue === "string" && cellValue.includes(",")) {
-        rule[header] = cellValue.split(",").map((item) => item.trim());
+        rule[header] = cellValue
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
       } else {
         rule[header] = cellValue;
       }
     });
-    return rule;
+    rules.push(rule);
   });
 
   return rules;
+}
+
+/**
+ * [FINAL v3.0.2] Membaca kebijakan overcommit dinamis dari sheet "Kebijakan Overcommit Cluster".
+ * Versi ini juga menerapkan normalisasi header yang konsisten.
+ */
+function bacaKebijakanCluster() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KONSTANTA.NAMA_SHEET.KEBIJAKAN_OVERCOMMIT_CLUSTER);
+  const policies = new Map();
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    console.error("Sheet 'Kebijakan Overcommit Cluster' tidak ditemukan atau kosong.");
+    return policies;
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data.shift().map((h) => h.toLowerCase().replace(/\s+/g, "")); // Normalisasi header
+
+  const clusterNameIndex = headers.indexOf("clustername");
+  if (clusterNameIndex === -1) {
+    console.error("Header 'Cluster Name' tidak ditemukan di sheet Kebijakan.");
+    return policies;
+  }
+
+  data.forEach((row) => {
+    const clusterName = row[clusterNameIndex];
+    if (clusterName) {
+      const policy = {};
+      headers.forEach((header, index) => {
+        policy[header] = row[index];
+      });
+      policies.set(clusterName, policy);
+    }
+  });
+
+  return policies;
 }
 
 /**
