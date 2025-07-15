@@ -88,6 +88,7 @@ function bacaKonfigurasi() {
     const properties = PropertiesService.getScriptProperties();
     config.TELEGRAM_BOT_TOKEN = properties.getProperty("TELEGRAM_BOT_TOKEN");
     config.WEBHOOK_BOT_TOKEN = properties.getProperty("WEBHOOK_BOT_TOKEN");
+    config.ENVIRONMENT = properties.getProperty("ENVIRONMENT");
 
     if (!config.TELEGRAM_BOT_TOKEN || !config.WEBHOOK_BOT_TOKEN) {
       throw new Error("Token bot tidak ditemukan di PropertiesService.");

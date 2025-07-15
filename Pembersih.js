@@ -39,8 +39,8 @@ function bersihkanFileEksporTua(config) {
 }
 
 /**
- * [BARU v1.6.0] FUNGSI PENGARSIPAN UTAMA UNTUK LOG STORAGE
- * Memindahkan log storage lama ke file JSON dan membersihkan sheet.
+ * [FUNGSI BARU v1.7.0 - DENGAN INDEXING] Mengarsipkan log storage ke file JSON
+ * dan mengelola file indeks untuk pencarian yang efisien.
  * @param {object} config - Objek konfigurasi bot.
  * @returns {string} Pesan hasil proses pengarsipan.
  */
@@ -55,7 +55,7 @@ function jalankanPengarsipanLogStorageKeJson(config) {
 
   const FOLDER_ARSIP_ID = config[KONSTANTA.KUNCI_KONFIG.FOLDER_ID_ARSIP_LOG_STORAGE];
   if (!FOLDER_ARSIP_ID) {
-    throw new Error("Folder ID untuk arsip log storage belum diatur di Konfigurasi.");
+    throw new Error("Folder ID untuk arsip log storage (FOLDER_ID_ARSIP_LOG_STORAGE) belum diatur di Konfigurasi.");
   }
   const folderArsip = DriveApp.getFolderById(FOLDER_ARSIP_ID);
 
@@ -67,7 +67,18 @@ function jalankanPengarsipanLogStorageKeJson(config) {
     return `ℹ️ Tidak ada baris data di "${sheetName}" untuk diarsipkan.`;
   }
 
-  // Ubah data menjadi format objek JSON
+  // --- LOGIKA INDEXING BARU DIMULAI DI SINI ---
+  const timestampIndex = headers.indexOf("Timestamp");
+  if (timestampIndex === -1) {
+    throw new Error("Kolom 'Timestamp' tidak ditemukan di header log storage. Tidak dapat melanjutkan pengarsipan.");
+  }
+
+  // Tentukan rentang tanggal dari data yang akan diarsipkan
+  const timestamps = allLogData.map((row) => new Date(row[timestampIndex])).filter((d) => !isNaN(d.getTime()));
+  const logStartDate = new Date(Math.min.apply(null, timestamps));
+  const logEndDate = new Date(Math.max.apply(null, timestamps));
+  // --- AKHIR LOGIKA INDEXING BARU ---
+
   const jsonData = allLogData.map((row) => {
     const obj = {};
     headers.forEach((header, index) => {
@@ -83,6 +94,35 @@ function jalankanPengarsipanLogStorageKeJson(config) {
     const jsonString = JSON.stringify(jsonData, null, 2);
 
     folderArsip.createFile(namaFileArsip, jsonString, MimeType.PLAIN_TEXT);
+
+    // --- MANAJEMEN FILE INDEX BARU ---
+    const indexFileName = "archive_log_storage_index.json";
+    let indexData = [];
+    const indexFiles = folderArsip.getFilesByName(indexFileName);
+
+    if (indexFiles.hasNext()) {
+      const indexFile = indexFiles.next();
+      try {
+        indexData = JSON.parse(indexFile.getBlob().getDataAsString());
+      } catch (e) {
+        console.warn(`Gagal parse file indeks storage, akan membuat yang baru. Error: ${e.message}`);
+        indexData = [];
+      }
+      indexFile.setTrashed(true); // Hapus file index lama
+    }
+
+    // Tambahkan entri baru ke data index
+    indexData.push({
+      fileName: namaFileArsip,
+      startDate: logStartDate.toISOString(),
+      endDate: logEndDate.toISOString(),
+      recordCount: allLogData.length,
+    });
+
+    // Buat file index yang baru dengan data yang sudah diperbarui
+    folderArsip.createFile(indexFileName, JSON.stringify(indexData, null, 2), MimeType.PLAIN_TEXT);
+    console.log(`File indeks "${indexFileName}" telah diperbarui.`);
+    // --- AKHIR MANAJEMEN FILE INDEX ---
 
     // Hapus semua data kecuali baris header
     sheetLog.getRange(2, 1, sheetLog.getLastRow() - 1, sheetLog.getLastColumn()).clearContent();

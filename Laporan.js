@@ -746,15 +746,3 @@ function generateStorageUtilizationReport(config) {
 
   return reportMessage;
 }
-
-/**
- * [FINAL v3.3.1] Membuat progress bar visual berbasis teks.
- * Tidak ada perubahan pada fungsi ini, namun disertakan untuk kelengkapan.
- */
-function createProgressBar(percentage, barLength = 10) {
-  const filledCount = Math.round((percentage / 100) * barLength);
-  const emptyCount = barLength - filledCount;
-  const filledPart = "█".repeat(filledCount);
-  const emptyPart = "░".repeat(emptyCount);
-  return `[${filledPart}${emptyPart}]`;
-}

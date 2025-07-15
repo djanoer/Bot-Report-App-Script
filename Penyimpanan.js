@@ -181,8 +181,8 @@ function countDatastoresForStorage(storageReportName, config) {
 }
 
 /**
- * [BARU v3.2.0] Menggabungkan data dari sheet "Log Storage Historis" aktif
- * dengan semua file arsip JSON yang relevan.
+ * [REVISI v3.3.0 - DENGAN INDEXING] Menggabungkan data dari sheet "Log Storage Historis" aktif
+ * dengan file arsip JSON yang relevan menggunakan file index untuk efisiensi.
  * @param {object} config - Objek konfigurasi bot.
  * @param {number} days - Jumlah hari ke belakang untuk diambil datanya.
  * @returns {object} Objek berisi { headers: Array, data: Array }.
@@ -191,49 +191,63 @@ function getCombinedStorageLogs(config, days = 30) {
   const allLogs = [];
   const K = KONSTANTA.KUNCI_KONFIG;
   const sheetName = "Log Storage Historis";
-
-  // 1. Baca data dari sheet aktif
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
   let headers = [];
+
+  // Tentukan rentang tanggal pencarian
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  // 1. Baca data dari sheet aktif yang pasti relevan
   if (sheet && sheet.getLastRow() > 1) {
     const data = sheet.getDataRange().getValues();
-    headers = data.shift(); // Ambil header
+    headers = data.shift();
     allLogs.push(...data);
   } else if (sheet) {
     headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   }
 
-  // 2. Baca data dari file arsip
-  const folderId = config[K.FOLDER_ID_ARSIP_LOG_STORAGE];
-  if (folderId) {
-    try {
-      const folder = DriveApp.getFolderById(folderId);
-      const files = folder.getFilesByType(MimeType.PLAIN_TEXT);
-      while (files.hasNext()) {
-        const file = files.next();
-        if (file.getName().startsWith("Arsip_Log_Storage")) {
-          const content = file.getBlob().getDataAsString();
-          const archivedData = JSON.parse(content);
-          // Ubah dari array objek menjadi array array
-          const dataAsArray = archivedData.map((obj) => headers.map((header) => obj[header]));
-          allLogs.push(...dataAsArray);
-        }
-      }
-    } catch (e) {
-      console.error(`Gagal membaca arsip log storage: ${e.message}`);
-    }
-  }
-
-  // 3. Filter data berdasarkan rentang tanggal
   const timestampIndex = headers.indexOf("Timestamp");
-  if (timestampIndex === -1) {
-    console.error("Header 'Timestamp' tidak ditemukan di log storage.");
+  if (timestampIndex === -1 && allLogs.length === 0) {
+    console.error("Header 'Timestamp' tidak ditemukan dan tidak ada data aktif. Proses ambil log dihentikan.");
     return { headers: headers, data: [] };
   }
 
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
+  // 2. Baca data dari file arsip menggunakan index
+  const folderId = config[K.FOLDER_ID_ARSIP_LOG_STORAGE];
+  if (folderId && headers.length > 0) {
+    try {
+      const folder = DriveApp.getFolderById(folderId);
+      const indexFiles = folder.getFilesByName("archive_log_storage_index.json");
 
+      if (indexFiles.hasNext()) {
+        const indexFile = indexFiles.next();
+        const indexData = JSON.parse(indexFile.getBlob().getDataAsString());
+
+        // Filter index untuk menemukan file arsip yang relevan
+        for (const indexEntry of indexData) {
+          const archiveEndDate = new Date(indexEntry.endDate);
+          // Hanya buka file jika rentang waktunya bersinggungan dengan yang kita cari
+          if (archiveEndDate >= startDate) {
+            const archiveFiles = folder.getFilesByName(indexEntry.fileName);
+            if (archiveFiles.hasNext()) {
+              const file = archiveFiles.next();
+              const content = file.getBlob().getDataAsString();
+              const archivedData = JSON.parse(content);
+              // Ubah dari array objek menjadi array array
+              const dataAsArray = archivedData.map((obj) => headers.map((header) => obj[header]));
+              allLogs.push(...dataAsArray);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`Gagal membaca arsip log storage menggunakan index: ${e.message}`);
+    }
+  }
+
+  // 3. Filter semua data gabungan berdasarkan rentang tanggal yang tepat
   const filteredLogs = allLogs.filter((row) => {
     const timestamp = new Date(row[timestampIndex]);
     return timestamp >= startDate;

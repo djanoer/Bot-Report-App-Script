@@ -44,7 +44,8 @@ function callTelegramApi(method, payloadData, config) {
 function setWebhook() {
   const config = bacaKonfigurasi();
   const webAppUrlBase =
-    "https://script.google.com/macros/s/AKfycbxi7QjJafg6Zp8NfW6QDcdixlq-ing7Iy5cie-rUNSQCVkoUNuwa86wpPoQq4bEJjV7/exec";
+    "https://script.google.com/macros/s/AKfycbwsqpb7UdR27t9T14YUmSsfG2ZhlybikXH7hvrQRwpWAp64YA5vYp_24DPIwxltsdhC/exec";
+  //const webAppUrlBase = "https://script.google.com/macros/s/AKfycbwsqpb7UdR27t9T14YUmSsfG2ZhlybikXH7hvrQRwpWAp64YA5vYp_24DPIwxltsdhC/exec";
   if (webAppUrlBase.includes("MASUKKAN")) {
     SpreadsheetApp.getUi().alert("Harap masukkan URL Web App Anda di dalam fungsi setWebhook sebelum menjalankannya.");
     return;
@@ -62,13 +63,47 @@ function setWebhook() {
 }
 
 /**
+ * [FUNGSI BARU] Menghapus webhook yang sedang aktif di Telegram
+ * dengan mengirimkan parameter URL kosong.
+ */
+function hapusWebhook() {
+  // Fungsi ini akan menggunakan konfigurasi dari lingkungan skrip yang sedang aktif
+  const config = bacaKonfigurasi();
+
+  console.log("Memulai proses penghapusan webhook...");
+
+  // Memanggil API Telegram dengan method 'setWebhook' dan URL kosong
+  const response = callTelegramApi("setWebhook", { url: "" }, config);
+
+  if (response && response.ok) {
+    const successMsg = "Webhook telah berhasil dihapus dari server Telegram.";
+    console.log(successMsg, response);
+    // Menampilkan notifikasi pop-up di Spreadsheet
+    showUiFeedback("Sukses!", successMsg);
+  } else {
+    const errorMsg = "Gagal menghapus webhook.";
+    console.error(errorMsg, response);
+    showUiFeedback("Gagal!", `${errorMsg} Silakan periksa log eksekusi untuk detail.`);
+  }
+}
+
+/**
  * [OPTIMALISASI UX] Mengirim pesan ke Telegram dengan penanganan batas panjang pesan.
  * Fungsi ini sekarang mengembalikan objek respons dari Telegram, yang berisi message_id.
  * @returns {object|null} Objek respons dari pesan terakhir yang dikirim, atau null jika gagal.
  */
 function kirimPesanTelegram(teksPesan, config, parseMode = "HTML", inlineKeyboard = null, targetChatId = null) {
   const TELEGRAM_MESSAGE_LIMIT = 4096;
-  const chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID);
+  let chatTujuan;
+
+  // Logika Pemilih Otomatis
+  if (config.ENVIRONMENT === "DEV") {
+    // Jika di DEV, selalu gunakan chat ID DEV
+    chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID_DEV);
+  } else {
+    // Jika di PROD (atau lingkungan lain), gunakan chat ID utama
+    chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID);
+  }
 
   if (!chatTujuan) {
     console.error("ID Chat tujuan tidak valid.");

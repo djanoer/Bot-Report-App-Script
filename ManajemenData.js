@@ -1664,7 +1664,7 @@ function jalankanPengarsipanLogKeJson(config) {
     return "ℹ️ Tidak ada baris data log setelah header. Pengarsipan dibatalkan.";
   }
 
-  const timestampIndex = headers.indexOf(KONSTANTA.HEADER_LOG.TIMESTAMP);
+  const timestampIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_LOG_TIMESTAMP]);
   if (timestampIndex === -1) {
     throw new Error("Kolom 'Timestamp' tidak ditemukan di header log. Tidak dapat melanjutkan pengarsipan.");
   }
@@ -1948,7 +1948,11 @@ function diagnoseOverprovisioningCause(dsName, config) {
 }
 
 /**
- * [REFACTORED v3.5.0] Mencari semua VM yang berada di dalam cluster tertentu.
+ * [REFACTORED v5.2.0 - BULK DATA READ] Mencari semua VM dalam sebuah cluster
+ * dengan membaca seluruh data sekali lalu menyaring di memori untuk performa maksimal.
+ * @param {string} clusterName - Nama cluster yang akan dicari.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {{headers: Array<string>, results: Array<Array<any>>}} Objek berisi header dan baris data VM yang cocok.
  */
 function searchVmsByCluster(clusterName, config) {
   const K = KONSTANTA.KUNCI_KONFIG;
@@ -1960,17 +1964,25 @@ function searchVmsByCluster(clusterName, config) {
     throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
   }
 
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  // --- OPTIMASI UTAMA ---
+  // 1. Baca SELURUH data dari sheet dalam SATU KALI panggilan.
+  const allDataWithHeaders = sheet.getDataRange().getValues();
+  const headers = allDataWithHeaders.shift(); // Ambil header, sisa datanya di allDataWithHeaders
+  const allData = allDataWithHeaders;
+  // --- AKHIR OPTIMASI ---
+
   const clusterHeaderName = config[K.HEADER_VM_CLUSTER];
   const clusterIndex = headers.indexOf(clusterHeaderName);
 
   if (clusterIndex === -1) {
-    throw new Error(`Kolom header penting "${clusterHeaderName}" tidak ditemukan di sheet "${sheetName}".`);
+    throw new Error(`Kolom header untuk cluster ("${clusterHeaderName}") tidak ditemukan di sheet "${sheetName}".`);
   }
 
-  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-
-  const results = allData.filter((row) => String(row[clusterIndex] || "").toLowerCase() === clusterName.toLowerCase());
+  // 2. Lakukan penyaringan di dalam memori, yang sangat cepat.
+  const results = allData.filter((row) => {
+    // Memastikan perbandingan case-insensitive untuk hasil yang lebih andal
+    return String(row[clusterIndex] || "").toLowerCase() === clusterName.toLowerCase();
+  });
 
   return { headers, results };
 }

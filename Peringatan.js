@@ -1,182 +1,208 @@
 // ===== FILE: Peringatan.gs =====
 
 /**
- * [v1.1.0] Menjadi orkestrator pemeriksaan dengan pola Data Dependency Injection.
- * @param {object} config - Objek konfigurasi.
- * @param {boolean} kirimNotifikasi - (Opsional) Set ke false untuk menonaktifkan pengiriman pesan.
- * @param {object} dsData - (Opsional) Objek data datastore dari _getSheetData.
- * @param {object} vmData - (Opsional) Objek data VM dari _getSheetData.
- * @returns {Array} Array berisi objek peringatan.
+ * [FINAL v4.0.0] Menjalankan pemeriksaan dan menghasilkan laporan hibrida cerdas.
+ * - Selalu menampilkan detail peringatan datastore.
+ * - Meringkas peringatan VM jika jumlahnya banyak.
+ * - Menyediakan tombol ekspor opsional untuk detail VM.
+ * @param {object} config - Objek konfigurasi bot yang aktif.
+ * @returns {object} Objek berisi { pesan: string, keyboard: object | null }
  */
-function jalankanPemeriksaanAmbangBatas(config = null, kirimNotifikasi = true, dsData = null, vmData = null) {
-  const activeConfig = config || bacaKonfigurasi();
+function jalankanPemeriksaanAmbangBatas(config) {
   console.log("Memulai pemeriksaan ambang batas sistem...");
 
-  // Ambil data hanya jika tidak disediakan sebagai argumen
-  const dsSheetData = dsData || _getSheetData(activeConfig[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
-  const vmSheetData = vmData || _getSheetData(activeConfig[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
-
   try {
-    let semuaPeringatan = [];
-    // "Suntikkan" data yang sudah diambil sebagai argumen ke fungsi-fungsi di bawah
-    semuaPeringatan.push(...cekKapasitasDatastore(activeConfig, dsSheetData.headers, dsSheetData.dataRows));
-    semuaPeringatan.push(...cekUptimeVmKritis(activeConfig, vmSheetData.headers, vmSheetData.dataRows));
-    semuaPeringatan.push(...cekVmKritisMati(activeConfig, vmSheetData.headers, vmSheetData.dataRows));
+    const dsSheetData = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
+    const vmSheetData = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
 
-    if (kirimNotifikasi) {
-      if (semuaPeringatan.length > 0) {
-        const BATAS_PESAN_DETAIL = 20;
+    // 1. Jalankan semua pemeriksaan secara terpisah
+    const dsAlerts = cekKapasitasDatastore(config, dsSheetData.headers, dsSheetData.dataRows);
+    const uptimeAlerts = cekUptimeVmKritis(config, vmSheetData.headers, vmSheetData.dataRows);
+    const vmMatiAlerts = cekVmKritisMati(config, vmSheetData.headers, vmSheetData.dataRows);
 
-        if (semuaPeringatan.length > BATAS_PESAN_DETAIL) {
-          const counts = { datastore: 0, uptime: { total: 0, byCrit: {} }, vmMati: { total: 0, byCrit: {} } };
-          const dataUntukEkspor = [];
-          const headers = ["Tipe Peringatan", "Item yang Diperiksa", "Detail", "Kritikalitas"];
-          const dsAlerts = semuaPeringatan.filter((alert) => alert.tipe.includes("Kapasitas Datastore"));
-          counts.datastore = dsAlerts.length;
+    const semuaPeringatan = [...dsAlerts, ...uptimeAlerts, ...vmMatiAlerts];
 
-          semuaPeringatan.forEach((alert) => {
-            if (!alert.tipe.includes("Kapasitas Datastore")) {
-              if (alert.tipe.includes("Uptime VM")) {
-                counts.uptime.total++;
-                const crit = alert.kritikalitas || "Lainnya";
-                counts.uptime.byCrit[crit] = (counts.uptime.byCrit[crit] || 0) + 1;
-              } else if (alert.tipe.includes("VM Kritis")) {
-                counts.vmMati.total++;
-                const crit = alert.kritikalitas || "Lainnya";
-                counts.vmMati.byCrit[crit] = (counts.vmMati.byCrit[crit] || 0) + 1;
-              }
-            }
-            dataUntukEkspor.push([alert.tipe, alert.item, alert.detailRaw, alert.kritikalitas || "N/A"]);
+    if (semuaPeringatan.length === 0) {
+      return {
+        pesan:
+          "✅  <b>Kondisi Sistem: Aman</b>\n<i>Tidak ada anomali yang terdeteksi pada semua sistem yang dipantau.</i>",
+        keyboard: null,
+      };
+    }
+
+    // 2. Mulai menyusun pesan laporan
+    let finalMessage = `🚨 <b>Laporan Kondisi Sistem</b> 🚨\n`;
+    finalMessage += `<i>Analisis dijalankan pada: ${new Date().toLocaleString("id-ID", {
+      dateStyle: "short",
+      timeStyle: "long",
+    })}</i>\n`;
+    finalMessage += `\nTeridentifikasi total <b>${semuaPeringatan.length}</b> item yang memerlukan tinjauan.\n`;
+
+    // 3. Bagian Peringatan Datastore (Selalu ditampilkan secara detail)
+    if (dsAlerts.length > 0) {
+      finalMessage += "\n<b>Peringatan Datastore:</b>\n";
+      const formattedDsAlerts = dsAlerts.map((alert) => {
+        return `${alert.icon} <b>Item:</b> <code>${escapeHtml(alert.item)}</code>\n${alert.detailFormatted}`;
+      });
+      finalMessage += formattedDsAlerts.join("\n\n");
+    } else {
+      finalMessage += "\n<b>Peringatan Datastore:</b>\n✅ Tidak ada peringatan terkait datastore.\n";
+    }
+
+    // 4. Bagian Peringatan VM (Selalu diringkas)
+    const vmAlerts = [...uptimeAlerts, ...vmMatiAlerts];
+    let keyboard = null;
+
+    if (vmAlerts.length > 0) {
+      finalMessage += `\n\n------------------------------------\n\n`;
+      finalMessage += `<b>Ringkasan Peringatan VM:</b>\n`;
+
+      const uptimeByCrit = uptimeAlerts.reduce((acc, alert) => {
+        const crit = alert.kritikalitas || "Lainnya";
+        acc[crit] = (acc[crit] || 0) + 1;
+        return acc;
+      }, {});
+      const matiByCrit = vmMatiAlerts.reduce((acc, alert) => {
+        const crit = alert.kritikalitas || "Lainnya";
+        acc[crit] = (acc[crit] || 0) + 1;
+        return acc;
+      }, {});
+
+      const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+      const sortCrit = (a, b) => (skorKritikalitas[b.toUpperCase()] || 0) - (skorKritikalitas[a.toUpperCase()] || 0);
+
+      if (uptimeAlerts.length > 0) {
+        finalMessage += `\n• 💡 <b>Uptime > ${config[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME]} hari:</b> ${
+          uptimeAlerts.length
+        } VM\n`;
+        Object.keys(uptimeByCrit)
+          .sort(sortCrit)
+          .forEach((crit) => {
+            finalMessage += `  - ${escapeHtml(crit)}: ${uptimeByCrit[crit]}\n`;
           });
-
-          const dsThreshold = activeConfig[KONSTANTA.KUNCI_KONFIG.THRESHOLD_DS_USED] || "N/A";
-          const uptimeThreshold = activeConfig[KONSTANTA.KUNCI_KONFIG.THRESHOLD_VM_UPTIME] || "N/A";
-
-          let ringkasanPesan = `🚨 <b>Laporan Kondisi Sistem</b> 🚨\n`;
-          ringkasanPesan += `<i>Analisis dijalankan pada: ${new Date().toLocaleString("id-ID")}</i>\n\n`;
-          ringkasanPesan += `Teridentifikasi total <b>${semuaPeringatan.length}</b> item yang memerlukan tinjauan. Detail lengkap telah diekspor ke dalam file Google Sheet.\n\n`;
-          ringkasanPesan += `<b>Ringkasan Peringatan:</b>\n\n`;
-
-          ringkasanPesan += `• 🔥 <b>Kapasitas Datastore Melebihi Ambang Batas (>${dsThreshold}%):</b> <code>${counts.datastore}</code>\n`;
-          if (dsAlerts.length > 0) {
-            const MAX_DS_TO_SHOW = 3;
-            for (let i = 0; i < Math.min(dsAlerts.length, MAX_DS_TO_SHOW); i++) {
-              const alert = dsAlerts[i];
-              const usage = alert.detailRaw.split(",")[0].split(":")[1].trim();
-              ringkasanPesan += `  - <code>${escapeHtml(alert.item)}</code> (${usage})\n`;
-            }
-            if (dsAlerts.length > MAX_DS_TO_SHOW) {
-              ringkasanPesan += `  - <i>... dan ${dsAlerts.length - MAX_DS_TO_SHOW} lainnya.</i>\n`;
-            }
-            ringkasanPesan += `  └ <i>Jalankan <code>/migrasicheck</code> untuk mendapatkan rekomendasi perbaikan.</i>\n`;
-          }
-
-          const skorKritikalitas = activeConfig[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
-          const sortCrit = (a, b) =>
-            (skorKritikalitas[b.toUpperCase()] || 0) - (skorKritikalitas[a.toUpperCase()] || 0);
-
-          ringkasanPesan += `\n• 💡 <b>Uptime VM Melebihi Batas Operasional (>${uptimeThreshold} hari):</b> <code>${counts.uptime.total}</code>\n`;
-          if (counts.uptime.total > 0) {
-            Object.keys(counts.uptime.byCrit)
-              .sort(sortCrit)
-              .forEach((crit) => {
-                ringkasanPesan += `  - ${escapeHtml(crit)}: ${counts.uptime.byCrit[crit]}\n`;
-              });
-          }
-
-          ringkasanPesan += `\n• ❗️ <b>VM Kritis Dalam Status Non-Aktif:</b> <code>${counts.vmMati.total}</code>\n`;
-          if (counts.vmMati.total > 0) {
-            Object.keys(counts.vmMati.byCrit)
-              .sort(sortCrit)
-              .forEach((crit) => {
-                ringkasanPesan += `  - ${escapeHtml(crit)}: ${counts.vmMati.byCrit[crit]}\n`;
-              });
-          }
-
-          kirimPesanTelegram(ringkasanPesan, activeConfig, "HTML");
-          exportResultsToSheet(
-            headers,
-            dataUntukEkspor,
-            "Laporan Detail Kondisi Sistem",
-            activeConfig,
-            null,
-            "Kritikalitas"
-          );
-        } else {
-          let pesanDetail = `🚨 <b>Laporan Kondisi Sistem</b> 🚨\n`;
-          pesanDetail += `<i>Teridentifikasi ${semuaPeringatan.length} item yang memerlukan tinjauan:</i>\n`;
-
-          const formattedAlerts = semuaPeringatan.map((alert) => {
-            let alertMessage = `${alert.icon} <b>${alert.tipe}</b>\n • <b>Item:</b> <code>${escapeHtml(
-              alert.item
-            )}</code>\n • <b>Detail:</b> ${alert.detailFormatted}`;
-            if (alert.kritikalitas) {
-              alertMessage += `\n • <b>Kritikalitas:</b> <i>${escapeHtml(alert.kritikalitas)}</i>`;
-            }
-            return alertMessage;
-          });
-          pesanDetail += "\n" + formattedAlerts.join("\n\n");
-
-          const dsAlertsDetail = semuaPeringatan.filter((alert) => alert.tipe.includes("Kapasitas Datastore"));
-          if (dsAlertsDetail.length > 0) {
-            pesanDetail += `\n\n<i>Jalankan <code>/migrasicheck</code> untuk mendapatkan rekomendasi perbaikan.</i>`;
-          }
-
-          kirimPesanTelegram(pesanDetail, activeConfig, "HTML");
-        }
-      } else {
-        const pesanAman =
-          "✅  <b>Kondisi Sistem: Aman</b>\n<i>Tidak ada anomali yang terdeteksi pada semua sistem yang dipantau.</i>";
-        console.log("Semua sistem terpantau dalam batas aman.");
-        kirimPesanTelegram(pesanAman, activeConfig, "HTML");
       }
+      if (vmMatiAlerts.length > 0) {
+        finalMessage += `\n• ❗️ <b>VM Kritis Non-Aktif:</b> ${vmMatiAlerts.length} VM\n`;
+        Object.keys(matiByCrit)
+          .sort(sortCrit)
+          .forEach((crit) => {
+            finalMessage += `  - ${escapeHtml(crit)}: ${matiByCrit[crit]}\n`;
+          });
+      }
+
+      const sessionData = { exportType: "all_vm_alerts" };
+      const sessionId = createCallbackSession(sessionData, config);
+
+      keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: `📄 Ekspor Detail ${vmAlerts.length} Peringatan VM`,
+              callback_data: `${KONSTANTA.CALLBACK_KONDISI.EXPORT_VM}${sessionId}`,
+            },
+          ],
+        ],
+      };
     }
 
-    return semuaPeringatan;
-  } catch (e) {
-    console.error(`Gagal menjalankan pemeriksaan ambang batas: ${e.message}\nStack: ${e.stack}`);
-    if (kirimNotifikasi) {
-      kirimPesanTelegram(`⚠️ <b>Gagal Memeriksa Kondisi Sistem</b>\n<i>Error: ${e.message}</i>`, activeConfig, "HTML");
+    // 5. Tambahkan footer info jika ada datastore yang over-provisioned
+    const adaOverProvisioned = dsAlerts.some((alert) => alert.tipe.includes("Over-provisioned"));
+    if (adaOverProvisioned) {
+      finalMessage += `\n\n<i><b>Info:</b> Untuk datastore yang over-provisioned, gunakan <code>/migrasicheck</code> untuk mendapatkan rekomendasi perbaikan.</i>`;
     }
-    return [];
+
+    return { pesan: finalMessage, keyboard: keyboard };
+  } catch (e) {
+    console.error(`Gagal menjalankan pemeriksaan: ${e.message}\nStack: ${e.stack}`);
+    return { pesan: `⚠️ <b>Gagal Memeriksa Kondisi Sistem</b>\n<i>Error: ${e.message}</i>`, keyboard: null };
   }
 }
 
 /**
- * [REFACTOR v1.1.0] Fungsi ini sekarang murni, hanya memproses data yang diberikan.
- * Tidak ada lagi panggilan I/O di sini.
+ * [REVISI v4.2.0 - DENGAN INFO SELISIH & TB] Memeriksa kesehatan datastore dengan
+ * logika yang efisien dan menyertakan satuan TB.
  */
 function cekKapasitasDatastore(config, headers, dsData) {
   const K = KONSTANTA.KUNCI_KONFIG;
-  const threshold = parseInt(config[K.THRESHOLD_DS_USED], 10);
-  if (isNaN(threshold) || !dsData || dsData.length === 0) return [];
+  const usageThreshold = parseInt(config[K.THRESHOLD_DS_USED], 10);
+  if (isNaN(usageThreshold) || !dsData || !dsData.length === 0) return [];
 
-  const nameIndex = headers.indexOf(config[K.DS_NAME_HEADER]);
-  const usedPercentHeaderName = config[K.HEADER_DS_USED_PERCENT];
-  const usedPercentIndex = headers.indexOf(usedPercentHeaderName);
+  const dsNameIndex = headers.indexOf(config[K.DS_NAME_HEADER]);
+  const usedPercentIndex = headers.indexOf(config[K.HEADER_DS_USED_PERCENT]);
+  const capacityGbIndex = headers.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
+  const provisionedGbIndex = headers.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
+  const capacityTbIndex = headers.indexOf(config[K.HEADER_DS_CAPACITY_TB]);
+  const provisionedTbIndex = headers.indexOf(config[K.HEADER_DS_PROV_DS_TB]);
 
-  if (nameIndex === -1 || usedPercentIndex === -1) {
-    // [PERUBAHAN] Menggunakan `return` karena `throw` akan menghentikan seluruh eksekusi.
-    console.error(`Peringatan: Header penting untuk cek kapasitas datastore tidak ditemukan. Pengecekan dilewati.`);
+  if (
+    [dsNameIndex, usedPercentIndex, capacityGbIndex, provisionedGbIndex, capacityTbIndex, provisionedTbIndex].includes(
+      -1
+    )
+  ) {
+    console.error(
+      "Peringatan: Salah satu header penting (Name, Used%, Capacity/Provisioned GB/TB) untuk datastore tidak ditemukan."
+    );
     return [];
   }
 
   const alerts = [];
 
   dsData.forEach((row) => {
-    const usedPercent = parseFloat(row[usedPercentIndex]);
-    if (!isNaN(usedPercent) && usedPercent > threshold) {
-      const dsName = row[nameIndex];
+    const dsName = row[dsNameIndex];
+    if (!dsName) return;
+
+    const capacityGb = parseLocaleNumber(row[capacityGbIndex]);
+    const totalProvisionedGb = parseLocaleNumber(row[provisionedGbIndex]);
+    const capacityTb = parseLocaleNumber(row[capacityTbIndex]);
+    const totalProvisionedTb = parseLocaleNumber(row[provisionedTbIndex]);
+    const usedPercent = parseLocaleNumber(row[usedPercentIndex]);
+
+    const isOverProvisioned = totalProvisionedGb > capacityGb;
+    const isUsageHigh = usedPercent > usageThreshold;
+
+    if (isOverProvisioned || isUsageHigh) {
+      let detailLines = [];
+      let icon = "⚠️";
+      let alertType = "Datastore Health Warning";
+
+      const usedBar = createProgressBar(usedPercent);
+      detailLines.push(` • <b>Used Space:</b> ${usedPercent.toFixed(1)}% ${usedBar}`);
+
+      const provisionedPercent = capacityGb > 0 ? (totalProvisionedGb / capacityGb) * 100 : 0;
+      const provisionedBar = createProgressBar(provisionedPercent);
+      detailLines.push(` • <b>Provisioned:</b> ${provisionedPercent.toFixed(1)}% ${provisionedBar}`);
+
+      if (isOverProvisioned) {
+        const selisihGb = totalProvisionedGb - capacityGb;
+        detailLines.push(
+          `   └ ❗️ Over-provisioned by <b>${selisihGb.toFixed(0)} GB</b>. (${totalProvisionedGb.toFixed(
+            0
+          )} GB / ${totalProvisionedTb.toFixed(2)} TB allocated vs ${capacityGb.toFixed(0)} GB / ${capacityTb.toFixed(
+            2
+          )} TB capacity)`
+        );
+        alertType = "Datastore Over-provisioned";
+        icon = "🔥";
+      }
+      if (isUsageHigh) {
+        alertType = "Datastore Usage Critical";
+        icon = "🔥";
+      }
+      if (isOverProvisioned && isUsageHigh) {
+        alertType = "Datastore Usage & Provisioning Critical";
+      }
+
       alerts.push({
-        tipe: "Kapasitas Datastore Kritis",
+        tipe: alertType,
         item: dsName,
-        detailFormatted: `Kapasitas Terpakai: <b>${usedPercent.toFixed(1)}%</b> (Ambang Batas: ${threshold}%)`,
-        detailRaw: `Terpakai: ${usedPercent.toFixed(1)}%, Batas: ${threshold}%`,
-        icon: "🔥",
+        detailFormatted: detailLines.join("\n"),
+        detailRaw: `Used: ${usedPercent.toFixed(1)}%, Provisioned: ${provisionedPercent.toFixed(1)}%`,
+        icon: icon,
         kritikalitas: null,
       });
     }
   });
+
   return alerts;
 }
 

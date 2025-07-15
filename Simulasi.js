@@ -1,8 +1,9 @@
 // ===== FILE: Simulasi.gs =====
 
 /**
- * [BARU v1.2.1] Menjalankan simulasi cleanup pada sebuah cluster untuk mengidentifikasi
- * potensi penghematan sumber daya dari VM yang tidak terpakai atau mati.
+ * [REVISI v1.3.0 - DENGAN VALIDASI] Menjalankan simulasi cleanup pada sebuah cluster
+ * untuk mengidentifikasi potensi penghematan sumber daya dari VM yang tidak terpakai atau mati.
+ * Kini dilengkapi dengan validasi header untuk mencegah kegagalan senyap.
  * @param {string} clusterName - Nama cluster yang akan dianalisis.
  * @param {object} config - Objek konfigurasi bot.
  * @returns {string} Pesan hasil simulasi yang sudah diformat HTML.
@@ -15,25 +16,43 @@ function jalankanSimulasiCleanup(clusterName, config) {
     }
 
     const K = KONSTANTA.KUNCI_KONFIG;
-    const nameIndex = headers.indexOf(config[K.HEADER_VM_NAME]);
-    const stateIndex = headers.indexOf(config[K.HEADER_VM_STATE]);
-    const cpuIndex = headers.indexOf(config[K.HEADER_VM_CPU]);
-    const memoryIndex = headers.indexOf(config[K.HEADER_VM_MEMORY]);
-    const provGbIndex = headers.indexOf(config[K.HEADER_VM_PROV_GB]);
+
+    // --- BLOK VALIDASI HEADER BARU ---
+    const requiredHeaders = {
+      nameIndex: config[K.HEADER_VM_NAME],
+      stateIndex: config[K.HEADER_VM_STATE],
+      cpuIndex: config[K.HEADER_VM_CPU],
+      memoryIndex: config[K.HEADER_VM_MEMORY],
+      provGbIndex: config[K.HEADER_VM_PROV_GB],
+    };
+
+    const indices = {};
+    for (const key in requiredHeaders) {
+      const headerName = requiredHeaders[key];
+      indices[key] = headers.indexOf(headerName);
+      if (indices[key] === -1) {
+        // Membuat pesan error yang sangat spesifik
+        const configKeyName = Object.keys(K).find((k) => K[k] === headerName) || "TIDAK DIKETAHUI";
+        throw new Error(
+          `Header '${headerName}' tidak ditemukan. Periksa nilai untuk kunci '${configKeyName}' di sheet "Konfigurasi".`
+        );
+      }
+    }
+    // --- AKHIR BLOK VALIDASI ---
 
     const candidatesForCleanup = [];
     const totals = { cpu: 0, memory: 0, diskGb: 0 };
 
     vmsInCluster.forEach((vm) => {
-      const vmName = String(vm[nameIndex] || "").toLowerCase();
-      const vmState = String(vm[stateIndex] || "").toLowerCase();
+      const vmName = String(vm[indices.nameIndex] || "").toLowerCase();
+      const vmState = String(vm[indices.stateIndex] || "").toLowerCase();
 
       if (vmName.includes("unused") || vmName.includes("decom") || vmState.includes("off")) {
-        const cpu = parseInt(vm[cpuIndex], 10) || 0;
-        const memory = parseFloat(vm[memoryIndex]) || 0;
-        const diskGb = parseFloat(vm[provGbIndex]) || 0;
+        const cpu = parseInt(vm[indices.cpuIndex], 10) || 0;
+        const memory = parseFloat(vm[indices.memoryIndex]) || 0;
+        const diskGb = parseFloat(vm[indices.provGbIndex]) || 0;
 
-        candidatesForCleanup.push(vm[nameIndex]);
+        candidatesForCleanup.push(vm[indices.nameIndex]);
         totals.cpu += cpu;
         totals.memory += memory;
         totals.diskGb += diskGb;
@@ -57,7 +76,8 @@ function jalankanSimulasiCleanup(clusterName, config) {
     return message;
   } catch (e) {
     console.error(`Gagal menjalankan simulasi cleanup untuk cluster "${clusterName}". Error: ${e.message}`);
-    return `❌ Gagal menjalankan simulasi cleanup. Penyebab: ${e.message}`;
+    // Mengembalikan pesan error yang informatif ke pengguna
+    return `❌ Gagal menjalankan simulasi cleanup. Penyebab:\n<code>${escapeHtml(e.message)}</code>`;
   }
 }
 
@@ -145,5 +165,47 @@ function jalankanSimulasiMigrasi(sourceHost, config) {
   } catch (e) {
     console.error(`Gagal menjalankan simulasi migrasi dari host "${sourceHost}". Error: ${e.message}`);
     return `❌ Gagal menjalankan simulasi migrasi. Penyebab: ${e.message}`;
+  }
+}
+
+// ===== FUNGSI UJI COBA UNTUK DEBUGGING =====
+
+/**
+ * Jalankan fungsi ini langsung dari editor Apps Script untuk menguji
+ * dan melihat log debug dari fitur simulasi cleanup.
+ */
+function tesSimulasiCleanup_DariEditor() {
+  // --- KONFIGURASI PENGUJIAN ---
+  // Ganti nama cluster di bawah ini dengan nama cluster valid yang ada di data DEV Anda.
+  const NAMA_CLUSTER_UJI_COBA = "TBN-COM-LNV-CL01";
+  // -----------------------------
+
+  console.log(`[DEBUG] Memulai tes simulasi cleanup untuk cluster: "${NAMA_CLUSTER_UJI_COBA}"`);
+
+  try {
+    // Membaca konfigurasi, sama seperti yang dilakukan bot
+    const { config } = getBotState();
+    if (!config) {
+      console.error("[DEBUG] GAGAL: Tidak dapat membaca konfigurasi.");
+      return;
+    }
+    console.log("[DEBUG] Konfigurasi berhasil dibaca.");
+
+    // Memanggil fungsi simulasi yang sebenarnya
+    const hasilSimulasi = jalankanSimulasiCleanup(NAMA_CLUSTER_UJI_COBA, config);
+
+    // Menampilkan hasil akhir di log
+    console.log("------------------------------------------");
+    console.log("[DEBUG] HASIL AKHIR SIMULASI:");
+    console.log(hasilSimulasi);
+    console.log("------------------------------------------");
+    console.log(
+      "[DEBUG] Jika Anda melihat pesan ini, artinya seluruh fungsi berhasil dijalankan sampai selesai tanpa error."
+    );
+  } catch (e) {
+    // Menangkap dan menampilkan error apapun yang mungkin terjadi
+    console.error("[DEBUG] TERJADI ERROR KRITIS! Proses berhenti.");
+    console.error(`[DEBUG] Detail Error: ${e.message}`);
+    console.error(`[DEBUG] Stack Trace: ${e.stack}`);
   }
 }

@@ -82,6 +82,12 @@ const KONSTANTA = {
     BATAL: "reco_cancel",
   },
 
+  // Callback untuk Laporan Kondisi
+  CALLBACK_KONDISI: {
+    PREFIX: "kondisi_",
+    EXPORT_VM: "kondisi_export_vm_",
+  },
+
   // Aksi spesifik untuk pagination
   PAGINATION_ACTIONS: {
     NAVIGATE: "nav",
@@ -199,6 +205,7 @@ const KONSTANTA = {
     LOG_REPORT: "/log_report",
     REKOMENDASI_SETUP: "/rekomendasi_setup",
     CEK_STORAGE: "/cek_storage",
+    STATUS: "/status",
   },
 
   // String yang sering digunakan

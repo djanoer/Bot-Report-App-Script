@@ -102,40 +102,39 @@ const commandHandlers = {
   },
   [KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK]: (update, config) => {
     let statusMessageId = null;
+    const chatId = update.message.chat.id;
+
     try {
+      // Kirim pesan "tunggu" awal dan simpan ID-nya
       const sentMessage = kirimPesanTelegram(
         "🔬 Menganalisis rekomendasi migrasi datastore... Ini mungkin memerlukan beberapa saat.",
         config,
-        "HTML"
+        "HTML",
+        null,
+        chatId
       );
+
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
 
-      // Menangkap hasil laporan yang dikembalikan oleh fungsi
+      // Jalankan pekerjaan beratnya
       const laporanMigrasi = jalankanRekomendasiMigrasi();
 
-      // Mengirim laporan yang sebenarnya
-      kirimPesanTelegram(laporanMigrasi, config, "HTML");
-
+      // Edit pesan "tunggu" dengan hasil akhir
       if (statusMessageId) {
-        // Hapus pesan "Menganalisis..." karena laporan sudah dikirim
-        // Note: hapusPesanTelegram perlu dibuat jika belum ada, atau gunakan editMessageText
-        editMessageText(
-          "✅ Laporan analisis migrasi telah dikirimkan.",
-          null,
-          config.TELEGRAM_CHAT_ID,
-          statusMessageId,
-          config
-        );
+        editMessageText(laporanMigrasi, null, chatId, statusMessageId, config);
+      } else {
+        // Fallback jika pengiriman pesan awal gagal
+        kirimPesanTelegram(laporanMigrasi, config, "HTML", null, chatId);
       }
     } catch (e) {
       handleCentralizedError(e, "Perintah: /migrasicheck", config);
       if (statusMessageId) {
         editMessageText(
-          "❌ Gagal menjalankan analisis migrasi.",
+          `❌ Gagal menjalankan analisis migrasi.\n\nPenyebab: <code>${escapeHtml(e.message)}</code>`,
           null,
-          config.TELEGRAM_CHAT_ID,
+          chatId,
           statusMessageId,
           config
         );
@@ -196,32 +195,45 @@ const commandHandlers = {
   },
   [KONSTANTA.PERINTAH_BOT.ARSIPKAN_LOG]: (update, config) => {
     let statusMessageId = null;
+    const chatId = update.message.chat.id;
+
     try {
-      const sentMessage = kirimPesanTelegram("⏳ Memeriksa kondisi kedua log untuk pengarsipan...", config, "HTML");
+      // 1. Kirim pesan "sedang bekerja" dan simpan ID pesannya
+      const sentMessage = kirimPesanTelegram(
+        "⏳ Memulai proses pengarsipan... Ini mungkin memerlukan beberapa saat.",
+        config,
+        "HTML",
+        null,
+        chatId
+      );
+
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
 
-      // Jalankan pengarsipan untuk kedua jenis log
+      // 2. Jalankan pekerjaan beratnya secara langsung
       const resultLogPerubahan = cekDanArsipkanLogJikaPenuh(config);
       const resultLogStorage = cekDanArsipkanLogStorageJikaPenuh(config);
 
-      // Susun laporan gabungan
-      let finalReport = "<b>Laporan Status Pengarsipan Manual</b>\n\n";
-      finalReport += `• <b>Log Perubahan VM:</b>\n  └ <i>${resultLogPerubahan}</i>\n\n`;
+      // 3. Susun laporan hasil akhir
+      let finalReport = "<b>Laporan Hasil Pengarsipan Manual</b>\n\n";
+      finalReport += `• <b>Log Perubahan VM & DS:</b>\n  └ <i>${resultLogPerubahan}</i>\n\n`;
       finalReport += `• <b>Log Storage Historis:</b>\n  └ <i>${resultLogStorage}</i>`;
 
+      // 4. Edit pesan awal dengan laporan hasil akhir
       if (statusMessageId) {
-        editMessageText(finalReport, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        editMessageText(finalReport, null, chatId, statusMessageId, config);
       } else {
-        kirimPesanTelegram(finalReport, config, "HTML");
+        // Fallback jika pengiriman pesan awal gagal, kirim sebagai pesan baru
+        kirimPesanTelegram(finalReport, config, "HTML", null, chatId);
       }
     } catch (e) {
       const errorMessage = `🔴 Terjadi kesalahan kritis saat menjalankan pengarsipan: ${e.message}`;
+      // Jika terjadi error, edit pesan status untuk menampilkan error
       if (statusMessageId) {
-        editMessageText(errorMessage, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
+        editMessageText(errorMessage, null, chatId, statusMessageId, config);
       } else {
-        kirimPesanTelegram(errorMessage, config, "HTML");
+        handleCentralizedError(e, `Perintah: /arsipkanlog`, config);
       }
     }
   },
@@ -261,43 +273,36 @@ const commandHandlers = {
   },
   [KONSTANTA.PERINTAH_BOT.CEK_KONDISI]: (update, config) => {
     let statusMessageId = null;
+    const chatId = update.message.chat.id;
     try {
-      const sentMessage = kirimPesanTelegram("🔬 Memulai pemeriksaan kondisi sistem...", config, "HTML");
+      const sentMessage = kirimPesanTelegram("🔬 Memulai pemeriksaan kondisi sistem...", config, "HTML", null, chatId);
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
-      jalankanPemeriksaanAmbangBatas(config);
 
+      // Panggil fungsi analisis yang sekarang mengembalikan objek {pesan, keyboard}
+      const { pesan, keyboard } = jalankanPemeriksaanAmbangBatas(config);
+
+      // Edit pesan "tunggu" dengan laporan akhir dan tombolnya
       if (statusMessageId) {
-        editMessageText(
-          "✅ Pemeriksaan kondisi sistem selesai.",
-          null,
-          config.TELEGRAM_CHAT_ID,
-          statusMessageId,
-          config
-        );
+        editMessageText(pesan, keyboard, chatId, statusMessageId, config);
+      } else {
+        kirimPesanTelegram(pesan, config, "HTML", keyboard, chatId);
       }
     } catch (e) {
       handleCentralizedError(e, `Perintah: ${KONSTANTA.PERINTAH_BOT.CEK_KONDISI}`, config);
       if (statusMessageId) {
-        editMessageText(
-          "❌ Gagal menjalankan pemeriksaan kondisi.",
-          null,
-          config.TELEGRAM_CHAT_ID,
-          statusMessageId,
-          config
-        );
+        editMessageText("❌ Gagal menjalankan pemeriksaan kondisi.", null, chatId, statusMessageId, config);
       }
     }
   },
   [KONSTANTA.PERINTAH_BOT.INFO]: (update, config, userDataAuth) => kirimPesanInfo(config, userDataAuth),
   [KONSTANTA.PERINTAH_BOT.SIMULASI]: (update, config) => {
-    // Asumsikan kita akan menambahkannya di Konstanta.js
     const args = update.message.text.split(" ");
     const subCommand = (args[1] || "").toLowerCase();
     const parameter = args.slice(2).join(" ");
 
-    if (!subCommand || !parameter) {
+    if (!subCommand || !parameter || (subCommand !== "cleanup" && subCommand !== "migrasi")) {
       kirimPesanTelegram(
         "Format perintah tidak valid. Gunakan:\n" +
           "<code>/simulasi cleanup [nama_cluster]</code>\n" +
@@ -308,32 +313,30 @@ const commandHandlers = {
       return;
     }
 
-    let statusMessageId = null;
-    let resultMessage = "";
     try {
-      const sentMessage = kirimPesanTelegram("⏳ Menjalankan simulasi, harap tunggu...", config, "HTML");
-      if (sentMessage && sentMessage.ok) {
-        statusMessageId = sentMessage.result.message_id;
-      }
+      // Membuat "tiket tugas" untuk simulasi
+      const properties = PropertiesService.getScriptProperties();
+      const jobData = {
+        chatId: update.message.chat.id,
+        userId: update.message.from.id,
+        subCommand: subCommand,
+        parameter: parameter,
+        triggerTime: new Date().toISOString(),
+      };
 
-      if (subCommand === "cleanup") {
-        resultMessage = jalankanSimulasiCleanup(parameter, config);
-      } else if (subCommand === "migrasi") {
-        resultMessage = jalankanSimulasiMigrasi(parameter, config);
-      } else {
-        resultMessage = "Sub-perintah tidak dikenal. Gunakan `cleanup` atau `migrasi`.";
-      }
+      // Simpan tugas dengan kunci unik. Kita bisa menumpuk beberapa tugas.
+      const newJobKey = `PENDING_SIMULATION_JOB_${Date.now()}`;
+      properties.setProperty(newJobKey, JSON.stringify(jobData));
 
-      if (statusMessageId) {
-        editMessageText(resultMessage, null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
-      } else {
-        kirimPesanTelegram(resultMessage, config, "HTML");
-      }
+      // Kirim respons instan ke pengguna
+      kirimPesanTelegram(
+        `✅ Permintaan simulasi <b>${subCommand}</b> diterima.\n\n` +
+          "Proses kalkulasi berjalan di latar belakang. Anda akan menerima hasilnya dalam pesan terpisah sesaat lagi.",
+        config,
+        "HTML"
+      );
     } catch (e) {
-      handleCentralizedError(e, `Perintah /simulasi`, config);
-      if (statusMessageId) {
-        editMessageText("❌ Gagal menjalankan simulasi.", null, config.TELEGRAM_CHAT_ID, statusMessageId, config);
-      }
+      handleCentralizedError(e, `Perintah /simulasi (Membuat Tugas)`, config);
     }
   },
   [KONSTANTA.PERINTAH_BOT.GRAFIK]: (update, config) => {
@@ -446,6 +449,11 @@ const commandHandlers = {
         );
       }
     }
+  },
+  [KONSTANTA.PERINTAH_BOT.STATUS]: (update, config) => {
+    // Tambahkan blok ini
+    const pesanStatus = jalankanPemeriksaanKesehatan();
+    kirimPesanTelegram(pesanStatus, config, "HTML");
   },
 };
 
@@ -569,6 +577,43 @@ function doPost(e) {
             requirements.io = callbackData.replace(K_REKOMENDASI.PILIH_IO, "");
             // === PERBAIKAN URUTAN ARGUMEN ===
             tampilkanPertanyaanSpek(userId, messageId, chatId, config, requirements);
+          }
+        } else if (callbackData.startsWith(KONSTANTA.CALLBACK_KONDISI.PREFIX)) {
+          const sessionId = callbackData.replace(KONSTANTA.CALLBACK_KONDISI.EXPORT_VM, "");
+          const sessionData = getCallbackSession(sessionId, config);
+
+          if (sessionData && sessionData.exportType === "all_vm_alerts") {
+            answerCallbackQuery(callbackQueryId, config, "Memproses ekspor... Ini mungkin perlu waktu.");
+
+            // --- LOGIKA EKSPOR BARU ---
+            // Jalankan ulang pemeriksaan untuk mendapatkan data VM yang segar
+            const vmSheetData = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+            const uptimeAlerts = cekUptimeVmKritis(config, vmSheetData.headers, vmSheetData.dataRows);
+            const vmMatiAlerts = cekVmKritisMati(config, vmSheetData.headers, vmSheetData.dataRows);
+            const vmAlertsToExport = [...uptimeAlerts, ...vmMatiAlerts];
+
+            if (vmAlertsToExport.length > 0) {
+              const dataToExport = vmAlertsToExport.map((a) => [a.tipe, a.item, a.detailRaw, a.kritikalitas || "N/A"]);
+              exportResultsToSheet(
+                ["Tipe Peringatan", "Item", "Detail", "Kritikalitas"],
+                dataToExport,
+                "Laporan Detail Peringatan VM",
+                config,
+                userData, // Menggunakan data pengguna yang menekan tombol
+                "Kritikalitas"
+              );
+            } else {
+              kirimPesanTelegram(
+                "ℹ️ Tidak ada data peringatan VM untuk diekspor saat ini.",
+                config,
+                "HTML",
+                null,
+                chatId
+              );
+            }
+            // --- AKHIR LOGIKA EKSPOR BARU ---
+          } else {
+            answerCallbackQuery(callbackQueryId, config, "Sesi ekspor tidak valid atau telah kedaluwarsa.");
           }
         } else if (match) {
           const prefix = match[1];
@@ -911,6 +956,7 @@ function kirimPesanInfo(config, userData) {
     "⚙️ <b>Utilitas & Bantuan</b>\n" +
     `<code>${K.EXPORT}</code> - Buka menu ekspor data ke Google Sheet.\n` +
     `<code>${K.DAFTAR} [email]</code> - Minta hak akses untuk menggunakan bot.\n` +
+    `<code>${K.STATUS}</code> - Pemeriksaan kesehatan sistem bot.\n` +
     `<code>${K.INFO}</code> - Tampilkan pesan bantuan ini.`;
 
   const userRole = userData && userData.role ? userData.role.toLowerCase() : "user";
@@ -955,7 +1001,9 @@ function onOpen() {
         .createMenu("🛠️ Setup & Diagnostik")
         .addItem("Tes Koneksi ke Telegram", "tesKoneksiTelegram")
         .addItem("SETUP: Set Token (Interaktif)", "setupSimpanTokenInteraktif")
-        .addItem("SETUP: Set Webhook", "setWebhook")
+        .addItem("Hapus Webhook Saat Ini", "hapusWebhook")
+        .addSeparator() // Tambahkan pemisah agar rapi
+        .addItem("Jalankan Pengujian Unit", "jalankanSemuaTes")
     )
     .addToUi();
 }

@@ -655,3 +655,20 @@ function clearUserState(userId) {
   cache.remove(cacheKey);
   console.log(`State untuk pengguna ${userId} telah berhasil dihapus.`);
 }
+
+/**
+ * [REVISI v1.1.0 - ROBUST] Membuat progress bar visual berbasis teks.
+ * Kini mampu menangani nilai persentase negatif tanpa menyebabkan error.
+ */
+function createProgressBar(percentage, barLength = 10) {
+  // --- PERBAIKAN UTAMA DI SINI ---
+  // Memastikan persentase dibatasi antara 0 dan 100 sebelum kalkulasi.
+  const safePercentage = Math.max(0, Math.min(percentage, 100));
+  // --- AKHIR PERBAIKAN ---
+
+  const filledCount = Math.round((safePercentage / 100) * barLength);
+  const emptyCount = barLength - filledCount;
+  const filledPart = "█".repeat(filledCount);
+  const emptyPart = "░".repeat(emptyCount);
+  return `[${filledPart}${emptyPart}]`;
+}
