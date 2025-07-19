@@ -209,27 +209,36 @@ const KONSTANTA = {
 
   // Nama perintah bot
   PERINTAH_BOT: {
-    DAFTAR: '/daftar', 
-    LAPORAN: '/laporan', 
-    SYNC_LAPORAN: '/sync_laporan', 
-    PROVISIONING: '/provisioning', 
-    CEK_TIKET: '/cektiket', 
-    MIGRASI_CHECK: '/migrasicheck', 
-    EXPORT: '/export', 
-    CEK_VM: '/cekvm', 
-    HISTORY: '/history', 
-    CEK_HISTORY: '/cekhistory', 
-    ARSIPKAN_LOG: '/arsipkanlog', 
-    CLEAR_CACHE: '/clearcache', 
-    INFO: '/info',
-    DISTRIBUSI_VM: '/distribusi_vm',
-    CEK_KONDISI: '/cek_kondisi',
-    SIMULASI: '/simulasi',
-    GRAFIK: '/grafik',
-    LOG_REPORT: '/log_report',
-    REKOMENDASI_SETUP: '/rekomendasi_setup',
-    CEK_STORAGE: '/cek_storage',
+    // Laporan & Analisis
+    LAPORAN: "/laporan-harian",
+    PROVISIONING: "/laporan-provisioning",
+    DISTRIBUSI_VM: "/laporan-aset",
+    CEK_KONDISI: "/cek-kesehatan",
+    CEK_STORAGE: "/cek-storage",
+    MIGRASI_CHECK: "/cek-migrasi",
+
+    // Pencarian & Riwayat
+    CEK_VM: "/cari-vm",
+    HISTORY: "/riwayat-vm",
+    CEK_HISTORY: "/riwayat-hari-ini",
+    
+    // Interaktif & Aksi
+    CEK_TIKET: "/tiket-utilisasi",
+    REKOMENDASI_SETUP: "/setup-vm",
+    GRAFIK: "/grafik",
+    SIMULASI: "/simulasi",
+    LOG_REPORT: "/catat-laporan-storage",
+    
+    // Utilitas
+    EXPORT: "/menu-ekspor",
+    INFO: "/info",
     STATUS: "/status",
+    DAFTAR: "/daftar",
+
+    // Administratif
+    SYNC_LAPORAN: "/sync-data",
+    ARSIPKAN_LOG: "/jalankan-arsip",
+    CLEAR_CACHE: "/bersihkan-cache",
   },
 
   // String yang sering digunakan

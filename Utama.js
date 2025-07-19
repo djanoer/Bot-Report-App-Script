@@ -255,7 +255,9 @@ const commandHandlers = {
       }
     }
   },
-  [KONSTANTA.PERINTAH_BOT.INFO]: (update, config, userDataAuth) => kirimPesanInfo(config, userDataAuth),
+  [KONSTANTA.PERINTAH_BOT.INFO]: (update, config, userDataAuth) => {
+      kirimPesanInfo(update, config, userDataAuth);
+  },
   [KONSTANTA.PERINTAH_BOT.SIMULASI]: (update, config) => {
     const args = update.message.text.split(" ");
     const subCommand = (args[1] || "").toLowerCase();
@@ -699,39 +701,38 @@ function doPost(e) {
   }
 }
 
-
 /**
- * [FINAL v3.3.0] Mengirim pesan bantuan (/info) yang dinamis dan sadar peran.
- * Versi ini menambahkan perintah /cek_storage.
- * @param {object} config - Objek konfigurasi bot.
- * @param {object} userData - Objek data pengguna yang menjalankan perintah, berisi info peran.
+ * [REVISI FINAL] Mengirim pesan bantuan (/info) yang dinamis dan sadar peran.
+ * Versi ini sekarang menerima objek 'update' untuk memastikan pengiriman ke chat yang benar.
  */
-function kirimPesanInfo(config, userData) {
+function kirimPesanInfo(update, config, userData) {
   const K = KONSTANTA.PERINTAH_BOT;
+  const chatId = update.message.chat.id; // <-- Ambil chat ID yang benar
+
   let infoPesan =
     "<b>Bot Laporan Infrastruktur</b>\n\n" +
     "Berikut adalah daftar perintah yang tersedia:\n\n" +
     "📊 <b>Laporan & Analisis</b>\n" +
     `<code>${K.LAPORAN}</code> - Laporan operasional harian instan.\n` +
-    `<code>${K.CEK_KONDISI}</code> - Analisis kondisi & anomali sistem.\n` +
-    `<code>${K.CEK_STORAGE}</code> - Ringkasan utilisasi storage (visual).\n` +
-    `<code>${K.DISTRIBUSI_VM}</code> - Laporan distribusi aset VM.\n` +
     `<code>${K.PROVISIONING}</code> - Laporan detail alokasi sumber daya.\n` +
-    `<code>${K.GRAFIK}</code> - Tampilkan grafik visual distribusi aset.\n\n` +
-    "🔍 <b>Investigasi & Riwayat</b>\n" +
+    `<code>${K.DISTRIBUSI_VM}</code> - Laporan distribusi aset VM.\n` +
+    `<code>${K.CEK_KONDISI}</code> - Analisis kondisi & anomali sistem.\n` +
+    `<code>${K.CEK_STORAGE}</code> - Ringkasan utilisasi storage.\n` +
+    `<code>${K.MIGRASI_CHECK}</code> - Analisis & rekomendasi migrasi.\n\n` +
+    "🔍 <b>Pencarian & Riwayat</b>\n" +
     `<code>${K.CEK_VM} [Nama/IP/PK]</code> - Cari detail VM.\n` +
-    `<code>${K.CEK_HISTORY}</code> - Riwayat perubahan data hari ini.\n` +
-    `<code>${K.HISTORY} [PK]</code> - Lacak riwayat lengkap sebuah VM.\n\n` +
-    "🛠️ <b>Perencanaan & Operasional</b>\n" +
-    `<code>${K.REKOMENDASI_SETUP}</code> - Rekomendasi penempatan VM baru (terpandu).\n` +
-    `<code>${K.SIMULASI} [cleanup/migrasi]</code> - Jalankan skenario perencanaan.\n` +
+    `<code>${K.HISTORY} [PK]</code> - Lacak riwayat lengkap sebuah VM.\n` +
+    `<code>${K.CEK_HISTORY}</code> - Riwayat perubahan data hari ini.\n\n` +
+    "⚙️ <b>Interaktif & Aksi</b>\n" +
+    `<code>${K.REKOMENDASI_SETUP}</code> - Buka panduan untuk rekomendasi setup VM baru.\n` +
     `<code>${K.CEK_TIKET}</code> - Buka menu monitoring tiket.\n` +
-    `<code>${K.MIGRASI_CHECK}</code> - Analisis & rekomendasi migrasi.\n` +
+    `<code>${K.GRAFIK}</code> - Tampilkan grafik visual (misal: /grafik kritikalitas).\n` +
+    `<code>${K.SIMULASI} [cleanup/migrasi]</code> - Jalankan skenario perencanaan.\n` +
     `<code>${K.LOG_REPORT}</code> - (Reply) Catat laporan storage manual.\n\n` +
-    "⚙️ <b>Utilitas & Bantuan</b>\n" +
+    "🛠️ <b>Utilitas</b>\n" +
     `<code>${K.EXPORT}</code> - Buka menu ekspor data ke Google Sheet.\n` +
-    `<code>${K.DAFTAR} [email]</code> - Minta hak akses untuk menggunakan bot.\n` +
     `<code>${K.STATUS}</code> - Pemeriksaan kesehatan sistem bot.\n` +
+    `<code>${K.DAFTAR}</code> - Minta hak akses untuk menggunakan bot.\n` +
     `<code>${K.INFO}</code> - Tampilkan pesan bantuan ini.`;
 
   const userRole = userData && userData.role ? userData.role.toLowerCase() : "user";
@@ -744,7 +745,8 @@ function kirimPesanInfo(config, userData) {
       `<code>${K.CLEAR_CACHE}</code> - Bersihkan cache hak akses & konfigurasi.`;
   }
 
-  kirimPesanTelegram(infoPesan, config, "HTML");
+  // Kirim pesan ke chat ID yang benar
+  kirimPesanTelegram(infoPesan, config, "HTML", null, chatId);
 }
 
 /**
