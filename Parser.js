@@ -6,9 +6,9 @@
 function parseForwardedMessage(textBlock) {
   const lowerCaseText = textBlock.toLowerCase();
 
-  if (lowerCaseText.includes("hpe storage alletra")) {
+  if (lowerCaseText.includes('hpe storage alletra')) {
     return parseAlletraReport(textBlock);
-  } else if (lowerCaseText.includes("storage vsp e790")) {
+  } else if (lowerCaseText.includes('storage vsp e790')) {
     return parseVspReport(textBlock);
   }
   return null;
@@ -20,11 +20,11 @@ function parseForwardedMessage(textBlock) {
  */
 function parseAlletraReport(textBlock) {
   const data = {};
-
+  
   const extract = (regex) => {
     const match = textBlock.match(regex);
     if (!match) return null;
-    return { value: parseFloat(match[1].replace(/,/g, "")), unit: (match[2] || "").trim() };
+    return { value: parseFloat(match[1].replace(/,/g, '')), unit: (match[2] || '').trim() };
   };
 
   const nameMatch = textBlock.match(/MA-STORAGE\s*:\s*(HPE STORAGE ALLETRA \w+)/i);
@@ -47,16 +47,16 @@ function parseAlletraReport(textBlock) {
  */
 function parseVspReport(textBlock) {
   const data = {};
-
+  
   const extract = (regex) => {
     const match = textBlock.match(regex);
     if (!match) return null;
-    return { value: parseFloat(match[1].replace(/,/g, "")), unit: (match[2] || "").trim() };
+    return { value: parseFloat(match[1].replace(/,/g, '')), unit: (match[2] || '').trim() };
   };
-
+    
   const nameMatch = textBlock.match(/Storage (VSP E790 \w+)/i);
   if (nameMatch) data.storageName = nameMatch[1].trim();
-
+  
   data.usage = extract(/Pool Used\s*:\s*([\d.]+)\s*(TiB)/i);
   data.iops = extract(/IOPS\s*:\s*([\d,]+)\s*(Operations\/s)/i);
   data.throughput = extract(/Bandwidth\s*:\s*([\d.]+)\s*(GiB\/s)/i);

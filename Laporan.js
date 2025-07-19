@@ -233,15 +233,14 @@ function buatLaporanPeriodik(periode) {
 }
 
 /**
- * [FINAL & STABIL - REFACTORED v3.5.0] Menyusun laporan provisioning dengan membaca header dari Konfigurasi.
+ * [REFACTOR FINAL] Menyusun laporan provisioning.
+ * Fungsi ini sekarang menerima data VM sebagai parameter.
  */
-function generateProvisioningReport(config) {
+function generateProvisioningReport(config, allVmData, headers) {
   try {
-    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-    if (!sheet || sheet.getLastRow() <= 1) throw new Error(`Sheet "${sheetName}" tidak ditemukan atau kosong.`);
-
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (!allVmData || allVmData.length === 0) {
+      throw new Error("Data VM tidak ditemukan atau kosong.");
+    }
 
     const K = KONSTANTA.KUNCI_KONFIG;
     const requiredHeaders = {
@@ -257,30 +256,30 @@ function generateProvisioningReport(config) {
     const indices = {};
     for (const key in requiredHeaders) {
       indices[key] = headers.indexOf(requiredHeaders[key]);
-      if (indices[key] === -1)
-        throw new Error(`Header penting '${requiredHeaders[key]}' tidak ditemukan di sheet "${sheetName}".`);
+      if (indices[key] === -1) {
+        throw new Error(`Header penting '${requiredHeaders[key]}' tidak ditemukan di sheet VM.`);
+      }
     }
 
-    const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
     const reportData = { Top5: { cpu: [], memory: [], disk: [] } };
-    const vCenters = new Set(allData.map((row) => row[indices.VCENTER] || "Lainnya"));
+    const vCenters = new Set(allVmData.map((row) => row[indices.VCENTER] || "Lainnya"));
 
     ["Total", ...vCenters].forEach((vc) => {
       reportData[vc] = { vmCount: 0, cpuOn: 0, cpuOff: 0, memOn: 0, memOff: 0, disk: 0 };
     });
 
-    for (const row of allData) {
+    for (const row of allVmData) {
       const vCenter = row[indices.VCENTER] || "Lainnya";
-      const isPoweredOn = String(row[indices.STATE] || "")
-        .toLowerCase()
-        .includes("on");
+      const isPoweredOn = String(row[indices.STATE] || "").toLowerCase().includes("on");
       const cpu = parseInt(row[indices.CPU], 10) || 0;
       const memory = parseFloat(row[indices.MEMORY]) || 0;
       const disk = parseFloat(row[indices.PROV_TB]) || 0;
+
       reportData[vCenter].vmCount++;
       reportData["Total"].vmCount++;
       reportData[vCenter].disk += disk;
       reportData["Total"].disk += disk;
+
       if (isPoweredOn) {
         reportData[vCenter].cpuOn += cpu;
         reportData[vCenter].memOn += memory;
@@ -310,19 +309,11 @@ function generateProvisioningReport(config) {
         const totalCpu = reportData[vc].cpuOn + reportData[vc].cpuOff;
         const totalMem = reportData[vc].memOn + reportData[vc].memOff;
         message += `💻 <b>vCPU:</b>\n`;
-        message += ` • Total: <b>${totalCpu.toLocaleString("id")} vCPU</b> (On: ${reportData[vc].cpuOn}, Off: ${
-          reportData[vc].cpuOff
-        })\n`;
-        message += ` • Rata-rata/VM: <b>${(reportData[vc].vmCount > 0 ? totalCpu / reportData[vc].vmCount : 0).toFixed(
-          1
-        )} vCPU</b>\n\n`;
+        message += ` • Total: <b>${totalCpu.toLocaleString("id")} vCPU</b> (On: ${reportData[vc].cpuOn}, Off: ${reportData[vc].cpuOff})\n`;
+        message += ` • Rata-rata/VM: <b>${(reportData[vc].vmCount > 0 ? totalCpu / reportData[vc].vmCount : 0).toFixed(1)} vCPU</b>\n\n`;
         message += `🧠 <b>Memori:</b>\n`;
-        message += ` • Total: <b>${totalMem.toLocaleString("id")} GB</b> <i>(~${(totalMem / 1024).toFixed(
-          1
-        )} TB)</i>\n`;
-        message += ` • Rata-rata/VM: <b>${(reportData[vc].vmCount > 0 ? totalMem / reportData[vc].vmCount : 0).toFixed(
-          1
-        )} GB</b>\n\n`;
+        message += ` • Total: <b>${totalMem.toLocaleString("id")} GB</b> <i>(~${(totalMem / 1024).toFixed(1)} TB)</i>\n`;
+        message += ` • Rata-rata/VM: <b>${(reportData[vc].vmCount > 0 ? totalMem / reportData[vc].vmCount : 0).toFixed(1)} GB</b>\n\n`;
         message += `💽 <b>Disk:</b>\n`;
         message += ` • Total Provisioned: <b>${reportData[vc].disk.toFixed(2)} TB</b>\n`;
       });
@@ -332,35 +323,19 @@ function generateProvisioningReport(config) {
     const totalCpuGrand = reportData["Total"].cpuOn + reportData["Total"].cpuOff;
     const totalMemGrand = reportData["Total"].memOn + reportData["Total"].memOff;
     message += `💻 <b>vCPU:</b>\n`;
-    message += ` • Total: <b>${totalCpuGrand.toLocaleString("id")} vCPU</b> (On: ${reportData["Total"].cpuOn}, Off: ${
-      reportData["Total"].cpuOff
-    })\n`;
-    message += ` • Rata-rata/VM: <b>${(reportData["Total"].vmCount > 0
-      ? totalCpuGrand / reportData["Total"].vmCount
-      : 0
-    ).toFixed(1)} vCPU</b>\n\n`;
+    message += ` • Total: <b>${totalCpuGrand.toLocaleString("id")} vCPU</b> (On: ${reportData["Total"].cpuOn}, Off: ${reportData["Total"].cpuOff})\n`;
+    message += ` • Rata-rata/VM: <b>${(reportData["Total"].vmCount > 0 ? totalCpuGrand / reportData["Total"].vmCount : 0).toFixed(1)} vCPU</b>\n\n`;
     message += `🧠 <b>Memori:</b>\n`;
-    message += ` • Total: <b>${totalMemGrand.toLocaleString("id")} GB</b> <i>(~${(totalMemGrand / 1024).toFixed(
-      1
-    )} TB)</i>\n`;
-    message += ` • Rata-rata/VM: <b>${(reportData["Total"].vmCount > 0
-      ? totalMemGrand / reportData["Total"].vmCount
-      : 0
-    ).toFixed(1)} GB</b>\n\n`;
+    message += ` • Total: <b>${totalMemGrand.toLocaleString("id")} GB</b> <i>(~${(totalMemGrand / 1024).toFixed(1)} TB)</i>\n`;
+    message += ` • Rata-rata/VM: <b>${(reportData["Total"].vmCount > 0 ? totalMemGrand / reportData["Total"].vmCount : 0).toFixed(1)} GB</b>\n\n`;
     message += `💽 <b>Disk:</b>\n`;
     message += ` • Total Provisioned: <b>${reportData["Total"].disk.toFixed(2)} TB</b>\n`;
 
     message += KONSTANTA.UI_STRINGS.SEPARATOR;
     message += `🏆 <b>Pengguna Resource Teratas</b>\n`;
-    const topCpuText = reportData.Top5.cpu
-      .map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value} vCPU)`)
-      .join("\n");
-    const topMemText = reportData.Top5.memory
-      .map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toLocaleString("id")} GB)`)
-      .join("\n");
-    const topDiskText = reportData.Top5.disk
-      .map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toFixed(2)} TB)`)
-      .join("\n");
+    const topCpuText = reportData.Top5.cpu.map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value} vCPU)`).join("\n");
+    const topMemText = reportData.Top5.memory.map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toLocaleString("id")} GB)`).join("\n");
+    const topDiskText = reportData.Top5.disk.map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toFixed(2)} TB)`).join("\n");
     message += `\n<i>vCPU Terbesar:</i>\n${topCpuText}\n`;
     message += `\n<i>Memori Terbesar:</i>\n${topMemText}\n`;
     message += `\n<i>Disk Terbesar:</i>\n${topDiskText}\n`;
@@ -368,6 +343,7 @@ function generateProvisioningReport(config) {
     message += `\n\n<i>Detail alokasi per vCenter dapat dianalisis lebih lanjut melalui perintah /export.</i>`;
 
     return message;
+  
   } catch (e) {
     throw new Error(`Gagal membuat laporan provisioning: ${e.message}`);
   }
@@ -566,183 +542,140 @@ function generateAssetDistributionReport(config) {
 }
 
 /**
- * [FUNGSI BARU v3.5.0 - LOGIKA FINAL & AKURAT] Menganalisis sebuah cluster secara komprehensif.
- * Menerapkan logika parsing DS yang cerdas dengan mengekstrak pola inti cluster (cth: 'CL01').
- * @param {string} clusterName - Nama cluster yang akan dianalisis (misal: 'TBN-COM-LNV-CL01').
- * @param {object} config - Objek konfigurasi bot yang aktif.
- * @returns {object} Objek yang berisi data analisis cluster.
+ * [FINAL] Fungsi utama untuk menghasilkan laporan utilisasi storage.
+ * Versi ini dilengkapi dengan penanganan error internal dan pemformatan HTML yang konsisten.
  */
-function generateClusterAnalysis(clusterName, config) {
-  const K = KONSTANTA.KUNCI_KONFIG;
-  const analysis = {
-    totalVms: 0,
-    on: 0,
-    off: 0,
-    totalCpu: 0,
-    totalMemory: 0,
-    totalVmProvisionedTb: 0,
-    totalDsCapacityTb: 0,
-    diskUtilizationPercent: 0,
-    criticalVmOffCount: 0,
-    criticalVmOffDetails: {},
-  };
-
+function generateStorageUtilizationReport(config) {
   try {
-    // 1. Analisis VM (Tidak ada perubahan di blok ini)
-    const { headers: vmHeaders, results: vmsInCluster } = searchVmsByCluster(clusterName, config);
-    if (vmsInCluster.length > 0) {
-      analysis.totalVms = vmsInCluster.length;
-      const stateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
-      const cpuIndex = vmHeaders.indexOf(config[K.HEADER_VM_CPU]);
-      const memoryIndex = vmHeaders.indexOf(config[K.HEADER_VM_MEMORY]);
-      const critIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
-      const provTbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_TB]);
-      const monitoredCritLevels = Object.keys(config[K.SKOR_KRITIKALITAS] || {});
+    const K = KONSTANTA.KUNCI_KONFIG;
+    const capacityMap = config[K.MAP_KAPASITAS_STORAGE];
+    const aliasMap = config[K.MAP_ALIAS_STORAGE];
 
-      vmsInCluster.forEach((row) => {
-        const state = String(row[stateIndex] || "").toLowerCase();
-        if (state.includes("on")) analysis.on++;
-        else analysis.off++;
-        analysis.totalCpu += parseInt(row[cpuIndex], 10) || 0;
-        analysis.totalMemory += parseFloat(row[memoryIndex]) || 0;
-        analysis.totalVmProvisionedTb += parseLocaleNumber(row[provTbIndex]);
+    if (!capacityMap || Object.keys(capacityMap).length === 0 || !aliasMap) {
+      return "❌ <b>Gagal:</b> Konfigurasi `MAP_KAPASITAS_STORAGE` atau `MAP_ALIAS_STORAGE` tidak ditemukan atau kosong di sheet Konfigurasi. Fitur ini tidak dapat berjalan.";
+    }
+    
+    const storageKeys = Object.keys(capacityMap); // Menggunakan variabel yang benar
+    const thresholds = config[K.STORAGE_UTILIZATION_THRESHOLDS] || { warning: 75, critical: 90 };
 
-        const criticality = String(row[critIndex] || "")
-          .toUpperCase()
-          .trim();
-        if (monitoredCritLevels.includes(criticality) && !state.includes("on")) {
-          analysis.criticalVmOffCount++;
-          analysis.criticalVmOffDetails[criticality] = (analysis.criticalVmOffDetails[criticality] || 0) + 1;
-        }
+    const { headers, data: logs } = getCombinedStorageLogs(config, 7);
+    if (logs.length === 0) {
+      return "ℹ️ Tidak ada data log storage yang ditemukan dalam 7 hari terakhir untuk dianalisis.";
+    }
+
+    const nameIndex = headers.indexOf("Storage Alias");
+    const usageIndex = headers.indexOf("Usage (TB)");
+    const timestampIndex = headers.indexOf("Timestamp");
+
+    if ([nameIndex, usageIndex, timestampIndex].includes(-1)) {
+      return "❌ <b>Gagal:</b> Header penting (Storage Alias, Usage (TB), Timestamp) tidak ditemukan di log storage.";
+    }
+
+    logs.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
+
+    let reportMessage = "📊 <b>Ringkasan Utilisasi Storage</b>\n";
+    reportMessage += "<i>Data berdasarkan catatan terakhir yang diterima.</i>\n\n";
+    reportMessage += "------------------------------------\n";
+
+    storageKeys.forEach((aliasUtama) => {
+      const reportKey = Object.keys(aliasMap).find((key) => aliasMap[key].includes(aliasUtama));
+      const semuaAliasTerkait = reportKey ? aliasMap[reportKey] : [aliasUtama];
+
+      const lastEntry = logs.find((row) => {
+        const logAliases = (row[nameIndex] || "").split(",").map((a) => a.trim());
+        return logAliases.some((logAlias) => semuaAliasTerkait.includes(logAlias));
       });
-    }
 
-    // 2. Analisis Datastore dengan Logika Parsing Baru
-    const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_DS]);
-    if (dsSheet && dsSheet.getLastRow() > 1) {
-      const dsData = dsSheet.getDataRange().getValues();
-      const dsHeaders = dsData.shift();
-      const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
-      const dsCapTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_TB]);
-
-      const includedKeywords = (config.KATA_KUNCI_DS_DIUTAMAKAN || []).map((k) => k.toLowerCase());
-      const excludedKeywords = (config[K.DS_KECUALI] || []).map((k) => k.toLowerCase());
-
-      // --- [PERBAIKAN LOGIKA PARSING UTAMA] ---
-      // Ekstrak pola inti cluster (CLxx) dari nama cluster lengkap yang dicari.
-      const clusterPatternMatch = clusterName.match(/CL\d+/i);
-      const coreClusterPattern = clusterPatternMatch ? clusterPatternMatch[0].toLowerCase() : null;
-
-      if (coreClusterPattern && dsNameIndex !== -1 && dsCapTbIndex !== -1) {
-        dsData.forEach((row) => {
-          const dsName = String(row[dsNameIndex] || "");
-          const dsNameLower = dsName.toLowerCase();
-
-          // Periksa apakah nama DS mengandung pola inti cluster (cth: 'cl01').
-          if (!dsNameLower.includes(coreClusterPattern)) {
-            return; // Lanjut ke datastore berikutnya jika tidak cocok
-          }
-          // --- [AKHIR PERBAIKAN] ---
-
-          const isIncluded =
-            includedKeywords.length === 0 || includedKeywords.some((keyword) => dsNameLower.includes(keyword));
-          if (!isIncluded) {
-            return;
-          }
-
-          const isExcluded = excludedKeywords.some((keyword) => dsNameLower.includes(keyword));
-          if (isExcluded) {
-            return;
-          }
-
-          analysis.totalDsCapacityTb += parseLocaleNumber(row[dsCapTbIndex]);
-        });
+      const totalCapacity = capacityMap[aliasUtama];
+      if (!lastEntry) {
+        reportMessage += `\n⚪️ <b>${aliasUtama}</b>\n   <i>(Tidak ada data log ditemukan)</i>\n`;
+        return;
       }
-    }
 
-    // 3. Hitung utilisasi
-    if (analysis.totalDsCapacityTb > 0) {
-      analysis.diskUtilizationPercent = (analysis.totalVmProvisionedTb / analysis.totalDsCapacityTb) * 100;
-    }
+      const currentUsage = parseFloat(lastEntry[usageIndex]) || 0;
+      const percentage = totalCapacity > 0 ? (currentUsage / totalCapacity) * 100 : 0;
+      let statusEmoji = percentage >= thresholds.critical ? "🔴" : (percentage >= thresholds.warning ? "🟡" : "🟢");
 
-    return analysis;
+      reportMessage += `\n${statusEmoji} <b>${aliasUtama}</b> <code>(${percentage.toFixed(1)}%)</code>\n`;
+      reportMessage += `${createProgressBar(percentage)}\n`;
+      reportMessage += `<code>${currentUsage.toFixed(1)} / ${totalCapacity} TB</code>\n`;
+    });
+
+    return reportMessage;
+
   } catch (e) {
-    console.error(`Gagal melakukan analisis untuk cluster "${clusterName}". Error: ${e.message}`);
-    return analysis;
+    console.error(`Gagal total saat membuat laporan utilisasi storage: ${e.message}\n${e.stack}`);
+    return `🔴 <b>Gagal Membuat Laporan Storage</b>\n\n<b>Penyebab:</b>\n<pre>${escapeHtml(e.message)}</pre>`;
   }
 }
 
 /**
- * [FINAL v3.3.1] Fungsi utama untuk menghasilkan laporan utilisasi storage.
- * Versi ini memperbaiki dua bug kritis:
- * 1. Menambahkan pengurutan data historis untuk memastikan data yang diambil selalu yang terbaru.
- * 2. Menyempurnakan logika pencarian untuk menangani storage dengan banyak alias (seperti VSPA & COM).
- * @param {object} config - Objek konfigurasi bot.
- * @returns {string} Pesan laporan lengkap yang sudah diformat HTML.
+ * [BARU] Memformat objek hasil analisis cluster menjadi string header HTML.
+ * @param {object} analysis - Objek hasil dari generateClusterAnalysis.
+ * @param {string} clusterName - Nama cluster yang dianalisis.
+ * @returns {string} String header yang sudah diformat.
  */
-function generateStorageUtilizationReport(config) {
-  const K = KONSTANTA.KUNCI_KONFIG;
-  const capacityMap = config[K.MAP_KAPASITAS_STORAGE] || {};
-  const thresholds = config[K.STORAGE_UTILIZATION_THRESHOLDS] || { warning: 75, critical: 90 };
-  const storageAliases = Object.keys(capacityMap);
-
-  if (storageAliases.length === 0) {
-    return "ℹ️ Tidak ada data kapasitas storage yang terdefinisi di Konfigurasi.";
+function formatClusterAnalysisHeader(analysis, clusterName) {
+  if (!analysis) return "";
+  
+  let header = `📊 <b>Analisis Cluster "${escapeHtml(clusterName)}"</b>\n`;
+  header += `• <b>Total VM:</b> ${analysis.totalVms} (🟢 ${analysis.on} On / 🔴 ${analysis.off} Off)\n`;
+  
+  const totalMemoryInTb = analysis.totalMemory / 1024;
+  header += `• <b>Alokasi Resource:</b> ${analysis.totalCpu} vCPU | ${analysis.totalMemory.toFixed(0)} GB RAM (~${totalMemoryInTb.toFixed(2)} TB)\n`;
+  
+  const diskUtilPercent = analysis.diskUtilizationPercent;
+  header += `• <b>Utilisasi Disk:</b> ${diskUtilPercent.toFixed(1)}% [<code>${createProgressBar(diskUtilPercent)}</code>] (${analysis.totalVmProvisionedTb.toFixed(2)} / ${analysis.totalDsCapacityTb.toFixed(2)} TB)\n`;
+  
+  if (analysis.criticalVmOffCount > 0) {
+    header += `• <b>Peringatan:</b> Terdapat <b>${analysis.criticalVmOffCount} VM Kritis</b> dalam kondisi mati!\n`;
   }
+  
+  return header;
+}
 
-  const { headers, data: logs } = getCombinedStorageLogs(config, 7);
-  if (logs.length === 0) {
-    return "ℹ️ Tidak ada data log storage yang ditemukan untuk dianalisis.";
-  }
+/**
+ * [BARU] Menganalisis sebuah datastore secara komprehensif.
+ */
+function generateDatastoreAnalysis(datastoreName, config) {
+  const analysis = {
+    totalVms: 0, on: 0, off: 0,
+    details: getDatastoreDetails(datastoreName, config)
+  };
 
-  const nameIndex = headers.indexOf("Storage Alias");
-  const usageIndex = headers.indexOf("Usage (TB)");
-  const timestampIndex = headers.indexOf("Timestamp");
+  if (!analysis.details) return analysis;
 
-  if (nameIndex === -1 || usageIndex === -1 || timestampIndex === -1) {
-    return "❌ Gagal: Header penting (Storage Alias, Usage (TB), Timestamp) tidak ditemukan di log.";
-  }
-
-  // Pastikan log diurutkan dari yang paling baru ke yang paling lama. Ini sangat krusial.
-  logs.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
-
-  let reportMessage = "📊 <b>Ringkasan Utilisasi Storage</b>\n";
-  reportMessage += "<i>Data berdasarkan catatan terakhir yang diterima.</i>\n\n";
-  reportMessage += "------------------------------------\n";
-
-  storageAliases.forEach((aliasUtama) => {
-    // Dapatkan semua kemungkinan alias untuk storage ini dari konfigurasi
-    const aliasMap = config[K.MAP_ALIAS_STORAGE] || {};
-    const reportKey = Object.keys(aliasMap).find((key) => aliasMap[key].includes(aliasUtama));
-    const semuaAliasTerkait = reportKey ? aliasMap[reportKey] : [aliasUtama];
-
-    // Cari entri log pertama yang cocok dengan SALAH SATU dari alias terkait
-    const lastEntry = logs.find((row) => {
-      const logAliases = (row[nameIndex] || "").split(",").map((a) => a.trim());
-      return logAliases.some((logAlias) => semuaAliasTerkait.includes(logAlias));
-    });
-
-    const totalCapacity = capacityMap[aliasUtama];
-
-    if (!lastEntry) {
-      reportMessage += `\n⚪️ <b>${aliasUtama}</b>\n   <i>(Tidak ada data log ditemukan)</i>\n`;
-      return;
+  try {
+    const { headers, results: vmsInDatastore } = searchVmsByDatastore(datastoreName, config);
+    analysis.totalVms = vmsInDatastore.length;
+    
+    if (vmsInDatastore.length > 0) {
+      const stateIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_STATE]);
+      if (stateIndex !== -1) {
+        vmsInDatastore.forEach(row => {
+          String(row[stateIndex] || "").toLowerCase().includes("on") ? analysis.on++ : analysis.off++;
+        });
+      }
     }
+  } catch(e) {
+    console.error(`Gagal menganalisis VM di datastore ${datastoreName}: ${e.message}`);
+  }
+  
+  return analysis;
+}
 
-    const currentUsage = parseFloat(lastEntry[usageIndex]) || 0;
-    const percentage = totalCapacity > 0 ? (currentUsage / totalCapacity) * 100 : 0;
-
-    let statusEmoji = "🟢";
-    if (percentage >= thresholds.critical) {
-      statusEmoji = "🔴";
-    } else if (percentage >= thresholds.warning) {
-      statusEmoji = "🟡";
-    }
-
-    reportMessage += `\n${statusEmoji} <b>${aliasUtama}</b> <code>(${percentage.toFixed(1)}%)</code>\n`;
-    reportMessage += `${createProgressBar(percentage)}\n`;
-    reportMessage += `<code>${currentUsage.toFixed(1)} / ${totalCapacity} TB</code>\n`;
-  });
-
-  return reportMessage;
+/**
+ * [BARU] Memformat objek hasil analisis datastore menjadi string header HTML.
+ */
+function formatDatastoreAnalysisHeader(analysis, datastoreName) {
+  if (!analysis || !analysis.details) {
+    return `🗄️ <b>Ringkasan Datastore "${escapeHtml(datastoreName)}"</b>\n<i>Detail tidak dapat dimuat.</i>`;
+  }
+  
+  const { details, totalVms, on, off } = analysis;
+  let header = `🗄️ <b>Ringkasan Datastore "${escapeHtml(datastoreName)}"</b>\n`;
+  header += `• <b>Kapasitas:</b> ${details.capacityGb.toFixed(1)} GB | <b>Terpakai:</b> ${details.provisionedGb.toFixed(1)} GB\n`;
+  header += `• <b>Alokasi Terpakai:</b> ${details.usagePercent.toFixed(1)}% [<code>${createProgressBar(details.usagePercent)}</code>]\n`;
+  header += `• <b>Total VM:</b> ${totalVms} (🟢 ${on} On / 🔴 ${off} Off)\n`;
+  return header;
 }

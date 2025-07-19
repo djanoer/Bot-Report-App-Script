@@ -13,13 +13,13 @@ function callTelegramApi(method, payloadData, config) {
     console.error("Token Bot Telegram belum diisi.");
     return null;
   }
-
+  
   const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/${method}`;
   const options = {
-    method: "post",
-    contentType: "application/json",
+    method: 'post',
+    contentType: 'application/json',
     payload: JSON.stringify(payloadData),
-    muteHttpExceptions: true, // Penting: Mencegah script berhenti total jika ada error HTTP (misal: 404, 400).
+    muteHttpExceptions: true // Penting: Mencegah script berhenti total jika ada error HTTP (misal: 404, 400).
   };
 
   try {
@@ -28,13 +28,11 @@ function callTelegramApi(method, payloadData, config) {
     const responseBody = response.getContentText();
 
     if (responseCode !== 200) {
-      console.error(
-        `Gagal memanggil API Telegram (Metode: ${method}). Kode: ${responseCode}. Respons: ${responseBody}`
-      );
+      console.error(`Gagal memanggil API Telegram (Metode: ${method}). Kode: ${responseCode}. Respons: ${responseBody}`);
       return null;
     }
     // Mengembalikan hasil parse JSON agar bisa digunakan oleh fungsi pemanggil (misal: untuk mendapatkan message_id)
-    return JSON.parse(responseBody);
+    return JSON.parse(responseBody); 
   } catch (e) {
     console.error(`Gagal total memanggil API Telegram (Metode: ${method}). Error: ${e.message}`);
     return null;
@@ -43,22 +41,35 @@ function callTelegramApi(method, payloadData, config) {
 
 function setWebhook() {
   const config = bacaKonfigurasi();
-  const webAppUrlBase =
-    "https://script.google.com/macros/s/AKfycbwsqpb7UdR27t9T14YUmSsfG2ZhlybikXH7hvrQRwpWAp64YA5vYp_24DPIwxltsdhC/exec";
-  //const webAppUrlBase = "https://script.google.com/macros/s/AKfycbwsqpb7UdR27t9T14YUmSsfG2ZhlybikXH7hvrQRwpWAp64YA5vYp_24DPIwxltsdhC/exec";
+  const webAppUrlBase = "https://script.google.com/macros/s/AKfycbzaevYC5eSTSQcoghSSHBryqjJfXXmV3P440Y_H5_K6wTVYblhby7jZ2nP7uG7c_ei3/exec";
+
   if (webAppUrlBase.includes("MASUKKAN")) {
-    SpreadsheetApp.getUi().alert("Harap masukkan URL Web App Anda di dalam fungsi setWebhook sebelum menjalankannya.");
+    // Menggunakan console.error untuk log yang lebih jelas jika dijalankan dari editor
+    console.error("GAGAL: Harap masukkan URL Web App Anda di dalam fungsi setWebhook sebelum menjalankannya.");
     return;
   }
+
   const webAppUrlWithToken = `${webAppUrlBase}?token=${config.WEBHOOK_BOT_TOKEN}`;
   const telegramApiUrl = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/setWebhook?url=${webAppUrlWithToken}`;
+
   try {
     const response = UrlFetchApp.fetch(telegramApiUrl);
-    console.log("setWebhook Response: " + response.getContentText());
-    SpreadsheetApp.getUi().alert("Webhook berhasil diatur!");
+    const responseText = response.getContentText();
+
+    // Memberikan feedback ke log, bukan ke UI
+    console.log("Respons dari setWebhook: " + responseText);
+
+    // Cek jika respons dari Telegram berisi "ok":true
+    const jsonResponse = JSON.parse(responseText);
+    if (jsonResponse.ok) {
+        console.log("SUKSES: Webhook berhasil diatur!");
+    } else {
+        console.error("GAGAL: Telegram melaporkan masalah saat mengatur webhook. Detail: " + responseText);
+    }
+
   } catch (e) {
-    console.error(`Gagal mengatur webhook: ${e.message}`);
-    SpreadsheetApp.getUi().alert(`Gagal mengatur webhook: ${e.message}`);
+    // Memberikan feedback error ke log
+    console.error(`Gagal total saat mengatur webhook: ${e.message}`);
   }
 }
 
@@ -68,7 +79,7 @@ function setWebhook() {
  */
 function hapusWebhook() {
   // Fungsi ini akan menggunakan konfigurasi dari lingkungan skrip yang sedang aktif
-  const config = bacaKonfigurasi();
+  const config = bacaKonfigurasi(); 
 
   console.log("Memulai proses penghapusan webhook...");
 
@@ -97,14 +108,14 @@ function kirimPesanTelegram(teksPesan, config, parseMode = "HTML", inlineKeyboar
   let chatTujuan;
 
   // Logika Pemilih Otomatis
-  if (config.ENVIRONMENT === "DEV") {
-    // Jika di DEV, selalu gunakan chat ID DEV
-    chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID_DEV);
+  if (config.ENVIRONMENT === 'DEV') {
+     // Jika di DEV, selalu gunakan chat ID DEV
+     chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID_DEV);
   } else {
-    // Jika di PROD (atau lingkungan lain), gunakan chat ID utama
-    chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID);
+     // Jika di PROD (atau lingkungan lain), gunakan chat ID utama
+     chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID);
   }
-
+  
   if (!chatTujuan) {
     console.error("ID Chat tujuan tidak valid.");
     return null;
@@ -120,20 +131,20 @@ function kirimPesanTelegram(teksPesan, config, parseMode = "HTML", inlineKeyboar
       payloadData.reply_markup = JSON.stringify(inlineKeyboard);
     }
     // [PERBAIKAN] Mengembalikan hasil dari callTelegramApi
-    return callTelegramApi("sendMessage", payloadData, config);
+    return callTelegramApi('sendMessage', payloadData, config);
   }
 
   console.log(`Pesan terlalu panjang (${teksPesan.length} karakter), akan dibagi.`);
   const chunks = [];
   let currentChunk = "";
-  const lines = teksPesan.split("\n");
+  const lines = teksPesan.split('\n');
 
   for (const line of lines) {
     if (currentChunk.length + line.length + 1 > TELEGRAM_MESSAGE_LIMIT) {
       chunks.push(currentChunk);
       currentChunk = "";
     }
-    currentChunk += line + "\n";
+    currentChunk += line + '\n';
   }
   chunks.push(currentChunk);
 
@@ -145,17 +156,17 @@ function kirimPesanTelegram(teksPesan, config, parseMode = "HTML", inlineKeyboar
       text: chunk,
       parse_mode: parseMode,
     };
-
+    
     if (i === chunks.length - 1 && inlineKeyboard) {
       payloadData.reply_markup = JSON.stringify(inlineKeyboard);
     }
-
-    finalResponse = callTelegramApi("sendMessage", payloadData, config);
+    
+    finalResponse = callTelegramApi('sendMessage', payloadData, config);
     if (chunks.length > 1) {
       Utilities.sleep(500);
     }
   }
-
+  
   return finalResponse;
 }
 
@@ -175,54 +186,76 @@ function editMessageText(teksPesan, inlineKeyboard, chatId, messageId, config) {
     chat_id: String(chatId),
     message_id: parseInt(messageId),
     text: teksPesan,
-    parse_mode: "HTML",
+    parse_mode: 'HTML'
   };
-
+  
   // [PERBAIKAN] Hanya tambahkan 'reply_markup' jika 'inlineKeyboard' tidak null.
   if (inlineKeyboard) {
     payloadData.reply_markup = JSON.stringify(inlineKeyboard);
   }
-
+  
   // Panggil API dengan payload yang sudah benar.
-  return callTelegramApi("editMessageText", payloadData, config);
+  return callTelegramApi('editMessageText', payloadData, config);
 }
 
 /**
  * [OPTIMALISASI] Fungsi ini sekarang hanya menyiapkan data dan mendelegasikannya ke callTelegramApi.
  */
 function answerCallbackQuery(callbackQueryId, config) {
-  return callTelegramApi("answerCallbackQuery", { callback_query_id: callbackQueryId }, config);
+  return callTelegramApi('answerCallbackQuery', { callback_query_id: callbackQueryId }, config);
 }
 
 /**
- * [BARU v1.3.0] Mengirim pesan foto ke Telegram.
- * @param {Blob} photoBlob - Objek Blob gambar yang akan dikirim.
- * @param {string} caption - Teks caption untuk foto.
- * @param {object} config - Objek konfigurasi bot.
- * @param {string|null} targetChatId - ID chat tujuan jika berbeda dari default.
- * @returns {object|null} Objek respons dari Telegram atau null jika gagal.
+ * [REFACTOR FINAL & TANGGUH] Mengirim pesan foto ke Telegram.
+ * Versi ini membangun permintaan 'multipart/form-data' secara manual untuk
+ * memastikan keandalan pengiriman file secara maksimal.
  */
 function kirimFotoTelegram(photoBlob, caption, config, targetChatId = null) {
-  const chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID);
+  let chatTujuan;
+
+  if (config.ENVIRONMENT === "DEV") {
+    chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID_DEV);
+  } else {
+    chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID);
+  }
+
   if (!chatTujuan) {
     console.error("ID Chat tujuan tidak valid.");
     return null;
   }
 
   const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendPhoto`;
-
-  // Untuk mengirim file, payload harus dalam format 'multipart/form-data'
-  const payload = {
+  
+  // --- PERBAIKAN UTAMA: MEMBANGUN PAYLOAD MANUAL ---
+  const boundary = "------" + Utilities.getUuid();
+  const data = {
     chat_id: chatTujuan,
     caption: caption,
-    parse_mode: "HTML",
-    photo: photoBlob,
+    parse_mode: 'HTML'
   };
 
+  let payload = "";
+  for (const key in data) {
+    payload += "--" + boundary + "\r\n";
+    payload += "Content-Disposition: form-data; name=\"" + key + "\"\r\n\r\n";
+    payload += data[key] + "\r\n";
+  }
+
+  payload += "--" + boundary + "\r\n";
+  payload += "Content-Disposition: form-data; name=\"photo\"; filename=\"grafik.png\"\r\n";
+  payload += "Content-Type: image/png\r\n\r\n";
+  
+  const payloadBytes = Utilities.newBlob(payload).getBytes();
+  const photoBytes = photoBlob.getBytes();
+  const footerBytes = Utilities.newBlob("\r\n--" + boundary + "--\r\n").getBytes();
+  
+  const requestBody = Utilities.newBlob(payloadBytes.concat(photoBytes, footerBytes)).setContentType("multipart/form-data; boundary=" + boundary);
+  // --- AKHIR PERBAIKAN ---
+
   const options = {
-    method: "post",
-    payload: payload,
-    muteHttpExceptions: true,
+    method: 'post',
+    payload: requestBody, // Gunakan request body yang sudah kita bangun
+    muteHttpExceptions: true
   };
 
   try {

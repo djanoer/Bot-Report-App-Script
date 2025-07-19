@@ -1,7 +1,7 @@
 // ===== FILE: Utilitas.gs =====
 
 function escapeHtml(text) {
-  if (typeof text !== "string") text = String(text);
+  if (typeof text !== 'string') text = String(text);
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
@@ -12,23 +12,15 @@ function escapeHtml(text) {
  */
 function computeVmHash(vmObject) {
   if (!vmObject) return "";
-
-  // Tidak ada lagi penghapusan kunci 'Uptime' secara paksa.
-  // Objek sekarang digunakan apa adanya sesuai dengan yang dibuat oleh processDataChanges.
   const objectForHashing = { ...vmObject };
-
   const sortedKeys = Object.keys(objectForHashing).sort();
-
   const dataString = sortedKeys
     .map((key) => {
       const value = objectForHashing[key];
-      // Jika nilai adalah string literal "#N/A", perlakukan seperti sel kosong.
       return String(value || "").trim() === "#N/A" ? "" : value;
     })
     .join("||");
-
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, dataString);
-
   return digest.map((byte) => (byte + 0x100).toString(16).substring(1)).join("");
 }
 
@@ -40,13 +32,10 @@ function computeVmHash(vmObject) {
  */
 function getDsInfo(dsName, migrationConfig) {
   if (typeof dsName !== "string") return { cluster: null, type: null };
-
   const clusterMatch = dsName.match(/(CL\d+)/i);
   const cluster = clusterMatch ? clusterMatch[1].toUpperCase() : null;
-
   let type = null;
   const knownTypes = Array.from(migrationConfig.keys()).sort((a, b) => b.length - a.length);
-
   for (const knownType of knownTypes) {
     if (dsName.includes(knownType)) {
       const rule = migrationConfig.get(knownType);
@@ -54,7 +43,6 @@ function getDsInfo(dsName, migrationConfig) {
       break;
     }
   }
-
   return { cluster: cluster, type: type };
 }
 
@@ -78,17 +66,13 @@ function showUiFeedback(title, message) {
  */
 function getEnvironmentFromDsName(dsName, environmentMap) {
   if (typeof dsName !== "string" || !environmentMap) return null;
-
-  // Urutkan kunci dari yang paling panjang agar tidak salah cocok (misal: 'LNV' vs '108LNV')
   const keywords = Object.keys(environmentMap).sort((a, b) => b.length - a.length);
-
   for (const keyword of keywords) {
     if (dsName.includes(keyword)) {
-      return environmentMap[keyword]; // Kembalikan nama environment resmi
+      return environmentMap[keyword];
     }
   }
-
-  return null; // Bukan environment khusus
+  return null;
 }
 
 /**
@@ -99,118 +83,62 @@ function getEnvironmentFromDsName(dsName, environmentMap) {
  */
 function normalizePrimaryKey(pk) {
   if (typeof pk !== "string" || !pk) return "";
-  // Menghapus '-VC' diikuti oleh angka di akhir string.
-  // Pola ini fleksibel untuk menangani -VC01, -VC02, -VC10, dst.
   return pk.replace(/-VC\d+$/i, "").trim();
 }
 
 /**
- * [MODIFIKASI DEBUGGING] Penanganan Error Terpusat.
- * Versi ini dimodifikasi untuk menampilkan pesan error teknis asli di Telegram,
- * membantu kita menemukan akar masalah yang sebenarnya.
+ * [REVISI v3.5.0 - DENGAN KONTEKS PENGGUNA] Penanganan Error Terpusat.
+ * Versi ini dimodifikasi untuk menyertakan detail pengguna yang mengalami error,
+ * membantu proses debugging menjadi lebih cepat dan akurat.
  */
-function handleCentralizedError(errorObject, context, config) {
-  // 1. Catat log teknis yang detail untuk developer (tidak berubah)
-  const errorMessageTechnical = `[ERROR di ${context}] ${errorObject.message}\nStack: ${
-    errorObject.stack || "Tidak tersedia"
-  }`;
+function handleCentralizedError(errorObject, context, config, userData = null) {
+  const userIdentifier = userData ? `[User: ${userData.id} | ${userData.firstName}]` : '[User: System/Unknown]';
+  const errorMessageTechnical = `[ERROR di ${context}] ${userIdentifier} ${errorObject.message}\nStack: ${errorObject.stack || "Tidak tersedia"}`;
   console.error(errorMessageTechnical);
-
-  // 2. Kirim pesan yang lebih detail ke pengguna untuk debugging
   if (config) {
     let userFriendlyMessage = `🔴 Maaf, terjadi kesalahan saat memproses permintaan Anda.\n\n`;
     userFriendlyMessage += `<b>Konteks:</b> ${context}\n`;
-    // [MODIFIKASI PENTING] Tambahkan pesan error asli ke notifikasi
-    userFriendlyMessage += `<b>Detail Error Teknis:</b>\n<pre>${escapeHtml(errorObject.message)}</pre>`;
-
-    kirimPesanTelegram(userFriendlyMessage, config, "HTML");
+    userFriendlyMessage += `<b>Detail Error:</b>\n<pre>${escapeHtml(errorObject.message)}</pre>\n\n`;
+    userFriendlyMessage += `<i>Administrator telah diberitahu mengenai masalah ini.</i>`;
+    const targetChatId = config.TELEGRAM_CHAT_ID;
+    if (targetChatId) {
+      kirimPesanTelegram(userFriendlyMessage, config, "HTML", null, targetChatId);
+    }
   }
 }
 
 /**
- * [FINAL v1.8.1] Membuat tampilan berhalaman secara generik.
- * Menggunakan jumlah entri dari konfigurasi terpusat.
+ * [REFACTOR FINAL STATE-DRIVEN] Membuat tampilan berhalaman secara generik.
+ * Versi ini menghasilkan callback yang stateful dan kompatibel dengan router mesin.
  */
-function createPaginatedView({
-  allItems,
-  page,
-  title,
-  headerContent = null,
-  formatEntryCallback,
-  callbackInfo,
-  config,
-}) {
+function createPaginatedView({ allItems, page, title, headerContent = null, formatEntryCallback, callbackInfo, config }) {
   const entriesPerPage = (config.SYSTEM_LIMITS && config.SYSTEM_LIMITS.PAGINATION_ENTRIES) || 15;
   const totalEntries = allItems.length;
   if (totalEntries === 0) {
     let emptyText = `ℹ️ ${title}\n\n`;
-    if (headerContent) {
-      emptyText = headerContent + `\n` + emptyText;
-    }
+    if (headerContent) emptyText = headerContent + `\n` + emptyText;
     emptyText += `Tidak ada data yang ditemukan.`;
     return { text: emptyText, keyboard: null };
   }
-
   const totalPages = Math.ceil(totalEntries / entriesPerPage);
   page = Math.max(1, Math.min(page, totalPages));
-
   const startIndex = (page - 1) * entriesPerPage;
   const endIndex = Math.min(startIndex + entriesPerPage, totalEntries);
   const pageEntries = allItems.slice(startIndex, endIndex);
-
-  const listContent = pageEntries
-    .map((item, index) => {
-      return `${startIndex + index + 1}. ${formatEntryCallback(item)}`;
-    })
-    .join("\n\n");
-
-  let text = "";
-  if (headerContent) {
-    text += headerContent + "\n";
-  }
-
-  text += `<i>Menampilkan <b>${
-    startIndex + 1
-  }-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
-  text += `------------------------------------\n\n`;
-  text += listContent;
-  text += "\u200B";
-
+  const listContent = pageEntries.map((item, index) => `${startIndex + index + 1}. ${formatEntryCallback(item)}`).join("\n\n");
+  let text = `${headerContent ? headerContent + '\n' : ''}`;
+  text += `<i>Menampilkan <b>${startIndex + 1}-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
+  text += `------------------------------------\n\n${listContent}\u200B`;
   const keyboardRows = [];
   const navigationButtons = [];
-
-  const createSessionForPage = (targetPage) => {
-    const sessionData = {
-      ...callbackInfo.context,
-      page: targetPage,
-    };
-    return createCallbackSession(sessionData, config);
-  };
-
-  if (page > 1) {
-    const prevSessionId = createSessionForPage(page - 1);
-    navigationButtons.push({ text: "⬅️ Prev", callback_data: `${callbackInfo.navPrefix}${prevSessionId}` });
-  }
-  if (totalPages > 1) {
-    navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: KONSTANTA.CALLBACK.IGNORE });
-  }
-  if (page < totalPages) {
-    const nextSessionId = createSessionForPage(page + 1);
-    navigationButtons.push({ text: "Next ➡️", callback_data: `${callbackInfo.navPrefix}${nextSessionId}` });
-  }
-
+  const createSessionForPage = (targetPage) => createCallbackSession({ ...callbackInfo.context, page: targetPage }, config);
+  if (page > 1) navigationButtons.push({ text: "⬅️ Prev", callback_data: `${callbackInfo.navPrefix}${createSessionForPage(page - 1)}` });
+  if (totalPages > 1) navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: "ignore" });
+  if (page < totalPages) navigationButtons.push({ text: "Next ➡️", callback_data: `${callbackInfo.navPrefix}${createSessionForPage(page + 1)}` });
   if (navigationButtons.length > 0) keyboardRows.push(navigationButtons);
-
   if (callbackInfo.exportPrefix) {
-    const exportSessionId = createSessionForPage(1);
-    keyboardRows.push([
-      {
-        text: `📄 Ekspor Semua ${totalEntries} Hasil`,
-        callback_data: `${callbackInfo.exportPrefix}${exportSessionId}`,
-      },
-    ]);
+    keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: `${callbackInfo.exportPrefix}${createSessionForPage(1)}` }]);
   }
-
   return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
 
@@ -229,85 +157,75 @@ let botState = null;
  * @returns {{config: object, userAccessMap: Map}} Objek yang berisi konfigurasi dan peta hak akses.
  */
 function getBotState() {
-  // 1. Jika state sudah ada di memori (untuk eksekusi yang sama), langsung kembalikan.
-  console.log("✅ Verifikasi: State diambil dari MEMORI.");
-  if (botState) {
-    // console.log("Menggunakan state dari memori.");
-    return botState;
-  }
-
+  if (botState) return botState;
   const cache = CacheService.getScriptCache();
-  const CACHE_KEY = "BOT_STATE_V2"; // Gunakan kunci baru
-  const CACHE_DURATION_SECONDS = 21600; // Cache untuk 6 jam
-
-  // 2. Coba ambil dari cache.
+  const CACHE_KEY = "BOT_STATE_V2";
   const cachedStateJSON = cache.get(CACHE_KEY);
   if (cachedStateJSON) {
     try {
       const cachedState = JSON.parse(cachedStateJSON);
-      // Ubah array hasil JSON.stringify kembali menjadi Map
       cachedState.userAccessMap = new Map(cachedState.userAccessMap);
-      botState = cachedState; // Simpan ke memori global
-      // console.log("State berhasil dimuat dari cache.");
-      console.log("✅ Verifikasi: State diambil dari CACHE.");
+      botState = cachedState;
       return botState;
-    } catch (e) {
-      console.log("🟡 Verifikasi: State dibaca dari SPREADSHEET.");
-      console.warn("Gagal mem-parsing state dari cache, akan membaca ulang dari sheet.", e);
-    }
+    } catch (e) { console.warn("Gagal mem-parsing state dari cache.", e); }
   }
-
-  // 3. Jika tidak ada di memori atau cache, baca dari Spreadsheet (fallback).
-  console.log("State tidak ditemukan di memori atau cache. Membaca ulang dari Spreadsheet...");
+  console.log("Membaca state dari Spreadsheet...");
   const config = bacaKonfigurasi();
   const userAccessMap = new Map();
-
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetHakAkses = ss.getSheetByName(KONSTANTA.NAMA_SHEET.HAK_AKSES);
   if (sheetHakAkses && sheetHakAkses.getLastRow() > 1) {
     const dataAkses = sheetHakAkses.getRange(2, 1, sheetHakAkses.getLastRow() - 1, 4).getValues();
     dataAkses.forEach((row) => {
-      const userId = String(row[0]);
-      const email = row[2];
-      const role = row[3];
-      if (userId && email) {
-        // Simpan email dan role
-        userAccessMap.set(userId, { email: email, role: role });
-      }
+      if (row[0] && row[2]) userAccessMap.set(String(row[0]), { email: row[2], role: row[3] });
     });
   }
-
-  // Gabungkan semua menjadi satu objek state
-  const newState = {
-    config: config,
-    userAccessMap: userAccessMap,
-  };
-
-  // Simpan state baru ke cache untuk eksekusi berikutnya.
-  // Perlu mengubah Map menjadi array agar bisa disimpan sebagai JSON.
-  const stateToCache = {
-    ...newState,
-    userAccessMap: Array.from(newState.userAccessMap.entries()),
-  };
-  cache.put(CACHE_KEY, JSON.stringify(stateToCache), CACHE_DURATION_SECONDS);
-
-  botState = newState; // Simpan ke memori global
+  const newState = { config: config, userAccessMap: userAccessMap };
+  const stateToCache = { ...newState, userAccessMap: Array.from(newState.userAccessMap.entries()) };
+  cache.put(CACHE_KEY, JSON.stringify(stateToCache), 21600);
+  botState = newState;
   return botState;
 }
 
 /**
- * [FUNGSI BARU - PENGGANTI clearUserAccessCache]
- * Menghapus cache state bot secara keseluruhan.
+ * [REFACTOR FINAL] Menghapus SEMUA cache bot yang relevan.
+ * Fungsi ini sekarang juga membersihkan cache data VM ("vm_data").
  */
 function clearBotStateCache() {
   try {
     const cache = CacheService.getScriptCache();
-    cache.remove("BOT_STATE_V2");
-    botState = null; // Hapus juga dari memori
-    console.log("Cache state bot berhasil dihapus.");
+    
+    // 1. Kunci cache state (konfigurasi & hak akses)
+    const stateCacheKey = "BOT_STATE_V2";
+    
+    // 2. Kunci cache data VM (manifest & semua potongannya)
+    const vmDataManifestKey = "vm_data_manifest";
+    const vmDataManifestJSON = cache.get(vmDataManifestKey);
+    const keysToRemove = [stateCacheKey, vmDataManifestKey];
+
+    if (vmDataManifestJSON) {
+      try {
+        const manifest = JSON.parse(vmDataManifestJSON);
+        if (manifest && manifest.totalChunks) {
+          for (let i = 0; i < manifest.totalChunks; i++) {
+            keysToRemove.push(`vm_data_chunk_${i}`);
+          }
+        }
+      } catch (e) {
+        console.warn(`Gagal mem-parse manifest cache vm_data saat pembersihan: ${e.message}`);
+      }
+    }
+
+    // Hapus semua cache yang teridentifikasi sekaligus
+    cache.removeAll(keysToRemove);
+    
+    // Reset state di memori juga
+    botState = null;
+    
+    console.log(`Pembersihan cache berhasil. Kunci yang dihapus: ${keysToRemove.join(", ")}`);
     return true;
   } catch (e) {
-    console.error("Gagal menghapus cache state bot: " + e.message);
+    console.error(`Gagal menghapus cache bot: ${e.message}`);
     return false;
   }
 }
@@ -320,33 +238,16 @@ function clearBotStateCache() {
  * @returns {number} Angka dalam format float.
  */
 function parseLocaleNumber(numberString) {
-  // Jika sudah berupa angka, langsung kembalikan
-  if (typeof numberString === "number") {
-    return numberString;
-  }
-  // Jika bukan string, ubah menjadi string
-  if (typeof numberString !== "string") {
-    numberString = String(numberString);
-  }
-
-  // 1. Bersihkan semua karakter non-numerik kecuali titik, koma, dan tanda minus.
+  if (typeof numberString === "number") return numberString;
+  if (typeof numberString !== "string") numberString = String(numberString);
   let cleaned = numberString.replace(/[^0-9.,-]/g, "");
-
   const lastComma = cleaned.lastIndexOf(",");
   const lastDot = cleaned.lastIndexOf(".");
-
-  // 2. Tentukan format berdasarkan pemisah desimal terakhir
-  // Jika koma adalah pemisah terakhir, atau satu-satunya pemisah, asumsikan format Eropa
   if (lastComma > -1 && lastComma > lastDot) {
-    // Hapus semua titik (pemisah ribuan), lalu ganti koma desimal dengan titik
     cleaned = cleaned.replace(/\./g, "").replace(",", ".");
   } else {
-    // Asumsikan format US/standar. Cukup hapus koma (pemisah ribuan).
-    // Titik desimal (jika ada) akan di-handle oleh parseFloat.
     cleaned = cleaned.replace(/,/g, "");
   }
-
-  // 3. Lakukan parseFloat pada string yang sudah bersih.
   return parseFloat(cleaned) || 0;
 }
 
@@ -359,7 +260,7 @@ function parseLocaleNumber(numberString) {
 function setUserState(userId, stateObject) {
   const cache = CacheService.getScriptCache();
   // Simpan status untuk pengguna ini selama 10 menit.
-  cache.put(`user_state_${userId}`, JSON.stringify(stateObject), 600);
+  cache.put(`user_state_${userId}`, JSON.stringify(stateObject), 600); 
 }
 
 /**
@@ -374,67 +275,56 @@ function getUserState(userId) {
 
   if (stateJSON) {
     // Setelah status diambil, langsung hapus agar tidak digunakan lagi.
-    cache.remove(stateKey);
+    cache.remove(stateKey); 
     return JSON.parse(stateJSON);
   }
   return null;
 }
 
 /**
- * [FUNGSI BARU v3.4.0] Menyimpan data besar ke cache dengan teknik chunking.
- * Fungsi ini secara otomatis menangani invalidasi cache lama sebelum menyimpan yang baru.
- * @param {string} keyPrefix - Awalan unik untuk kunci cache, misal: 'vm_data'.
- * @param {object} data - Objek atau array data yang akan disimpan.
- * @param {number} durationInSeconds - Durasi penyimpanan cache dalam detik.
+ * [FINAL-FIX] Menyimpan data besar ke cache dengan teknik chunking.
+ * Memperbaiki bug dengan menggunakan cache.put() di dalam perulangan, bukan cache.putAll().
  */
 function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
   const cache = CacheService.getScriptCache();
   const manifestKey = `${keyPrefix}_manifest`;
 
-  // Hapus cache lama terlebih dahulu untuk memastikan invalidasi yang bersih
-  let oldManifest;
-  try {
-    const oldManifestJSON = cache.get(manifestKey);
-    if (oldManifestJSON) {
-      oldManifest = JSON.parse(oldManifestJSON);
+  // Hapus cache lama terlebih dahulu
+  const oldManifestJSON = cache.get(manifestKey);
+  if (oldManifestJSON) {
+    try {
+      const oldManifest = JSON.parse(oldManifestJSON);
+      if (oldManifest && oldManifest.totalChunks) {
+        const keysToRemove = [manifestKey];
+        for (let i = 0; i < oldManifest.totalChunks; i++) {
+          keysToRemove.push(`${keyPrefix}_chunk_${i}`);
+        }
+        cache.removeAll(keysToRemove);
+      }
+    } catch (e) {
+      console.warn(`Gagal parse manifest cache lama untuk ${keyPrefix}: ${e.message}`);
     }
-  } catch (e) {
-    console.warn(
-      `Gagal mem-parse manifest cache lama untuk prefix "${keyPrefix}". Mungkin sudah tidak ada. Error: ${e.message}`
-    );
   }
 
-  if (oldManifest && oldManifest.totalChunks) {
-    const keysToRemove = [manifestKey];
-    for (let i = 0; i < oldManifest.totalChunks; i++) {
-      keysToRemove.push(`${keyPrefix}_chunk_${i}`);
-    }
-    cache.removeAll(keysToRemove);
-    console.log(`Cache lama dengan prefix "${keyPrefix}" telah berhasil dihapus.`);
-  }
-
-  // Lanjutkan dengan penyimpanan data baru
   const dataString = JSON.stringify(data);
-  const maxChunkSize = 95 * 1024; // 95KB untuk batas aman
+  const maxChunkSize = 95 * 1024; // 95KB
   const chunks = [];
-
-  // Pecah data menjadi beberapa bagian jika perlu
   for (let i = 0; i < dataString.length; i += maxChunkSize) {
     chunks.push(dataString.substring(i, i + maxChunkSize));
   }
 
-  // Siapkan manifest dan semua potongan data untuk disimpan
   const manifest = { totalChunks: chunks.length };
-  const itemsToCache = {
-    [manifestKey]: JSON.stringify(manifest),
-  };
-  chunks.forEach((chunk, index) => {
-    itemsToCache[`${keyPrefix}_chunk_${index}`] = chunk;
-  });
-
+  
   try {
-    cache.putAll(itemsToCache, durationInSeconds);
+    // --- PERBAIKAN UTAMA DI SINI ---
+    // Simpan manifest terlebih dahulu
+    cache.put(manifestKey, JSON.stringify(manifest), durationInSeconds);
+    // Simpan setiap potongan data secara individual menggunakan perulangan
+    chunks.forEach((chunk, index) => {
+      cache.put(`${keyPrefix}_chunk_${index}`, chunk, durationInSeconds);
+    });
     console.log(`Data berhasil disimpan ke cache dengan prefix "${keyPrefix}" dalam ${chunks.length} potongan.`);
+    // --- AKHIR PERBAIKAN ---
   } catch (e) {
     console.error(`Gagal menyimpan data cache dengan teknik chunking untuk prefix "${keyPrefix}". Error: ${e.message}`);
   }
@@ -449,40 +339,29 @@ function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
 function readLargeDataFromCache(keyPrefix) {
   const cache = CacheService.getScriptCache();
   const manifestKey = `${keyPrefix}_manifest`;
-
   try {
     const manifestJSON = cache.get(manifestKey);
-    if (!manifestJSON) {
-      console.log(`Cache manifest untuk prefix "${keyPrefix}" tidak ditemukan (cache miss).`);
-      return null;
-    }
-
+    if (!manifestJSON) return null;
     const manifest = JSON.parse(manifestJSON);
     const totalChunks = manifest.totalChunks;
     const chunkKeys = [];
-
     for (let i = 0; i < totalChunks; i++) {
       chunkKeys.push(`${keyPrefix}_chunk_${i}`);
     }
-
     const cachedChunks = cache.getAll(chunkKeys);
     let reconstructedString = "";
-
-    // Validasi Integritas Cache (Sangat Penting!)
     for (let i = 0; i < totalChunks; i++) {
       const chunkKey = `${keyPrefix}_chunk_${i}`;
       if (!cachedChunks[chunkKey]) {
-        console.error(`Integritas cache rusak: Potongan "${chunkKey}" hilang. Membatalkan pembacaan cache.`);
-        return null; // Cache miss karena tidak lengkap
+        console.error(`Integritas cache rusak: Potongan "${chunkKey}" hilang.`);
+        return null;
       }
       reconstructedString += cachedChunks[chunkKey];
     }
-
-    console.log(`Data berhasil direkonstruksi dari ${totalChunks} potongan cache.`);
     return JSON.parse(reconstructedString);
   } catch (e) {
-    console.error(`Gagal membaca atau mem-parse data cache dengan prefix "${keyPrefix}". Error: ${e.message}`);
-    return null; // Cache miss karena error
+    console.error(`Gagal membaca data cache dengan prefix "${keyPrefix}". Error: ${e.message}`);
+    return null;
   }
 }
 
@@ -493,11 +372,8 @@ function readLargeDataFromCache(keyPrefix) {
 function createCallbackSession(dataToStore, config) {
   const cache = CacheService.getScriptCache();
   const sessionId = Utilities.getUuid().substring(0, 8);
-
   const timeout = (config.SYSTEM_LIMITS && config.SYSTEM_LIMITS.SESSION_TIMEOUT_SECONDS) || 900;
   cache.put(`session_${sessionId}`, JSON.stringify(dataToStore), timeout);
-
-  console.log(`Sesi callback dibuat dengan ID: ${sessionId}`);
   return sessionId;
 }
 
@@ -510,14 +386,10 @@ function getCallbackSession(sessionId) {
   const cache = CacheService.getScriptCache();
   const sessionKey = `session_${sessionId}`;
   const sessionJSON = cache.get(sessionKey);
-
   if (sessionJSON) {
-    console.log(`Mengambil sesi callback dengan ID: ${sessionId}`);
-    // Setelah sesi diambil, langsung hapus agar tidak bisa digunakan lagi (keamanan).
     cache.remove(sessionKey);
     return JSON.parse(sessionJSON);
   }
-  console.warn(`Sesi callback dengan ID: ${sessionId} tidak ditemukan atau telah kedaluwarsa.`);
   return null;
 }
 
@@ -528,26 +400,14 @@ function getCallbackSession(sessionId) {
  * @returns {{headers: Array<string>, dataRows: Array<Array<any>>}} Objek berisi header dan baris data.
  */
 function _getSheetData(sheetName) {
-  if (!sheetName) {
-    console.error("Nama sheet tidak disediakan ke _getSheetData.");
-    return { headers: [], dataRows: [] };
-  }
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-
-  if (!sheet) {
-    console.error(`Sheet dengan nama "${sheetName}" tidak ditemukan.`);
-    return { headers: [], dataRows: [] };
-  }
-
-  if (sheet.getLastRow() < 1) {
-    return { headers: [], dataRows: [] }; // Sheet kosong
-  }
-
-  const allData = sheet.getDataRange().getValues();
-  const headers = allData.shift() || []; // Ambil baris pertama sebagai header, atau array kosong jika tidak ada
-
-  return { headers: headers, dataRows: allData };
+    if (!sheetName) return { headers: [], dataRows: [] };
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return { headers: [], dataRows: [] };
+    if (sheet.getLastRow() < 1) return { headers: [], dataRows: [] };
+    const allData = sheet.getDataRange().getValues();
+    const headers = allData.shift() || [];
+    return { headers: headers, dataRows: allData };
 }
 
 /**
@@ -578,8 +438,8 @@ function getLevenshteinDistance(a, b) {
       } else {
         matrix[i][j] = Math.min(
           matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1, // insertion
-          matrix[i - 1][j] + 1 // deletion
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
         );
       }
     }
@@ -598,7 +458,7 @@ function findClosestCommand(wrongCommand) {
   let closestCommand = null;
   let minDistance = 3; // Batas toleransi, jangan sarankan jika terlalu beda
 
-  allCommands.forEach((command) => {
+  allCommands.forEach(command => {
     const distance = getLevenshteinDistance(wrongCommand, command);
     if (distance < minDistance) {
       minDistance = distance;
@@ -618,30 +478,30 @@ function findClosestCommand(wrongCommand) {
  * @returns {object} Objek berisi { cluster: '...', storageType: '...' }.
  */
 function getStorageInfoFromDsName(dsName, aliasMap) {
-  if (typeof dsName !== "string" || !aliasMap) return { cluster: null, storageType: null };
+    if (typeof dsName !== 'string' || !aliasMap) return { cluster: null, storageType: null };
 
-  // === AWAL BLOK PERBAIKAN UTAMA ===
-  // Regex baru yang lebih fleksibel: mencari pola kata-kata yang diakhiri dengan CL##
-  // Contoh: akan cocok dengan "TBN-COM-LNV-CL02" dan juga "COM-CL01"
-  const clusterMatch = dsName.match(/((?:\w+-)*CL\d+)/i);
-  const cluster = clusterMatch ? clusterMatch[0].toUpperCase() : null;
-  // === AKHIR BLOK PERBAIKAN UTAMA ===
+    // === AWAL BLOK PERBAIKAN UTAMA ===
+    // Regex baru yang lebih fleksibel: mencari pola kata-kata yang diakhiri dengan CL##
+    // Contoh: akan cocok dengan "TBN-COM-LNV-CL02" dan juga "COM-CL01"
+    const clusterMatch = dsName.match(/((?:\w+-)*CL\d+)/i);
+    const cluster = clusterMatch ? clusterMatch[0].toUpperCase() : null;
+    // === AKHIR BLOK PERBAIKAN UTAMA ===
 
-  // Cari alias storage yang cocok
-  let storageType = null;
-  // Urutkan kunci dari yang terpanjang agar tidak salah cocok (misal: "VSPA" sebelum "VSP")
-  const storageKeys = Object.keys(aliasMap).sort((a, b) => b.length - a.length);
+    // Cari alias storage yang cocok
+    let storageType = null;
+    // Urutkan kunci dari yang terpanjang agar tidak salah cocok (misal: "VSPA" sebelum "VSP")
+    const storageKeys = Object.keys(aliasMap).sort((a, b) => b.length - a.length);
 
-  for (const key of storageKeys) {
-    const aliases = aliasMap[key];
-    const isMatch = aliases.some((alias) => dsName.toUpperCase().includes(alias.toUpperCase()));
-    if (isMatch) {
-      // Gunakan alias pertama sebagai tipe storage utama
-      storageType = aliases[0];
-      break;
+    for (const key of storageKeys) {
+        const aliases = aliasMap[key];
+        const isMatch = aliases.some(alias => dsName.toUpperCase().includes(alias.toUpperCase()));
+        if (isMatch) {
+            // Gunakan alias pertama sebagai tipe storage utama
+            storageType = aliases[0];
+            break;
+        }
     }
-  }
-  return { cluster: cluster, storageType: storageType };
+    return { cluster: cluster, storageType: storageType };
 }
 
 /**
@@ -671,4 +531,36 @@ function createProgressBar(percentage, barLength = 10) {
   const filledPart = "█".repeat(filledCount);
   const emptyPart = "░".repeat(emptyCount);
   return `[${filledPart}${emptyPart}]`;
+}
+
+/**
+ * [BARU] Menghitung dan memformat durasi waktu relatif dari tanggal tertentu hingga sekarang.
+ * @param {Date | string} date - Tanggal mulai.
+ * @returns {string} String yang diformat seperti "(sekitar 2 tahun yang lalu)".
+ */
+function formatRelativeTime(date) {
+  if (!date) return "";
+  
+  const startDate = new Date(date);
+  if (isNaN(startDate.getTime())) return "";
+
+  const now = new Date();
+  const diffSeconds = Math.round((now - startDate) / 1000);
+  const diffMinutes = Math.round(diffSeconds / 60);
+  const diffHours = Math.round(diffMinutes / 60);
+  const diffDays = Math.round(diffHours / 24);
+  const diffMonths = Math.round(diffDays / 30.44);
+  const diffYears = Math.round(diffDays / 365.25);
+
+  if (diffYears > 0) {
+    return `(sekitar ${diffYears} tahun yang lalu)`;
+  } else if (diffMonths > 0) {
+    return `(sekitar ${diffMonths} bulan yang lalu)`;
+  } else if (diffDays > 0) {
+    return `(sekitar ${diffDays} hari yang lalu)`;
+  } else if (diffHours > 0) {
+    return `(sekitar ${diffHours} jam yang lalu)`;
+  } else {
+    return `(beberapa saat yang lalu)`;
+  }
 }

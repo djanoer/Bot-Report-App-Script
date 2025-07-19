@@ -16,21 +16,18 @@ function bacaAturanPenempatan() {
 
   const data = sheet.getDataRange().getValues();
   // Ambil header dan normalisasikan: ubah ke huruf kecil, hapus semua spasi
-  const headers = data.shift().map((h) => h.toLowerCase().replace(/\s+/g, ""));
-
-  data.forEach((row) => {
+  const headers = data.shift().map(h => h.toLowerCase().replace(/\s+/g, '')); 
+  
+  data.forEach(row => {
     // Abaikan baris kosong
-    if (row.every((cell) => cell === "")) return;
+    if (row.every(cell => cell === '')) return;
 
     const rule = {};
     headers.forEach((header, index) => {
       const cellValue = row[index];
       // Gunakan header yang sudah dinormalisasi sebagai kunci
-      if (typeof cellValue === "string" && cellValue.includes(",")) {
-        rule[header] = cellValue
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
+      if (typeof cellValue === 'string' && cellValue.includes(',')) {
+        rule[header] = cellValue.split(',').map(item => item.trim()).filter(Boolean);
       } else {
         rule[header] = cellValue;
       }
@@ -55,22 +52,22 @@ function bacaKebijakanCluster() {
   }
 
   const data = sheet.getDataRange().getValues();
-  const headers = data.shift().map((h) => h.toLowerCase().replace(/\s+/g, "")); // Normalisasi header
-
-  const clusterNameIndex = headers.indexOf("clustername");
+  const headers = data.shift().map(h => h.toLowerCase().replace(/\s+/g, '')); // Normalisasi header
+  
+  const clusterNameIndex = headers.indexOf('clustername');
   if (clusterNameIndex === -1) {
-    console.error("Header 'Cluster Name' tidak ditemukan di sheet Kebijakan.");
-    return policies;
+      console.error("Header 'Cluster Name' tidak ditemukan di sheet Kebijakan.");
+      return policies;
   }
 
-  data.forEach((row) => {
+  data.forEach(row => {
     const clusterName = row[clusterNameIndex];
     if (clusterName) {
-      const policy = {};
-      headers.forEach((header, index) => {
-        policy[header] = row[index];
-      });
-      policies.set(clusterName, policy);
+        const policy = {};
+        headers.forEach((header, index) => {
+            policy[header] = row[index];
+        });
+        policies.set(clusterName, policy);
     }
   });
 
@@ -86,8 +83,8 @@ function bacaKonfigurasi() {
     const K = KONSTANTA.KUNCI_KONFIG;
     const config = {};
     const properties = PropertiesService.getScriptProperties();
-    config.TELEGRAM_BOT_TOKEN = properties.getProperty("TELEGRAM_BOT_TOKEN");
-    config.WEBHOOK_BOT_TOKEN = properties.getProperty("WEBHOOK_BOT_TOKEN");
+    config.TELEGRAM_BOT_TOKEN = properties.getProperty('TELEGRAM_BOT_TOKEN');
+    config.WEBHOOK_BOT_TOKEN = properties.getProperty('WEBHOOK_BOT_TOKEN');
     config.ENVIRONMENT = properties.getProperty("ENVIRONMENT");
 
     if (!config.TELEGRAM_BOT_TOKEN || !config.WEBHOOK_BOT_TOKEN) {
@@ -97,44 +94,32 @@ function bacaKonfigurasi() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(KONSTANTA.NAMA_SHEET.KONFIGURASI);
     if (!sheet) throw new Error(`Sheet "Konfigurasi" tidak ditemukan.`);
-
+    
     const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
-
+    
     const arrayKeys = [
-      K.KOLOM_PANTAU,
-      K.KOLOM_PANTAU_DS,
-      K.DS_KECUALI,
-      K.STATUS_TIKET_AKTIF,
-      "KATA_KUNCI_DS_DIUTAMAKAN",
-      K.KRITIKALITAS_PANTAU,
+      K.KOLOM_PANTAU, K.KOLOM_PANTAU_DS, K.DS_KECUALI, 
+      K.STATUS_TIKET_AKTIF, 'KATA_KUNCI_DS_DIUTAMAKAN', K.KRITIKALITAS_PANTAU
     ];
-
+    
     const jsonKeys = [
-      K.MAP_ENV,
-      K.SKOR_KRITIKALITAS,
-      K.MAP_ALIAS_STORAGE,
-      K.MAP_KAPASITAS_STORAGE,
-      K.SYSTEM_LIMITS,
-      K.STORAGE_UTILIZATION_THRESHOLDS,
+        K.MAP_ENV, K.SKOR_KRITIKALITAS, K.MAP_ALIAS_STORAGE, 
+        K.MAP_KAPASITAS_STORAGE, K.SYSTEM_LIMITS,
+        K.STORAGE_UTILIZATION_THRESHOLDS
     ];
 
-    data.forEach((row) => {
+    data.forEach(row => {
       const key = row[0];
       const value = row[1];
       if (key) {
         if (jsonKeys.includes(key)) {
-          try {
-            config[key] = JSON.parse(value);
-          } catch (e) {
-            throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}. Periksa format di sheet Konfigurasi.`);
+          try { 
+            config[key] = JSON.parse(value); 
+          } catch (e) { 
+            throw new Error(`Gagal parse JSON untuk ${key}: ${e.message}. Periksa format di sheet Konfigurasi.`); 
           }
         } else if (arrayKeys.includes(key)) {
-          config[key] = value
-            ? String(value)
-                .split(",")
-                .map((k) => k.trim())
-                .filter(Boolean)
-            : [];
+          config[key] = value ? String(value).split(',').map(k => k.trim()).filter(Boolean) : [];
         } else {
           config[key] = value;
         }
@@ -148,18 +133,12 @@ function bacaKonfigurasi() {
       }
     }
 
-    const kritikalitasString = config[K.KATEGORI_KRITIKALITAS] || "";
-    const environmentString = config[K.KATEGORI_ENVIRONMENT] || "";
+    const kritikalitasString = config[K.KATEGORI_KRITIKALITAS] || '';
+    const environmentString = config[K.KATEGORI_ENVIRONMENT] || '';
 
-    config.LIST_KRITIKALITAS = kritikalitasString
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-    config.LIST_ENVIRONMENT = environmentString
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
+    config.LIST_KRITIKALITAS = kritikalitasString.split(',').map(item => item.trim()).filter(Boolean);
+    config.LIST_ENVIRONMENT = environmentString.split(',').map(item => item.trim()).filter(Boolean);
+    
     return config;
   } catch (e) {
     throw new Error(`Gagal membaca konfigurasi: ${e.message}`);
@@ -170,7 +149,7 @@ function getMigrationConfig(migrationLogicSheet) {
   const migrationConfig = new Map();
   if (migrationLogicSheet && migrationLogicSheet.getLastRow() > 1) {
     const rulesData = migrationLogicSheet.getRange(2, 1, migrationLogicSheet.getLastRow() - 1, 5).getValues();
-    rulesData.forEach((row) => {
+    rulesData.forEach(row => {
       const recognizedType = row[0];
       const priorityDest = [row[1], row[2], row[3]].filter(Boolean);
       const alias = row[4];
@@ -211,26 +190,26 @@ function setupSimpanTokenInteraktif() {
 
   // Meminta Token Telegram Bot
   const responseTelegram = ui.prompt(
-    "Langkah 1/2: Setup Token Telegram",
-    "Salin-tempel token untuk Telegram Bot Anda dari BotFather:",
+    'Langkah 1/2: Setup Token Telegram',
+    'Salin-tempel token untuk Telegram Bot Anda dari BotFather:',
     ui.ButtonSet.OK_CANCEL
   );
 
   if (responseTelegram.getSelectedButton() !== ui.Button.OK || !responseTelegram.getResponseText()) {
-    ui.alert("Setup dibatalkan oleh pengguna.");
+    ui.alert('Setup dibatalkan oleh pengguna.');
     return;
   }
   const tokenTelegram = responseTelegram.getResponseText().trim();
 
   // Meminta Token Rahasia Webhook
   const responseWebhook = ui.prompt(
-    "Langkah 2/2: Setup Token Webhook",
-    "Sekarang, masukkan token rahasia untuk webhook Anda (ini adalah teks rahasia yang Anda buat sendiri untuk mengamankan webhook):",
+    'Langkah 2/2: Setup Token Webhook',
+    'Sekarang, masukkan token rahasia untuk webhook Anda (ini adalah teks rahasia yang Anda buat sendiri untuk mengamankan webhook):',
     ui.ButtonSet.OK_CANCEL
   );
 
   if (responseWebhook.getSelectedButton() !== ui.Button.OK || !responseWebhook.getResponseText()) {
-    ui.alert("Setup dibatalkan oleh pengguna.");
+    ui.alert('Setup dibatalkan oleh pengguna.');
     return;
   }
   const tokenWebhook = responseWebhook.getResponseText().trim();
@@ -238,24 +217,23 @@ function setupSimpanTokenInteraktif() {
   // Menyimpan token ke tempat yang aman (logika penyimpanan tidak berubah)
   const properties = PropertiesService.getScriptProperties();
   properties.setProperties({
-    TELEGRAM_BOT_TOKEN: tokenTelegram,
-    WEBHOOK_BOT_TOKEN: tokenWebhook,
+    'TELEGRAM_BOT_TOKEN': tokenTelegram,
+    'WEBHOOK_BOT_TOKEN': tokenWebhook
   });
 
-  ui.alert("✅ BERHASIL!", "Semua token telah disimpan dengan aman di PropertiesService.", ui.ButtonSet.OK);
+  ui.alert('✅ BERHASIL!', 'Semua token telah disimpan dengan aman di PropertiesService.', ui.ButtonSet.OK);
 }
 
 function tesKoneksiTelegram() {
-  try {
-    const config = bacaKonfigurasi();
-    const pesanTes =
-      "<b>Tes Koneksi Bot Laporan VM</b>\n\nJika Anda menerima pesan ini, maka konfigurasi bot sudah benar.";
-    kirimPesanTelegram(pesanTes, config);
-    showUiFeedback("Terkirim!", "Pesan tes telah dikirim ke Telegram. Silakan periksa grup/chat Anda.");
-  } catch (e) {
-    console.error("Gagal menjalankan tes koneksi Telegram: " + e.message);
-    showUiFeedback("Gagal", `Gagal mengirim pesan tes. Error: ${e.message}`);
-  }
+    try {
+      const config = bacaKonfigurasi();
+      const pesanTes = "<b>Tes Koneksi Bot Laporan VM</b>\n\nJika Anda menerima pesan ini, maka konfigurasi bot sudah benar.";
+      kirimPesanTelegram(pesanTes, config);
+      showUiFeedback("Terkirim!", "Pesan tes telah dikirim ke Telegram. Silakan periksa grup/chat Anda.");
+    } catch (e) {
+      console.error("Gagal menjalankan tes koneksi Telegram: " + e.message);
+      showUiFeedback("Gagal", `Gagal mengirim pesan tes. Error: ${e.message}`);
+    }
 }
 
 /**
@@ -268,15 +246,9 @@ function tesKonfigurasi() {
     const config = bacaKonfigurasi();
     console.log("Konfigurasi berhasil dimuat. Isinya adalah:");
     console.log(JSON.stringify(config, null, 2)); // Mencatat objek config dengan format yang rapi
-    SpreadsheetApp.getUi().alert(
-      "Tes Konfigurasi Berhasil!",
-      "Silakan periksa Log Eksekusi untuk melihat isi dari objek konfigurasi."
-    );
+    SpreadsheetApp.getUi().alert("Tes Konfigurasi Berhasil!", "Silakan periksa Log Eksekusi untuk melihat isi dari objek konfigurasi.");
   } catch (e) {
     console.error(e);
-    SpreadsheetApp.getUi().alert(
-      "Tes Konfigurasi Gagal!",
-      `Terjadi error: ${e.message}. Silakan periksa Log Eksekusi untuk detail.`
-    );
+    SpreadsheetApp.getUi().alert("Tes Konfigurasi Gagal!", `Terjadi error: ${e.message}. Silakan periksa Log Eksekusi untuk detail.`);
   }
 }

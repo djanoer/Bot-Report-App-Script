@@ -1,12 +1,8 @@
 // ===== FILE: Visualisasi.gs =====
 
 /**
- * [FINAL v1.3.3] Membuat gambar grafik Pie Chart untuk distribusi aset.
- * Versi ini memperbaiki masalah legenda yang terpotong dengan mengatur posisi
- * legenda secara eksplisit dan memperlebar dimensi grafik.
- * @param {string} tipeDistribusi - Tipe data yang akan divisualisasikan, misal: "kritikalitas".
- * @param {object} config - Objek konfigurasi bot.
- * @returns {Blob|null} Objek Blob gambar PNG jika berhasil, atau null jika gagal.
+ * [REVISI FINAL] Membuat gambar grafik Pie Chart untuk distribusi aset.
+ * Versi ini melemparkan error secara transparan untuk pelaporan yang lebih baik dan konsisten.
  */
 function buatGrafikDistribusi(tipeDistribusi, config) {
   try {
@@ -30,7 +26,7 @@ function buatGrafikDistribusi(tipeDistribusi, config) {
     }
 
     if (columnIndex === -1) {
-      throw new Error(`Header untuk distribusi '${tipeDistribusi}' tidak ditemukan.`);
+      throw new Error(`Header untuk distribusi '${tipeDistribusi}' tidak ditemukan di sheet "Konfigurasi" atau "Data VM".`);
     }
 
     const counts = {};
@@ -47,27 +43,22 @@ function buatGrafikDistribusi(tipeDistribusi, config) {
     for (const category in counts) {
       const count = counts[category];
       const percentage = ((count / totalVms) * 100).toFixed(1);
-      const labelWithPercentage = `${category} (${percentage}%)`;
-      dataTable.addRow([labelWithPercentage, count]);
+      dataTable.addRow([`${category} (${percentage}%)`, count]);
     }
 
-    // === AWAL BLOK PERUBAHAN UTAMA ===
-    const chartBuilder = Charts.newPieChart()
+    const chart = Charts.newPieChart()
       .setDataTable(dataTable)
       .setTitle(title)
-      // Perlebar dimensi untuk memberi ruang lebih bagi legenda
       .setDimensions(750, 450)
       .set3D()
-      // Secara eksplisit atur posisi legenda ke kanan dengan opsi teks
       .setOption("legend", { position: "right", textStyle: { fontSize: 12 } })
-      .setOption("pieSliceText", "value");
-    // === AKHIR BLOK PERUBAHAN UTAMA ===
-
-    const chart = chartBuilder.build();
+      .setOption("pieSliceText", "value")
+      .build();
 
     return chart.getAs("image/png");
   } catch (e) {
-    console.error(`Gagal membuat grafik: ${e.message}`);
-    return null;
+    // --- PERBAIKAN UTAMA DI SINI ---
+    // Melemparkan kembali error agar bisa ditangkap oleh handler utama dengan pesan yang spesifik.
+    throw new Error(e.message);
   }
 }

@@ -1,19 +1,6 @@
 // ===== FILE: Pengujian.gs =====
 
-/**
- * Fungsi pembantu untuk membandingkan hasil yang diharapkan dengan hasil aktual.
- * @param {*} expected - Nilai yang seharusnya dihasilkan.
- * @param {*} actual - Nilai yang benar-benar dihasilkan oleh fungsi yang diuji.
- * @param {string} testName - Nama tes untuk identifikasi di log.
- */
-function assertEquals(expected, actual, testName) {
-  // Membandingkan dengan mengubah keduanya menjadi string untuk konsistensi
-  if (String(expected) !== String(actual)) {
-    console.error(`❌ GAGAL: ${testName}. | Diharapkan: "${expected}" | Hasil: "${actual}"`);
-  } else {
-    console.log(`✅ LULUS: ${testName}`);
-  }
-}
+// --- Suite Pengujian Unit ---
 
 /**
  * FUNGSI UTAMA: Jalankan fungsi ini dari editor untuk memulai semua pengujian unit.
@@ -21,9 +8,25 @@ function assertEquals(expected, actual, testName) {
  */
 function jalankanSemuaTes() {
   console.log("Memulai Pengujian Unit...");
-  tesFungsiUtilitas(); // Menjalankan tes untuk file Utilitas.gs
-  // Jika nanti Anda punya grup tes lain, panggil di sini. Contoh: tesFungsiParser();
+  
+  tesFungsiUtilitas();
+  tesFungsiManajemenData(); // Menambahkan suite tes baru
+  
   console.log("Pengujian Unit Selesai.");
+}
+
+/**
+ * Fungsi pembantu untuk membandingkan hasil yang diharapkan dengan hasil aktual.
+ */
+function assertEquals(expected, actual, testName) {
+  // Membandingkan dengan mengubah keduanya menjadi string untuk konsistensi
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+    console.error(`❌ GAGAL: ${testName}.`);
+    console.error(`   - Diharapkan: ${JSON.stringify(expected)}`);
+    console.error(`   - Hasil:      ${JSON.stringify(actual)}`);
+  } else {
+    console.log(`✅ LULUS: ${testName}`);
+  }
 }
 
 // --- Grup Tes untuk Utilitas.gs ---
@@ -44,4 +47,86 @@ function tesFungsiUtilitas() {
   assertEquals(100, parseLocaleNumber("100"), "parseLocaleNumber: Angka bulat");
   assertEquals(95.5, parseLocaleNumber("95,5%"), "parseLocaleNumber: Dengan simbol %");
   assertEquals(0, parseLocaleNumber("Teks Acak"), "parseLocaleNumber: Input teks acak");
+}
+
+
+// --- Grup Tes untuk ManajemenData.js ---
+function tesFungsiManajemenData() {
+  console.log("\n--- Menguji File: ManajemenData.js ---");
+
+  // 1. Menyiapkan data tiruan
+  const mockSheetData = {
+    [KONSTANTA.NAMA_SHEET.KONFIGURASI]: [
+        ["Kunci", "Nilai"],
+        [KONSTANTA.KUNCI_KONFIG.SHEET_VM, "Data VM Utama"],
+        [KONSTANTA.KUNCI_KONFIG.HEADER_VM_PK, "Id"],
+        [KONSTANTA.KUNCI_KONFIG.HEADER_VM_NAME, "Name"],
+        [KONSTANTA.KUNCI_KONFIG.HEADER_VM_IP, "IP Address"]
+    ],
+    "Data VM Utama": [
+      ["Id", "Name", "IP Address", "Cluster"],
+      ["VM-001-VC01", "WEB_SERVER_01", "192.168.1.10", "ClusterA"],
+      ["VM-002-VC01", "DB_SERVER_01", "192.168.1.20", "ClusterA"],
+      ["VM-003-VC02", "WEB_SERVER_02", "10.0.0.5", "ClusterB"]
+    ]
+  };
+  
+  // 2. Membuat objek tiruan SpreadsheetApp
+  // Ini menggantikan SpreadsheetApp.getActiveSpreadsheet() yang asli
+  const mockSpreadsheetApp = {
+      getActiveSpreadsheet: function() {
+          return Mocks.createMockSpreadsheet(mockSheetData);
+      }
+  };
+
+  // 3. Menjalankan tes pada searchVmOnSheet
+  
+  // Tes 1: Pencarian berdasarkan nama
+  let { results: results1 } = searchVmOnSheet_testable("WEB_SERVER", mockSpreadsheetApp);
+  assertEquals(2, results1.length, "searchVmOnSheet: Menemukan 2 VM 'WEB_SERVER'");
+
+  // Tes 2: Pencarian berdasarkan PK yang dinormalisasi
+  let { results: results2 } = searchVmOnSheet_testable("VM-002", mockSpreadsheetApp);
+  assertEquals(1, results2.length, "searchVmOnSheet: Menemukan 1 VM dengan PK 'VM-002'");
+  assertEquals("DB_SERVER_01", results2[0][1], "searchVmOnSheet: Nama VM dengan PK 'VM-002' sudah benar");
+  
+  // Tes 3: Pencarian tidak menemukan hasil
+  let { results: results3 } = searchVmOnSheet_testable("TIDAK_ADA", mockSpreadsheetApp);
+  assertEquals(0, results3.length, "searchVmOnSheet: Tidak menemukan hasil");
+}
+
+/**
+ * Versi "testable" dari searchVmOnSheet yang menerima mock object
+ * sebagai parameter (Dependency Injection).
+ */
+function searchVmOnSheet_testable(searchTerm, mockApp) {
+    // Di sini, kita "menyuntikkan" mockApp kita
+    const ss = mockApp.getActiveSpreadsheet(); 
+    
+    // Logika di bawah ini sama persis dengan fungsi aslinya,
+    // tetapi sekarang berjalan di atas data tiruan kita.
+    const configSheet = ss.getSheetByName(KONSTANTA.NAMA_SHEET.KONFIGURASI);
+    const configData = configSheet.getDataRange().getValues();
+    const config = Object.fromEntries(configData.slice(1));
+
+    const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
+    const sheet = ss.getSheetByName(sheetName);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const allData = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
+    
+    const pkIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_PK]);
+    const nameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_NAME]);
+    const ipIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_IP]);
+    
+    const searchLower = searchTerm.toLowerCase().trim();
+    const normalizedSearchTerm = normalizePrimaryKey(searchLower);
+
+    const results = allData.filter((row) => {
+      const vmPk = normalizePrimaryKey(String(row[pkIndex] || "")).toLowerCase();
+      const vmName = String(row[nameIndex] || "").toLowerCase();
+      const vmIp = String(row[ipIndex] || "").toLowerCase();
+      return vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower);
+    });
+
+    return { headers, results };
 }
