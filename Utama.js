@@ -7,7 +7,13 @@
  * Merupakan titik masuk (entry point) utama untuk semua interaksi dengan bot.
  * Berisi fungsi `doPost(e)` yang menangani semua permintaan masuk dari webhook
  * Telegram, serta `commandHandlers` yang merutekan perintah berbasis teks.
+ *
+ * @section FUNGSI UTAMA
+ * - doPost(e): Fungsi webhook utama yang menerima dan memproses semua update dari Telegram.
+ * - commandHandlers: Objek yang memetakan perintah teks (misal: /laporanharian) ke fungsi yang sesuai.
+ * - onOpen(): Membuat menu kustom di antarmuka Google Sheet.
  */
+
 
 /**
  * [REFACTORED v4.3.1] Handler untuk semua perintah bot.
@@ -31,7 +37,31 @@ const commandHandlers = {
       }
     }
   },
-  [KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN]: () => syncDanBuatLaporanHarian(false, "PERINTAH MANUAL"),
+  [KONSTANTA.PERINTAH_BOT.SYNC_LAPORAN]: (update, config, userDataAuth) => {
+    const chatId = update.message.chat.id;
+
+    // 1. Kirim pesan status awal
+    const timestamp = new Date().toLocaleString("id-ID", { hour: "2-digit", minute: "2-digit" });
+    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp} (dari Perintah /syncdata)</b>\n\n⏳ Sinkronisasi penuh & pembuatan laporan telah ditambahkan ke antrean...`;
+    const sentMessage = kirimPesanTelegram(pesanAwal, config, "HTML", null, chatId);
+    let statusMessageId = null;
+    if (sentMessage && sentMessage.ok) {
+      statusMessageId = sentMessage.result.message_id;
+    }
+
+    // 2. Buat tiket pekerjaan (job)
+    const jobData = { 
+      jobType: "sync_and_report", 
+      config: config, 
+      chatId: chatId,
+      statusMessageId: statusMessageId,
+      userData: userDataAuth // Sertakan info pengguna
+    };
+
+    // 3. Tambahkan pekerjaan ke antrean
+    const jobKey = `job_manual_sync_${Date.now()}`;
+    PropertiesService.getScriptProperties().setProperty(jobKey, JSON.stringify(jobData));
+  },
   [KONSTANTA.PERINTAH_BOT.PROVISIONING]: (update, config, userDataAuth) => {
     const chatId = update.message.chat.id;
     let statusMessageId = null;
@@ -41,7 +71,9 @@ const commandHandlers = {
         statusMessageId = sentMessage.result.message_id;
       }
 
-      const { headers, dataRows } = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+      // Memanggil fungsi baru yang cepat dan berbasis cache
+      const { headers, dataRows } = getVmData(config);
+      // Menyalurkan data yang sudah siap ke fungsi laporan
       const laporan = generateProvisioningReport(config, dataRows, headers);
 
       editMessageText(laporan, null, chatId, statusMessageId, config);
@@ -224,7 +256,10 @@ const commandHandlers = {
       if (sentMessage && sentMessage.ok) {
         statusMessageId = sentMessage.result.message_id;
       }
-      const laporan = generateAssetDistributionReport(config);
+      // Memanggil fungsi baru yang cepat dan berbasis cache
+      const { headers, dataRows } = getVmData(config);
+      // Menyalurkan data yang sudah siap ke fungsi laporan
+      const laporan = generateAssetDistributionReport(config, dataRows, headers);
       editMessageText(laporan, null, chatId, statusMessageId, config);
     } catch (e) {
       handleCentralizedError(e, `Perintah: /laporan-aset`, config, userDataAuth);
@@ -776,24 +811,39 @@ function onOpen() {
 // === FUNGSI-FUNGSI WRAPPER UNTUK UI FEEDBACK ===
 
 /**
- * [WRAPPER] Menjalankan runDailyJobs dan memberikan feedback ke UI Spreadsheet.
+ * [REFACTORED V.1.1] Mendelegasikan pekerjaan sinkronisasi penuh ke antrean
+ * untuk menghindari timeout saat dijalankan dari menu.
  */
 function runDailyJobsWithUiFeedback() {
+  const { config, userDataMap } = getBotState(); // Menggunakan getBotState untuk efisiensi
+
+  // Memberi notifikasi ke UI Spreadsheet
   SpreadsheetApp.getUi().alert(
-    "Memulai Proses...",
-    "Sinkronisasi penuh dan pembuatan laporan sedang berjalan di latar belakang. Proses ini mungkin memakan waktu beberapa menit.",
+    "Permintaan Diterima",
+    "Sinkronisasi penuh dan pembuatan laporan telah ditambahkan ke antrean dan akan diproses di latar belakang. Anda akan menerima laporan di Telegram setelah selesai.",
     SpreadsheetApp.getUi().ButtonSet.OK
   );
-  try {
-    syncDanBuatLaporanHarian(false, "MANUAL_DARI_MENU");
-    SpreadsheetApp.getUi().alert(
-      "Sukses!",
-      "Proses sinkronisasi dan laporan penuh telah berhasil dijalankan.",
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  } catch (e) {
-    SpreadsheetApp.getUi().alert("Gagal!", `Terjadi kesalahan: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+
+  // Mengirim pesan status awal ke Telegram
+  const timestamp = new Date().toLocaleString("id-ID", { hour: "2-digit", minute: "2-digit" });
+  let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp} (dari Menu)</b>\n\n⏳ Sinkronisasi penuh & pembuatan laporan telah ditambahkan ke antrean...`;
+  const sentMessage = kirimPesanTelegram(pesanAwal, config, "HTML");
+  let statusMessageId = null;
+  if (sentMessage && sentMessage.ok) {
+    statusMessageId = sentMessage.result.message_id;
   }
+
+  // Membuat tiket pekerjaan (job)
+  const jobData = { 
+    jobType: "sync_and_report", 
+    config: config, 
+    chatId: config.TELEGRAM_CHAT_ID, // Menggunakan chat ID utama
+    statusMessageId: statusMessageId // Menyertakan ID pesan status
+  };
+
+  // Menambahkan pekerjaan ke antrean
+  const jobKey = `job_manual_sync_${Date.now()}`;
+  PropertiesService.getScriptProperties().setProperty(jobKey, JSON.stringify(jobData));
 }
 
 /**
@@ -862,7 +912,7 @@ function jalankanLaporanMigrasiDariMenu() {
   );
   try {
     const laporan = jalankanRekomendasiMigrasi();
-    kirimPesanTelegram(laporan, bacaKonfigurasi(), "HTML");
+    kirimPesanTelegram(laporan, getBotState().config, "HTML");
     SpreadsheetApp.getUi().alert(
       "Terkirim!",
       "Laporan analisis migrasi telah dikirim ke Telegram.",

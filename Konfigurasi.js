@@ -216,7 +216,7 @@ function setupSimpanTokenInteraktif() {
 
 function tesKoneksiTelegram() {
     try {
-      const config = bacaKonfigurasi();
+      const { config } = getBotState();
       const pesanTes = "<b>Tes Koneksi Bot Laporan VM</b>\n\nJika Anda menerima pesan ini, maka konfigurasi bot sudah benar.";
       kirimPesanTelegram(pesanTes, config);
       showUiFeedback("Terkirim!", "Pesan tes telah dikirim ke Telegram. Silakan periksa grup/chat Anda.");

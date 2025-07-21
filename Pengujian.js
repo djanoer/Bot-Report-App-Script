@@ -1,17 +1,73 @@
-// ===== FILE: Pengujian.gs =====
+/**
+ * @file Pengujian.js
+ * @description
+ * Berisi suite pengujian unit (Unit Tests). Bertujuan untuk memverifikasi
+ * fungsionalitas dari fungsi-fungsi individual secara terisolasi untuk
+ * memastikan setiap komponen kecil bekerja sesuai harapan.
+ *
+ * @section FUNGSI UTAMA
+ * - jalankanSemuaTes(): Runner utama untuk mengeksekusi semua pengujian unit.
+ * - tesFungsiUtilitas(): Menguji fungsi-fungsi pembantu di file Utilitas.js.
+ * - tesFungsiManajemenData(): Menguji fungsi pencarian data di file ManajemenVM.js.
+ */
+
+
+// Pustaka ini diperlukan untuk membuat objek spreadsheet palsu untuk pengujian.
+const Mocks = (function() {
+  function MockSheet(name, data) {
+    this.name = name;
+    this.data = data || [[]];
+    this.lastRow = this.data.length;
+    this.lastCol = this.data.length > 0 ? this.data[0].length : 0;
+
+    this.getName = function() { return this.name; };
+    this.getLastRow = function() { return this.lastRow; };
+    this.getLastColumn = function() { return this.lastCol; };
+    this.getRange = function(row, col, numRows, numCols) {
+      const rangeData = [];
+      const endRow = row + (numRows || 1) - 1;
+      const endCol = col + (numCols || 1) - 1;
+
+      for (let i = row - 1; i < endRow && i < this.lastRow; i++) {
+        const rowData = [];
+        for (let j = col - 1; j < endCol && j < this.lastCol; j++) {
+          rowData.push(this.data[i][j]);
+        }
+        rangeData.push(rowData);
+      }
+
+      return {
+        getValues: function() { return rangeData; },
+        getValue: function() { return rangeData.length > 0 ? rangeData[0][0] : null; }
+      };
+    };
+    this.getDataRange = function() { return this.getRange(1, 1, this.lastRow, this.lastCol); };
+  }
+
+  function MockSpreadsheet(sheets) {
+    this.sheets = sheets || [];
+    this.getSheetByName = function(name) { return this.sheets.find(s => s.getName() === name) || null; };
+  }
+
+  return {
+    createMockSpreadsheet: function(sheetData) {
+      const mockSheets = Object.keys(sheetData).map(name => new MockSheet(name, sheetData[name]));
+      return new MockSpreadsheet(mockSheets);
+    }
+  };
+})();
 
 // --- Suite Pengujian Unit ---
 
 /**
  * FUNGSI UTAMA: Jalankan fungsi ini dari editor untuk memulai semua pengujian unit.
- * Ini adalah 'runner' yang akan memanggil semua grup tes.
  */
 function jalankanSemuaTes() {
   console.log("Memulai Pengujian Unit...");
-  
+
   tesFungsiUtilitas();
-  tesFungsiManajemenData(); // Menambahkan suite tes baru
-  
+  tesFungsiManajemenData();
+
   console.log("Pengujian Unit Selesai.");
 }
 

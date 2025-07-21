@@ -48,7 +48,7 @@ function callTelegramApi(method, payloadData, config) {
 }
 
 function setWebhook() {
-  const config = bacaKonfigurasi();
+  const { config } = getBotState();
   const webAppUrlBase = "https://script.google.com/macros/s/AKfycbzaevYC5eSTSQcoghSSHBryqjJfXXmV3P440Y_H5_K6wTVYblhby7jZ2nP7uG7c_ei3/exec";
 
   if (webAppUrlBase.includes("MASUKKAN")) {
@@ -86,8 +86,7 @@ function setWebhook() {
  * dengan mengirimkan parameter URL kosong.
  */
 function hapusWebhook() {
-  // Fungsi ini akan menggunakan konfigurasi dari lingkungan skrip yang sedang aktif
-  const config = bacaKonfigurasi(); 
+  const { config } = getBotState();
 
   console.log("Memulai proses penghapusan webhook...");
 
@@ -107,25 +106,24 @@ function hapusWebhook() {
 }
 
 /**
- * [OPTIMALISASI UX] Mengirim pesan ke Telegram dengan penanganan batas panjang pesan.
- * Fungsi ini sekarang mengembalikan objek respons dari Telegram, yang berisi message_id.
- * @returns {object|null} Objek respons dari pesan terakhir yang dikirim, atau null jika gagal.
+ * [REFACTORED V.1.2] Mengirim pesan ke Telegram dengan logika pemilihan Chat ID
+ * yang ketat berdasarkan lingkungan (ENVIRONMENT).
  */
 function kirimPesanTelegram(teksPesan, config, parseMode = "HTML", inlineKeyboard = null, targetChatId = null) {
   const TELEGRAM_MESSAGE_LIMIT = 4096;
   let chatTujuan;
 
-  // Logika Pemilih Otomatis
+  // Logika Pemilih Otomatis yang Diperkuat
   if (config.ENVIRONMENT === 'DEV') {
-     // Jika di DEV, selalu gunakan chat ID DEV
-     chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID_DEV);
+     // Jika di DEV, SELALU gunakan chat ID DEV, abaikan parameter targetChatId.
+     chatTujuan = String(config.TELEGRAM_CHAT_ID_DEV);
   } else {
-     // Jika di PROD (atau lingkungan lain), gunakan chat ID utama
+     // Jika di PROD (atau lingkungan lain), gunakan targetChatId jika ada, atau fallback ke chat ID utama.
      chatTujuan = targetChatId || String(config.TELEGRAM_CHAT_ID);
   }
-  
-  if (!chatTujuan) {
-    console.error("ID Chat tujuan tidak valid.");
+
+  if (!chatTujuan || chatTujuan === "undefined") {
+    console.error("ID Chat tujuan tidak valid atau tidak diatur di Konfigurasi.");
     return null;
   }
 
@@ -138,7 +136,6 @@ function kirimPesanTelegram(teksPesan, config, parseMode = "HTML", inlineKeyboar
     if (inlineKeyboard) {
       payloadData.reply_markup = JSON.stringify(inlineKeyboard);
     }
-    // [PERBAIKAN] Mengembalikan hasil dari callTelegramApi
     return callTelegramApi('sendMessage', payloadData, config);
   }
 

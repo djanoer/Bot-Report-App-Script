@@ -4,79 +4,118 @@
  * @date 2023-03-01
  *
  * @description
- * Bertindak sebagai orkestrator untuk proses pengolahan data inti dan sinkronisasi.
- * Fungsi utama di sini adalah jantung dari pekerjaan harian bot yang menyalin data,
+ * Bertindak sebagai orkestrator untuk proses pengolahan data inti.
+ * Fungsi utama di sini adalah jantung dari pekerjaan sinkronisasi yang menyalin data,
  * mendeteksi perubahan, dan memicu pembuatan laporan.
+ *
+ * @section FUNGSI UTAMA
+ * - jalankanAlurSinkronisasiPenuh(config, triggerSource): Menjalankan alur kerja sinkronisasi dan pelaporan secara lengkap.
+ * - processDataChanges(...): Mendeteksi perubahan (penambahan, modifikasi, penghapusan) pada data.
+ * - getCombinedLogs(...): Menggabungkan log dari sheet aktif dan file arsip.
+ * - salinDataSheet(...): Menyalin konten sheet dari spreadsheet sumber.
  */
+
 
 /**
- * [PINDAH] Menjadi pusat untuk semua pekerjaan harian.
+ * [ORKESTRATOR BARU] Menjalankan alur kerja sinkronisasi dan pelaporan secara lengkap.
+ * Fungsi ini menggabungkan logika yang sebelumnya ada di AntreanTugas.js.
  */
-function syncDanBuatLaporanHarian(showUiAlert = true, triggerSource = "TIDAK DIKETAHUI", config = null) {
-  const activeConfig = config || bacaKonfigurasi();
-  const lock = LockService.getScriptLock();
-  const lockTimeout = (activeConfig.SYSTEM_LIMITS && activeConfig.SYSTEM_LIMITS.LOCK_TIMEOUT_MS) || 10000;
-  
-  if (!lock.tryLock(lockTimeout)) {
-    console.log("Proses sinkronisasi sudah berjalan, permintaan saat ini dibatalkan.");
-    return;
+function jalankanAlurSinkronisasiPenuh(config, triggerSource) {
+  console.log(`Memulai proses sinkronisasi dari sumber: ${triggerSource}`);
+  const KUNCI = KONSTANTA.KUNCI_KONFIG;
+
+  // 1. Validasi konfigurasi penting
+  const sumberId = config[KUNCI.ID_SUMBER];
+  const sheetVmName = config[KUNCI.SHEET_VM];
+  if (!sumberId || !sheetVmName) {
+    throw new Error(`Konfigurasi kritis hilang: SUMBER_SPREADSHEET_ID atau NAMA_SHEET_DATA_UTAMA kosong.`);
   }
 
-  let statusMessageId = null;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(300000)) { // Coba kunci selama 5 menit
+    throw new Error("Proses sinkronisasi lain sedang berjalan. Permintaan dilewati.");
+  }
+
   try {
-    const startTime = new Date();
-    const timestamp = startTime.toLocaleString("id-ID", { hour: "2-digit", minute: "2-digit" });
-    let pesanAwal = `<b>Permintaan diterima pada pukul ${timestamp}</b>\n\n⏳ Memulai sinkronisasi penuh & pembuatan laporan...`;
-    const sentMessage = kirimPesanTelegram(pesanAwal, activeConfig, "HTML");
-    if (sentMessage && sentMessage.ok) statusMessageId = sentMessage.result.message_id;
+    // 2. Jalankan proses penyalinan dan deteksi perubahan
+    salinDataSheet(sheetVmName, sumberId);
+    processDataChanges(config, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, config[KUNCI.HEADER_VM_PK], (config[KUNCI.KOLOM_PANTAU] || []).map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.VM);
 
-    const KUNCI = KONSTANTA.KUNCI_KONFIG;
-    const sumberId = activeConfig[KUNCI.ID_SUMBER];
-    const sheetVmName = activeConfig[KUNCI.SHEET_VM];
-    const sheetDsName = activeConfig[KUNCI.SHEET_DS];
-
-    salinDataSheet(sheetVmName, sumberId, activeConfig);
-
-    try {
-      const { dataRows: vmData } = _getSheetData(sheetVmName);
-      if (vmData.length > 0) saveLargeDataToCache("vm_data", [vmData[0], ...vmData], 21600); // headers + data
-    } catch (e) {
-      console.error(`Gagal melakukan cache warming: ${e.message}`);
-    }
-
-    try {
-      const kolomVmUntukDipantau = activeConfig[KUNCI.KOLOM_PANTAU] || [];
-      if (kolomVmUntukDipantau.length > 0) {
-        processDataChanges(activeConfig, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, activeConfig[KUNCI.HEADER_VM_PK], kolomVmUntukDipantau.map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.VM);
-      }
-    } catch (e) {
-      console.error(`Gagal Menjalankan Pemeriksaan Perubahan VM: ${e.message}`);
-    }
-
+    const sheetDsName = config[KUNCI.SHEET_DS];
     if (sheetDsName) {
-      salinDataSheet(sheetDsName, sumberId, activeConfig);
-      try {
-        const kolomDsUntukDipantau = activeConfig[KUNCI.KOLOM_PANTAU_DS] || [];
-        if (kolomDsUntukDipantau.length > 0) {
-          processDataChanges(activeConfig, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, activeConfig[KUNCI.DS_NAME_HEADER], kolomDsUntukDipantau.map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.DATASTORE);
-        }
-      } catch (e) {
-        console.error(`Gagal Menjalankan Pemeriksaan Perubahan Datastore: ${e.message}`);
-      }
+      salinDataSheet(sheetDsName, sumberId);
+      processDataChanges(config, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, config[KUNCI.DS_NAME_HEADER], (config[KUNCI.KOLOM_PANTAU_DS] || []).map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.DATASTORE);
     }
 
-    const pesanLaporanOperasional = buatLaporanHarianVM(activeConfig);
-    kirimPesanTelegram(pesanLaporanOperasional, activeConfig, "HTML");
-    if (statusMessageId) editMessageText(`<b>✅ Proses Selesai</b>`, null, activeConfig.TELEGRAM_CHAT_ID, statusMessageId, activeConfig);
-  
-  } catch (e) {
-    handleCentralizedError(e, "syncDanBuatLaporanHarian", activeConfig, {firstName: "System", id: "trigger"});
-    if (statusMessageId) editMessageText(`<b>❌ Proses Gagal</b>`, null, activeConfig.TELEGRAM_CHAT_ID, statusMessageId, activeConfig);
+    // 3. Buat laporan
+    console.log("Sinkronisasi selesai. Membuat laporan...");
+    const pesanLaporan = buatLaporanHarianVM(config);
+    console.log("Pembuatan laporan selesai.");
+    return pesanLaporan; // Kembalikan string laporan
+
   } finally {
     lock.releaseLock();
   }
 }
 
+/**
+ * [REFACTORED V.1.3 - DEFINITIVE] Menjalankan proses inti sinkronisasi dengan
+ * validasi konfigurasi yang tangguh sebelum eksekusi.
+ */
+function syncDanBuatLaporanHarian(triggerSource = "TIDAK DIKETAHUI", config) {
+  // --- BLOK VALIDASI BARU ---
+  // 1. Periksa kunci-kunci konfigurasi yang paling penting sebelum melakukan apa pun.
+  const KUNCI = KONSTANTA.KUNCI_KONFIG;
+  const requiredKeys = [KUNCI.ID_SUMBER, KUNCI.SHEET_VM];
+  const missingKeys = requiredKeys.filter(key => !config[key]);
+
+  // 2. Jika ada kunci yang hilang, lemparkan error yang sangat spesifik.
+  if (missingKeys.length > 0) {
+    throw new Error(`Konfigurasi tidak valid. Kunci berikut hilang atau kosong di sheet "Konfigurasi": ${missingKeys.join(', ')}. Harap periksa kembali sheet Anda.`);
+  }
+  // --- AKHIR BLOK VALIDASI ---
+
+  const lock = LockService.getScriptLock();
+  const lockTimeout = (config.SYSTEM_LIMITS && config.SYSTEM_LIMITS.LOCK_TIMEOUT_MS) || 10000;
+
+  if (!lock.tryLock(lockTimeout)) {
+    console.log("Proses sinkronisasi sudah berjalan, permintaan saat ini dibatalkan.");
+    throw new Error("Proses sinkronisasi lain sedang berjalan. Permintaan Anda dilewati.");
+  }
+
+  try {
+    console.log(`Memulai sinkronisasi dari sumber: ${triggerSource}`);
+    const sumberId = config[KUNCI.ID_SUMBER];
+    const sheetVmName = config[KUNCI.SHEET_VM];
+    const sheetDsName = config[KUNCI.SHEET_DS];
+
+    // Proses Sinkronisasi Data VM
+    salinDataSheet(sheetVmName, sumberId);
+    const kolomVmUntukDipantau = config[KUNCI.KOLOM_PANTAU] || [];
+    if (kolomVmUntukDipantau.length > 0) {
+      processDataChanges(config, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, config[KUNCI.HEADER_VM_PK], kolomVmUntukDipantau.map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.VM);
+    }
+
+    // Proses Sinkronisasi Data Datastore (jika ada)
+    if (sheetDsName) {
+      salinDataSheet(sheetDsName, sumberId);
+      const kolomDsUntukDipantau = config[KUNCI.KOLOM_PANTAU_DS] || [];
+      if (kolomDsUntukDipantau.length > 0) {
+        processDataChanges(config, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, config[KUNCI.DS_NAME_HEADER], kolomDsUntukDipantau.map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.DATASTORE);
+      }
+    }
+
+    // Membuat laporan dan mengembalikan hasilnya
+    const pesanLaporanOperasional = buatLaporanHarianVM(config);
+    return pesanLaporanOperasional;
+
+  } catch (e) {
+    // Salurkan error ke tingkat yang lebih tinggi untuk dilaporkan
+    throw new Error(`Gagal saat sinkronisasi: ${e.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
 
 /**
  * [PINDAH] Helper untuk menyalin konten sebuah sheet dari spreadsheet sumber ke tujuan.

@@ -14,11 +14,8 @@
  * - generateClusterAnalysis(clusterName, config): Menganalisis dan meringkas metrik kesehatan sebuah cluster.
  * - diagnoseOverprovisioningCause(dsName, config): Mendiagnosis kemungkinan penyebab datastore over-provisioned.
  * - findBestDestination(...): Menemukan datastore tujuan terbaik untuk migrasi VM berdasarkan aturan.
- *
- * @notes
- * Fungsi-fungsi di sini bersifat "read-only" dan tidak melakukan modifikasi data.
- * Sangat bergantung pada data yang akurat dari sheet 'Data VM' dan 'Datastore'.
  */
+
 
 /**
  * [REFACTOR v4.7.0 - READ ONCE & PROACTIVE VALIDATION] Menjalankan alur kerja analisis migrasi.

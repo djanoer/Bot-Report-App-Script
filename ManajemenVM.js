@@ -5,9 +5,152 @@
  *
  * @description
  * Mengelola semua logika bisnis inti yang berkaitan dengan entitas Virtual Machine (VM).
- * Tanggung jawab utama file ini mencakup pencarian VM, pengambilan detail,
+ * Tanggung jawab utama file ini mencakup pencarian, pengambilan data (Cache-First),
  * pelacakan riwayat perubahan, dan analisis profil VM.
+ *
+ * @section FUNGSI UTAMA
+ * - getVmData(config): Mengambil data VM dari cache atau spreadsheet. PENGGANTI _getSheetData.
+ * - searchVmOnSheet(searchTerm, config): Mencari VM berdasarkan nama, IP, atau PK.
+ * - searchVmsByColumn(columnName, searchValue, config): Fungsi pencarian generik berdasarkan kolom.
+ * - getVmHistory(pk, config): Mengambil riwayat lengkap sebuah VM dari log aktif dan arsip.
  */
+
+
+/**
+ * [FUNGSI BARU & SUPERIOR] Mengambil data VM dengan strategi Cache-First.
+ * Ini akan menjadi PENGGANTI UTAMA untuk panggilan _getSheetData untuk data VM.
+ * @param {object} config - Objek konfigurasi.
+ * @returns {{headers: Array<string>, dataRows: Array<Array<any>>}}
+ */
+function getVmData(config) {
+  // 1. Coba baca dari cache terlebih dahulu untuk performa maksimal
+  let allDataWithHeaders = readLargeDataFromCache("vm_data");
+
+  if (allDataWithHeaders) {
+    console.log("Data VM berhasil diambil dari cache.");
+    const headers = allDataWithHeaders.shift(); // Pisahkan header dari data
+    return { headers: headers, dataRows: allDataWithHeaders };
+  }
+
+  // 2. Jika cache kosong, baru baca dari Spreadsheet
+  console.log("Cache VM kosong, membaca dari Spreadsheet...");
+  const { headers, dataRows } = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
+
+  if (dataRows.length > 0) {
+    // 3. Lakukan "cache warming" agar panggilan berikutnya lebih cepat
+    saveLargeDataToCache("vm_data", [headers, ...dataRows], 21600); // Simpan kembali dengan header
+  }
+
+  return { headers, dataRows };
+}
+
+/**
+ * [FINAL-FIX] Menyimpan data besar ke cache dengan teknik chunking.
+ * Memperbaiki bug dengan menggunakan cache.put() di dalam perulangan, bukan cache.putAll().
+ */
+function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
+  const cache = CacheService.getScriptCache();
+  const manifestKey = `${keyPrefix}_manifest`;
+
+  // Hapus cache lama terlebih dahulu
+  const oldManifestJSON = cache.get(manifestKey);
+  if (oldManifestJSON) {
+    try {
+      const oldManifest = JSON.parse(oldManifestJSON);
+      if (oldManifest && oldManifest.totalChunks) {
+        const keysToRemove = [manifestKey];
+        for (let i = 0; i < oldManifest.totalChunks; i++) {
+          keysToRemove.push(`${keyPrefix}_chunk_${i}`);
+        }
+        cache.removeAll(keysToRemove);
+      }
+    } catch (e) {
+      console.warn(`Gagal parse manifest cache lama untuk ${keyPrefix}: ${e.message}`);
+    }
+  }
+
+  const dataString = JSON.stringify(data);
+  const maxChunkSize = 95 * 1024; // 95KB
+  const chunks = [];
+  for (let i = 0; i < dataString.length; i += maxChunkSize) {
+    chunks.push(dataString.substring(i, i + maxChunkSize));
+  }
+
+  const manifest = { totalChunks: chunks.length };
+  
+  try {
+    // --- PERBAIKAN UTAMA DI SINI ---
+    // Simpan manifest terlebih dahulu
+    cache.put(manifestKey, JSON.stringify(manifest), durationInSeconds);
+    // Simpan setiap potongan data secara individual menggunakan perulangan
+    chunks.forEach((chunk, index) => {
+      cache.put(`${keyPrefix}_chunk_${index}`, chunk, durationInSeconds);
+    });
+    console.log(`Data berhasil disimpan ke cache dengan prefix "${keyPrefix}" dalam ${chunks.length} potongan.`);
+    // --- AKHIR PERBAIKAN ---
+  } catch (e) {
+    console.error(`Gagal menyimpan data cache dengan teknik chunking untuk prefix "${keyPrefix}". Error: ${e.message}`);
+  }
+}
+
+/**
+ * [FUNGSI BARU v3.4.0] Membaca data besar dari cache yang disimpan dengan teknik chunking.
+ * Dilengkapi dengan validasi integritas untuk memastikan data tidak rusak.
+ * @param {string} keyPrefix - Awalan unik untuk kunci cache.
+ * @returns {object|null} Data yang telah direkonstruksi, atau null jika cache tidak lengkap atau tidak ada.
+ */
+function readLargeDataFromCache(keyPrefix) {
+  const cache = CacheService.getScriptCache();
+  const manifestKey = `${keyPrefix}_manifest`;
+  try {
+    const manifestJSON = cache.get(manifestKey);
+    if (!manifestJSON) return null;
+    const manifest = JSON.parse(manifestJSON);
+    const totalChunks = manifest.totalChunks;
+    const chunkKeys = [];
+    for (let i = 0; i < totalChunks; i++) {
+      chunkKeys.push(`${keyPrefix}_chunk_${i}`);
+    }
+    const cachedChunks = cache.getAll(chunkKeys);
+    let reconstructedString = "";
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkKey = `${keyPrefix}_chunk_${i}`;
+      if (!cachedChunks[chunkKey]) {
+        console.error(`Integritas cache rusak: Potongan "${chunkKey}" hilang.`);
+        return null;
+      }
+      reconstructedString += cachedChunks[chunkKey];
+    }
+    return JSON.parse(reconstructedString);
+  } catch (e) {
+    console.error(`Gagal membaca data cache dengan prefix "${keyPrefix}". Error: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * [FUNGSI BARU & GENERIK] Mencari VM berdasarkan kriteria kolom tertentu.
+ * Menggunakan data yang sudah di-cache dari getVmData untuk performa tinggi.
+ * @param {string} columnName - Nama header kolom yang akan dicari.
+ * @param {string} searchValue - Nilai yang ingin dicocokkan di dalam kolom.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {{headers: Array, results: Array}}
+ */
+function searchVmsByColumn(columnName, searchValue, config) {
+  const { headers, dataRows } = getVmData(config); // Menggunakan fungsi superior kita
+
+  const columnIndex = headers.indexOf(columnName);
+  if (columnIndex === -1) {
+    throw new Error(`Kolom header "${columnName}" tidak dapat ditemukan di sheet "Data VM".`);
+  }
+
+  const searchLower = searchValue.toLowerCase();
+  const results = dataRows.filter(row =>
+    String(row[columnIndex] || "").toLowerCase() === searchLower
+  );
+
+  return { headers, results };
+}
 
 /**
  * [FINAL & BULLETPROOF] Mencari VM dengan strategi Cache-First dan pelaporan error yang sangat detail.
@@ -89,60 +232,13 @@ function searchVmOnSheet(searchTerm, config) {
 }
 
 function searchVmsByCluster(clusterName, config) {
-  const K = KONSTANTA.KUNCI_KONFIG;
-  const sheetName = config[K.SHEET_VM];
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-
-  if (!sheet || sheet.getLastRow() < 2) {
-    throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
-  }
-
-  // 1. Baca SELURUH data dari sheet dalam SATU KALI panggilan.
-  const allDataWithHeaders = sheet.getDataRange().getValues();
-  const headers = allDataWithHeaders.shift();
-  const allData = allDataWithHeaders;
-
-  const clusterHeaderName = config[K.HEADER_VM_CLUSTER];
-  const clusterIndex = headers.indexOf(clusterHeaderName);
-
-  if (clusterIndex === -1) {
-    throw new Error(`Kolom header untuk cluster ("${clusterHeaderName}") tidak ditemukan di sheet "${sheetName}".`);
-  }
-
-  // 2. Lakukan penyaringan di dalam memori, yang sangat cepat.
-  const results = allData.filter((row) => {
-    // Memastikan perbandingan case-insensitive untuk hasil yang lebih andal
-    return String(row[clusterIndex] || "").toLowerCase() === clusterName.toLowerCase();
-  });
-
-  return { headers, results };
+  const clusterHeader = config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_CLUSTER];
+  return searchVmsByColumn(clusterHeader, clusterName, config);
 }
 
 function searchVmsByDatastore(datastoreName, config) {
-  const sheetName = config[KONSTANTA.KUNCI_KONFIG.SHEET_VM];
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-
-  if (!sheet || sheet.getLastRow() < 2) {
-    throw new Error(`Sheet "${sheetName}" tidak dapat ditemukan atau kosong.`);
-  }
-
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const datastoreColumn = config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER];
-  const datastoreIndex = headers.indexOf(datastoreColumn);
-
-  if (datastoreIndex === -1) {
-    throw new Error(`Kolom header untuk datastore ("${datastoreColumn}") tidak ditemukan di sheet "${sheetName}".`);
-  }
-
-  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-
-  const results = allData.filter(
-    (row) => String(row[datastoreIndex] || "").toLowerCase() === datastoreName.toLowerCase()
-  );
-
-  return { headers, results };
+  const datastoreHeader = config[KONSTANTA.KUNCI_KONFIG.VM_DS_COLUMN_HEADER];
+  return searchVmsByColumn(datastoreHeader, datastoreName, config);
 }
 
 function getVmHistory(pk, config) {

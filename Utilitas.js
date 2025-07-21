@@ -6,8 +6,17 @@
  * @description
  * Kumpulan fungsi pembantu (helper/utility) generik yang digunakan di
  * berbagai bagian dalam proyek. Menyediakan fungsi yang dapat digunakan kembali
- * untuk tugas umum seperti manajemen cache, sesi, dan parsing.
+ * untuk tugas umum seperti manajemen sesi, parsing, dan penanganan error.
+ *
+ * @section FUNGSI UTAMA
+ * - normalizePrimaryKey(pk): Membersihkan Primary Key dari sufiks lokasi.
+ * - handleCentralizedError(...): Pusat penanganan error untuk logging dan notifikasi.
+ * - createPaginatedView(...): Membuat tampilan interaktif dengan navigasi halaman.
+ * - getBotState(): Mengambil konfigurasi dan hak akses dari cache atau spreadsheet.
+ * - clearBotStateCache(): Membersihkan semua cache bot yang relevan secara tuntas.
+ * - setUserState/getUserState: Mengelola status percakapan multi-langkah pengguna.
  */
+
 
 function escapeHtml(text) {
   if (typeof text !== 'string') text = String(text);
@@ -212,44 +221,43 @@ function getBotState() {
 }
 
 /**
- * [REFACTOR FINAL] Menghapus SEMUA cache bot yang relevan.
- * Fungsi ini sekarang juga membersihkan cache data VM ("vm_data").
+ * [REFACTORED V.1.3 - TAHAN BANTING] Menghapus SEMUA kemungkinan cache bot
+ * dengan pendekatan "brute force" untuk memastikan keandalan.
+ * Fungsi ini tidak lagi bergantung pada manifest yang bisa rusak.
  */
 function clearBotStateCache() {
   try {
     const cache = CacheService.getScriptCache();
-    
-    // 1. Kunci cache state (konfigurasi & hak akses)
-    const stateCacheKey = "BOT_STATE_V2";
-    
-    // 2. Kunci cache data VM (manifest & semua potongannya)
-    const vmDataManifestKey = "vm_data_manifest";
-    const vmDataManifestJSON = cache.get(vmDataManifestKey);
-    const keysToRemove = [stateCacheKey, vmDataManifestKey];
+    const keysToRemove = [];
 
-    if (vmDataManifestJSON) {
-      try {
-        const manifest = JSON.parse(vmDataManifestJSON);
-        if (manifest && manifest.totalChunks) {
-          for (let i = 0; i < manifest.totalChunks; i++) {
-            keysToRemove.push(`vm_data_chunk_${i}`);
-          }
-        }
-      } catch (e) {
-        console.warn(`Gagal mem-parse manifest cache vm_data saat pembersihan: ${e.message}`);
-      }
+    // 1. Tambahkan kunci cache state yang pasti
+    keysToRemove.push("BOT_STATE_V2");
+    keysToRemove.push("vm_data_manifest");
+
+    // 2. Pendekatan "Brute Force" untuk cache data VM yang terfragmentasi.
+    // Kita mencoba menghapus hingga 50 potongan (mencakup ~5MB data),
+    // yang seharusnya lebih dari cukup. Ini akan menghapus semua potongan
+    // yang ada tanpa perlu membaca manifest terlebih dahulu.
+    for (let i = 0; i < 50; i++) {
+      keysToRemove.push(`vm_data_chunk_${i}`);
     }
 
-    // Hapus semua cache yang teridentifikasi sekaligus
+    // 3. Tambahkan juga kunci cache untuk state pengguna
+    // (Meskipun durasinya singkat, lebih baik dibersihkan juga)
+    // Catatan: Ini memerlukan ID pengguna, jadi kita lewati untuk pembersihan global,
+    // atau kita bisa menyimpannya di tempat lain jika perlu.
+    // Untuk saat ini, fokus pada cache utama.
+
+    // 4. Hapus semua kunci yang teridentifikasi sekaligus
     cache.removeAll(keysToRemove);
-    
-    // Reset state di memori juga
+
+    // 5. Reset state di memori untuk sesi eksekusi saat ini
     botState = null;
-    
-    console.log(`Pembersihan cache berhasil. Kunci yang dihapus: ${keysToRemove.join(", ")}`);
+
+    console.log(`PEMBERSIHAN CACHE TUNTAS: Upaya penghapusan untuk ${keysToRemove.length} kunci cache telah dijalankan.`);
     return true;
   } catch (e) {
-    console.error(`Gagal menghapus cache bot: ${e.message}`);
+    console.error(`Gagal menjalankan pembersihan cache total: ${e.message}`);
     return false;
   }
 }
@@ -303,90 +311,6 @@ function getUserState(userId) {
     return JSON.parse(stateJSON);
   }
   return null;
-}
-
-/**
- * [FINAL-FIX] Menyimpan data besar ke cache dengan teknik chunking.
- * Memperbaiki bug dengan menggunakan cache.put() di dalam perulangan, bukan cache.putAll().
- */
-function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
-  const cache = CacheService.getScriptCache();
-  const manifestKey = `${keyPrefix}_manifest`;
-
-  // Hapus cache lama terlebih dahulu
-  const oldManifestJSON = cache.get(manifestKey);
-  if (oldManifestJSON) {
-    try {
-      const oldManifest = JSON.parse(oldManifestJSON);
-      if (oldManifest && oldManifest.totalChunks) {
-        const keysToRemove = [manifestKey];
-        for (let i = 0; i < oldManifest.totalChunks; i++) {
-          keysToRemove.push(`${keyPrefix}_chunk_${i}`);
-        }
-        cache.removeAll(keysToRemove);
-      }
-    } catch (e) {
-      console.warn(`Gagal parse manifest cache lama untuk ${keyPrefix}: ${e.message}`);
-    }
-  }
-
-  const dataString = JSON.stringify(data);
-  const maxChunkSize = 95 * 1024; // 95KB
-  const chunks = [];
-  for (let i = 0; i < dataString.length; i += maxChunkSize) {
-    chunks.push(dataString.substring(i, i + maxChunkSize));
-  }
-
-  const manifest = { totalChunks: chunks.length };
-  
-  try {
-    // --- PERBAIKAN UTAMA DI SINI ---
-    // Simpan manifest terlebih dahulu
-    cache.put(manifestKey, JSON.stringify(manifest), durationInSeconds);
-    // Simpan setiap potongan data secara individual menggunakan perulangan
-    chunks.forEach((chunk, index) => {
-      cache.put(`${keyPrefix}_chunk_${index}`, chunk, durationInSeconds);
-    });
-    console.log(`Data berhasil disimpan ke cache dengan prefix "${keyPrefix}" dalam ${chunks.length} potongan.`);
-    // --- AKHIR PERBAIKAN ---
-  } catch (e) {
-    console.error(`Gagal menyimpan data cache dengan teknik chunking untuk prefix "${keyPrefix}". Error: ${e.message}`);
-  }
-}
-
-/**
- * [FUNGSI BARU v3.4.0] Membaca data besar dari cache yang disimpan dengan teknik chunking.
- * Dilengkapi dengan validasi integritas untuk memastikan data tidak rusak.
- * @param {string} keyPrefix - Awalan unik untuk kunci cache.
- * @returns {object|null} Data yang telah direkonstruksi, atau null jika cache tidak lengkap atau tidak ada.
- */
-function readLargeDataFromCache(keyPrefix) {
-  const cache = CacheService.getScriptCache();
-  const manifestKey = `${keyPrefix}_manifest`;
-  try {
-    const manifestJSON = cache.get(manifestKey);
-    if (!manifestJSON) return null;
-    const manifest = JSON.parse(manifestJSON);
-    const totalChunks = manifest.totalChunks;
-    const chunkKeys = [];
-    for (let i = 0; i < totalChunks; i++) {
-      chunkKeys.push(`${keyPrefix}_chunk_${i}`);
-    }
-    const cachedChunks = cache.getAll(chunkKeys);
-    let reconstructedString = "";
-    for (let i = 0; i < totalChunks; i++) {
-      const chunkKey = `${keyPrefix}_chunk_${i}`;
-      if (!cachedChunks[chunkKey]) {
-        console.error(`Integritas cache rusak: Potongan "${chunkKey}" hilang.`);
-        return null;
-      }
-      reconstructedString += cachedChunks[chunkKey];
-    }
-    return JSON.parse(reconstructedString);
-  } catch (e) {
-    console.error(`Gagal membaca data cache dengan prefix "${keyPrefix}". Error: ${e.message}`);
-    return null;
-  }
 }
 
 /**
