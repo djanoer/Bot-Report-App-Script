@@ -1,4 +1,13 @@
-// ===== FILE: Tiket.gs =====
+/**
+ * @file Tiket.js
+ * @author Djanoer Team
+ * @date 2023-04-12
+ *
+ * @description
+ * Mengelola semua logika yang berkaitan dengan data tiket utilisasi.
+ * Bertanggung jawab untuk sinkronisasi data tiket dan menyajikannya kepada
+ * pengguna melalui menu interaktif.
+ */
 
 // =================================================================
 // FUNGSI UTAMA: PENGENDALI INTERAKSI TIKET (ROUTER)
@@ -37,10 +46,6 @@ function syncTiketDataForTrigger() {
 // FUNGSI PEMBUAT TAMPILAN (VIEW GENERATORS)
 // =================================================================
 
-/**
- * [REVISI FINAL] Membuat tampilan ringkasan utama yang konsisten dan lengkap.
- * Menampilkan Ikhtisar Semua Tiket dan Analisis Tiket Aktif secara terpisah.
- */
 function generateSummaryView(config) {
   const { ticketData, headers } = getLocalTicketData(config);
   if (!ticketData || ticketData.length === 0) {
@@ -50,7 +55,6 @@ function generateSummaryView(config) {
   const K = KONSTANTA.KUNCI_KONFIG;
   const statusIndex = headers.indexOf(config[K.HEADER_TIKET_STATUS]);
 
-  // --- Langkah 1: Hitung Ikhtisar SEMUA status tiket ---
   const allStatusCounts = {};
   ticketData.forEach((row) => {
     const status = String(row[statusIndex] || "").trim();
@@ -58,7 +62,6 @@ function generateSummaryView(config) {
   });
   const totalTickets = Object.values(allStatusCounts).reduce((sum, count) => sum + count, 0);
 
-  // --- Langkah 2: Dapatkan kategori usia yang HANYA berisi tiket aktif ---
   const ageCategories = categorizeTicketAgeWithNewRules(ticketData, headers, config);
   const totalActiveTickets = Object.values(ageCategories).reduce((sum, categoryArray) => sum + categoryArray.length, 0);
 
@@ -66,39 +69,28 @@ function generateSummaryView(config) {
 
   let text = `📊 <b>Monitoring & Analisis Tiket Utilisasi</b>\n`;
   text += `<i>Diperbarui pada: ${timestamp}</i>\n`;
-  
-  // --- Tampilkan Ikhtisar Semua Tiket ---
+
   text += `\n<b>Ikhtisar Status Tiket (Total: ${totalTickets})</b>\n`;
   for (const status in allStatusCounts) {
     text += `• ${escapeHtml(status)}: <b>${allStatusCounts[status]}</b>\n`;
   }
 
   text += KONSTANTA.UI_STRINGS.SEPARATOR;
-  
-  // --- Tampilkan Analisis Tiket Aktif ---
+
   text += `<b>Analisis Usia Tindak Lanjut (Total Tiket Aktif: ${totalActiveTickets})</b>\n`;
   text += `Silakan pilih kategori di bawah untuk inspeksi lebih lanjut:`;
 
-  const createCallback = (category) => {
-      const sessionId = createCallbackSession({ category: category }, config);
-      return `ticket_machine:show_list:${sessionId}`;
-  };
-
-  // Tombol sekarang akan selalu konsisten dengan total tiket aktif
   const keyboard = {
     inline_keyboard: [
-      [{ text: `Belum Ditindaklanuti (${ageCategories.notFollowedUp.length})`, callback_data: createCallback("notFollowedUp") }],
-      [{ text: `Tindak Lanjut 7-14 Hari (${ageCategories.followedUp7to14Days.length})`, callback_data: createCallback("followedUp7to14Days") }],
-      [{ text: `Tindak Lanjut 14-28 Hari (${ageCategories.followedUp14to28Days.length})`, callback_data: createCallback("followedUp14to28Days") }],
-      [{ text: `Tindak Lanjut > 1 Bulan (${ageCategories.followedUpOver1Month.length})`, callback_data: createCallback("followedUpOver1Month") }],
+      [{ text: `Belum Ditindaklanjuti (${ageCategories.notFollowedUp.length})`, callback_data: CallbackHelper.build('ticket_machine', 'show_list', { category: "notFollowedUp" }, config) }],
+      [{ text: `Tindak Lanjut 7-14 Hari (${ageCategories.followedUp7to14Days.length})`, callback_data: CallbackHelper.build('ticket_machine', 'show_list', { category: "followedUp7to14Days" }, config) }],
+      [{ text: `Tindak Lanjut 14-28 Hari (${ageCategories.followedUp14to28Days.length})`, callback_data: CallbackHelper.build('ticket_machine', 'show_list', { category: "followedUp14to28Days" }, config) }],
+      [{ text: `Tindak Lanjut > 1 Bulan (${ageCategories.followedUpOver1Month.length})`, callback_data: CallbackHelper.build('ticket_machine', 'show_list', { category: "followedUpOver1Month" }, config) }],
     ],
   };
   return { text, keyboard };
 }
 
-/**
- * [REFACTOR STATE-DRIVEN] Membuat tampilan daftar tiket.
- */
 function generateTicketListView(category, config) {
   const { ticketData, headers } = getLocalTicketData(config);
   const K = KONSTANTA.KUNCI_KONFIG;
@@ -123,21 +115,23 @@ function generateTicketListView(category, config) {
       const ticketUrl = row[linkIndex] || "#";
       const ticketId = parseTicketId(ticketUrl);
       const ticketCategory = row[categoryIndex] || "N/A";
-      
-      const detailSessionId = createCallbackSession({ ticketId: ticketId, fromCategory: category }, config);
-      keyboardRows.push([{ text: `Lihat Keterangan ${ticketId}`, callback_data: `ticket_machine:show_detail:${detailSessionId}` }]);
+
+      const sessionData = { ticketId: ticketId, fromCategory: category };
+      keyboardRows.push([{ 
+        text: `Lihat Keterangan ${ticketId}`, 
+        callback_data: CallbackHelper.build('ticket_machine', 'show_detail', sessionData, config) 
+      }]);
       text += `${i + 1}. <a href="${ticketUrl}"><b>${ticketId}</b></a>, ${escapeHtml(ticketCategory)}\n`;
     });
   }
 
-  const summarySessionId = createCallbackSession({}, config);
-  keyboardRows.push([{ text: "⬅️ Kembali ke Ringkasan", callback_data: `ticket_machine:show_summary:${summarySessionId}` }]);
+  keyboardRows.push([{ 
+    text: "⬅️ Kembali ke Ringkasan", 
+    callback_data: CallbackHelper.build('ticket_machine', 'show_summary', {}, config) 
+  }]);
   return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
 
-/**
- * [REFACTOR STATE-DRIVEN] Membuat tampilan detail tiket.
- */
 function generateDetailView(ticketId, fromCategory, config) {
   const { ticketData, headers } = getLocalTicketData(config);
   const K = KONSTANTA.KUNCI_KONFIG;
@@ -153,9 +147,11 @@ function generateDetailView(ticketId, fromCategory, config) {
     text += "<i>Detail untuk tiket ini tidak dapat ditemukan.</i>";
   }
 
-  const listSessionId = createCallbackSession({ category: fromCategory }, config);
   const keyboard = {
-    inline_keyboard: [[{ text: "⬅️ Kembali ke Daftar", callback_data: `ticket_machine:show_list:${listSessionId}` }]],
+    inline_keyboard: [[{ 
+      text: "⬅️ Kembali ke Daftar", 
+      callback_data: CallbackHelper.build('ticket_machine', 'show_list', { category: fromCategory }, config) 
+    }]],
   };
   return { text, keyboard };
 }
@@ -314,9 +310,10 @@ function findActiveTicketsByVmName(vmName, config) {
       
       if (ticketVmNameClean && ticketVmNameClean.includes(searchedVmNameClean)) {
         const ticketStatus = String(row[statusIndex] || '').toLowerCase().trim();
+        const statusSelesai = (config[K.STATUS_TIKET_SELESAI] || []).map(s => s.toLowerCase());
         
         // Menggunakan logika status BUKAN 'done'
-        if (ticketStatus && ticketStatus !== 'done') {
+        if (ticketStatus && !statusSelesai.includes(ticketStatus)) {
           relevantTickets.push({
             id: parseTicketId(row[linkIndex] || ''),
             name: String(row[nameIndex]).trim(),

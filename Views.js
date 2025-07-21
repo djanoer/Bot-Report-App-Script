@@ -1,4 +1,16 @@
-// ===== FILE: Views.gs =====
+/**
+ * @file Views.js
+ * @author Djanoer Team
+ * @date 2023-08-15
+ *
+ * @description
+ * Berisi fungsi-fungsi yang bertanggung jawab murni untuk me-render (menggambar)
+ * tampilan atau "view" yang akan dikirim ke Telegram. Fungsi-fungsi ini bersifat
+ * "bodoh" (dumb components), artinya mereka hanya menerima objek state dan
+ * mengubahnya menjadi pesan teks dan keyboard.
+ * @notes
+ * Saat ini file ini merupakan konsep arsitektur dan belum diaktifkan dalam alur utama.
+ */
 
 /**
  * Berisi semua fungsi yang bertanggung jawab untuk me-render (menggambar)

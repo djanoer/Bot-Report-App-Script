@@ -1,4 +1,13 @@
-// ===== FILE: Peringatan.gs =====
+/**
+ * @file Peringatan.js
+ * @author Djanoer Team
+ * @date 2023-07-12
+ *
+ * @description
+ * Bertanggung jawab untuk menjalankan pemeriksaan proaktif terhadap kondisi infrastruktur
+ * berdasarkan ambang batas yang ditentukan di konfigurasi. Menghasilkan laporan
+ * peringatan jika ditemukan anomali.
+ */
 
 /**
  * [FINAL v4.0.0] Menjalankan pemeriksaan dan menghasilkan laporan hibrida cerdas.
@@ -65,12 +74,12 @@ function jalankanPemeriksaanAmbangBatas(config) {
               Object.keys(matiByCrit).sort(sortCrit).forEach(crit => { finalMessage += `  - ${escapeHtml(crit)}: ${matiByCrit[crit]}\n`; });
           }
 
-          const sessionData = { exportType: 'all_vm_alerts' };
+          const sessionData = { exportType: KONSTANTA.TIPE_INTERNAL.EKSPOR_PERINGATAN_VM };
           const sessionId = createCallbackSession(sessionData, config);
-          
+
           keyboard = {
               inline_keyboard: [[
-                  { text: `📄 Ekspor Detail ${vmAlerts.length} Peringatan VM`, callback_data: `${KONSTANTA.CALLBACK_KONDISI.EXPORT_VM}${sessionId}` }
+                  { text: `📄 Ekspor Detail ${vmAlerts.length} Peringatan VM`, callback_data: `kondisi_machine:export_alerts:${sessionId}` }
               ]]
           };
       }
@@ -78,7 +87,7 @@ function jalankanPemeriksaanAmbangBatas(config) {
       // 5. Tambahkan footer info jika ada datastore yang over-provisioned
       const adaOverProvisioned = dsAlerts.some(alert => alert.tipe.includes("Over-provisioned"));
       if (adaOverProvisioned) {
-          finalMessage += `\n\n<i><b>Info:</b> Untuk datastore yang over-provisioned, gunakan <code>/migrasicheck</code> untuk mendapatkan rekomendasi perbaikan.</i>`;
+          finalMessage += `\n\n<i><b>Info:</b> Untuk datastore yang over-provisioned, gunakan <code>${KONSTANTA.PERINTAH_BOT.MIGRASI_CHECK}</code> untuk mendapatkan rekomendasi perbaikan.</i>`;
       }
       
       return { pesan: finalMessage, keyboard: keyboard };

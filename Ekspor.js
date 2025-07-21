@@ -1,4 +1,13 @@
-// ===== FILE: Ekspor.gs =====
+/**
+ * @file Ekspor.js
+ * @author Djanoer Team
+ * @date 2023-08-11
+ *
+ * @description
+ * Mengelola semua logika yang berkaitan dengan ekspor data ke Google Sheets.
+ * File ini menangani permintaan ekspor, memproses data, dan membuat file
+ * laporan di Google Drive.
+ */
 
 /**
  * [PINDAH] Mengekspor data ke Google Sheet dengan logika pengurutan otomatis.
@@ -132,177 +141,134 @@ function processUptimeExport(exportType, config) {
   return { headers: headers, data: filteredData, title: dynamicTitle };
 }  
 
-/**
-* [REFACTOR FINAL] Mengendalikan semua permintaan ekspor dari menu interaktif.
-* Fungsi ini sekarang menggunakan tipe ekspor dari data sesi secara langsung.
-*/
-function handleExportRequest(update, config, userData) {
-  const callbackQuery = update.callback_query;
-  const sessionData = callbackQuery.sessionData;
-  const exportType = sessionData.type; // Mengambil tipe dari sesi
-  
-  const chatId = callbackQuery.message.chat.id;
-  
-  let statusMessageId = null;
-  try {
-    const titleForStatus = exportType.replace(/_/g, " ").toUpperCase();
-    const sentMessage = kirimPesanTelegram(
-      `⏳ Memulai proses ekspor untuk <b>${titleForStatus}</b>... Harap tunggu.`,
-      config, "HTML", null, chatId
-    );
-    if (sentMessage && sentMessage.ok) {
-      statusMessageId = sentMessage.result.message_id;
-    }
-  } catch (e) {
-    console.warn(`Gagal mengirim pesan status awal untuk ekspor: ${e.message}`);
+function exportMachine(update, config, userData) {
+const callbackQuery = update.callback_query;
+const sessionData = callbackQuery.sessionData;
+const exportType = sessionData.type;
+const chatId = callbackQuery.message.chat.id;
+
+let statusMessageId = null;
+
+try {
+  // Beri notifikasi singkat bahwa tombol sudah ditekan
+  answerCallbackQuery(callbackQuery.id, config, `Memproses permintaan...`);
+
+  // Gunakan helper baru untuk mendapatkan judul yang profesional
+  const friendlyTitle = _getFriendlyExportTitle(exportType);
+  const waitMessage = `⏳ Harap tunggu, sedang memproses permintaan ekspor Anda untuk "<b>${friendlyTitle}</b>"...`;
+
+  const sentMessage = kirimPesanTelegram(waitMessage, config, "HTML", null, chatId);
+  if (sentMessage && sentMessage.ok) {
+    statusMessageId = sentMessage.result.message_id;
   }
 
-  try {
-    let headers, data, title, highlightColumn = null;
-    const K = KONSTANTA.KUNCI_KONFIG;
+  // Buat tiket tugas dan sertakan ID pesan "tunggu"
+  const jobData = {
+    jobType: 'export_menu',
+    context: { exportType: exportType },
+    config: config,
+    userData: userData,
+    chatId: chatId,
+    statusMessageId: statusMessageId // Sertakan ID pesan di sini
+  };
 
-    // --- PERBAIKAN UTAMA: Menggunakan 'exportType' secara langsung di switch ---
-    switch (exportType) {
-      case "log_today":
-      case "log_7_days":
-      case "log_30_days": {
-        const now = new Date();
-        let startDate = new Date();
-        if (exportType === "log_today") {
-          startDate.setHours(0, 0, 0, 0);
-          title = "Log Perubahan Hari Ini (Termasuk Arsip)";
-        } else if (exportType === "log_7_days") {
-          startDate.setDate(now.getDate() - 7);
-          title = "Log Perubahan 7 Hari Terakhir (Termasuk Arsip)";
-        } else {
-          startDate.setDate(now.getDate() - 30);
-          title = "Log Perubahan 30 Hari Terakhir (Termasuk Arsip)";
-        }
-        const combinedLogResult = getCombinedLogs(startDate, config);
-        headers = combinedLogResult.headers;
-        data = combinedLogResult.data;
-        highlightColumn = config[K.HEADER_LOG_ACTION];
-        break;
-      }
+  const jobKey = `job_${callbackQuery.from.id}_${Date.now()}`;
+  PropertiesService.getScriptProperties().setProperty(jobKey, JSON.stringify(jobData));
 
-      case "all_vms":
-      case "vms_vc01":
-      case "vms_vc02": {
-        const { headers: vmHeaders, dataRows: allVmData } = _getSheetData(config[K.SHEET_VM]);
-        headers = vmHeaders;
-
-        if (exportType === "all_vms") {
-          data = allVmData;
-          title = "Semua Data VM";
-        } else {
-          const vcenterHeaderName = config[K.HEADER_VM_VCENTER];
-          const vcenterIndex = headers.indexOf(vcenterHeaderName);
-          if (vcenterIndex === -1) throw new Error(`Kolom '${vcenterHeaderName}' tidak ditemukan.`);
-          
-          const vcenter = exportType.split("_").pop().toUpperCase();
-          data = allVmData.filter((row) => String(row[vcenterIndex]).toUpperCase() === vcenter);
-          title = `Data VM di ${vcenter}`;
-        }
-        highlightColumn = config[K.HEADER_VM_VCENTER];
-        break;
-      }
-
-      case "uptime_cat_1":
-      case "uptime_cat_2":
-      case "uptime_cat_3":
-      case "uptime_cat_4":
-      case "uptime_invalid": {
-        // Fungsi processUptimeExport perlu sedikit penyesuaian
-        const result = processUptimeExport(exportType, config);
-        if (result) {
-          headers = result.headers;
-          data = result.data;
-          title = result.title;
-          highlightColumn = config[K.HEADER_VM_UPTIME];
-        }
-        break;
-      }
-      
-      default:
-        // Menambahkan default case untuk menangani tipe yang tidak dikenal
-        throw new Error(`Tipe ekspor tidak dikenal: ${exportType}`);
-    }
-
-    if (data && headers && headers.length > 0) {
-      if (data.length > 0) {
-        exportResultsToSheet(headers, data, title, config, userData, highlightColumn);
-        if (statusMessageId) {
-          editMessageText(`✅ Proses ekspor untuk <b>${title}</b> telah selesai. Hasilnya telah dikirimkan.`, null, chatId, statusMessageId, config);
-        }
-      } else {
-        const noDataMessage = `ℹ️ Tidak ada data yang dapat diekspor untuk kategori "<b>${title}</b>".`;
-        if (statusMessageId) {
-          editMessageText(noDataMessage, null, chatId, statusMessageId, config);
-        } else {
-          kirimPesanTelegram(noDataMessage, config, "HTML", null, chatId);
-        }
-      }
-    } else {
-      const failMessage = `⚠️ Gagal memproses permintaan: Tidak dapat menemukan data untuk ekspor "${exportType}".`;
-      if (statusMessageId) {
-        editMessageText(failMessage, null, chatId, statusMessageId, config);
-      } else {
-        kirimPesanTelegram(failMessage, config, "HTML", null, chatId);
-      }
-    }
-  } catch (e) {
-    handleCentralizedError(e, `Permintaan Ekspor (${exportType})`, config, userData);
-    const errorMessage = `⚠️ Terjadi kesalahan saat memproses ekspor Anda.\n<code>${escapeHtml(e.message)}</code>`;
-    if (statusMessageId) {
-      editMessageText(errorMessage, null, chatId, statusMessageId, config);
-    } else {
-      kirimPesanTelegram(errorMessage, config, "HTML", null, chatId);
-    }
+} catch (e) {
+  handleCentralizedError(e, `Permintaan Ekspor (Gagal Antre) (${exportType})`, config, userData);
+  if (statusMessageId) {
+    editMessageText(`⚠️ Terjadi kesalahan saat menambahkan tugas ke antrean.`, null, chatId, statusMessageId, config);
   }
+}
 }
 
 /**
- * [PINDAH] Mengeksekusi satu pekerjaan ekspor dari antrean.
- */
+* [HELPER BARU] Menerjemahkan exportType internal menjadi judul yang ramah pengguna.
+* @param {string} exportType - Tipe ekspor internal (mis. "log_7_days").
+* @returns {string} Judul yang sudah diformat untuk ditampilkan ke pengguna.
+*/
+function _getFriendlyExportTitle(exportType) {
+switch (exportType) {
+  case "log_today": return "Log Hari Ini";
+  case "log_7_days": return "Log 7 Hari Terakhir";
+  case "log_30_days": return "Log 30 Hari Terakhir";
+  case "uptime_cat_1": return "VM Uptime < 1 Tahun";
+  case "uptime_cat_2": return "VM Uptime 1-2 Tahun";
+  case "uptime_cat_3": return "VM Uptime 2-3 Tahun";
+  case "uptime_cat_4": return "VM Uptime > 3 Tahun";
+  case "uptime_invalid": return "VM dengan Uptime Tidak Valid";
+  case "all_vms": return "Semua Data VM";
+  case "vms_vc01": return "Data VM di VC01";
+  case "vms_vc02": return "Data VM di VC02";
+  default: return "Laporan Kustom";
+}
+}
+
+/**
+* [PINDAH & REFACTOR] Mengeksekusi satu pekerjaan ekspor dari antrean.
+* Versi ini telah diperbaiki untuk menangani semua jenis ekspor kontekstual.
+*/
 function executeExportJob(jobData) {
-  try {
-    const { config, userData, chatId } = jobData;
-    let searchResults;
-    let title, headers, results;
+const { config, userData, chatId, statusMessageId, context } = jobData;
+let title = "Laporan Kontekstual"; // Judul default
 
-    if (jobData.jobType === "history") {
-      const context = jobData.context;
-      searchResults = context.pk ? getVmHistory(context.pk, config) : getCombinedLogs(new Date(0), config);
-      title = context.pk ? `Laporan Riwayat - PK ${context.pk}` : `Laporan Riwayat Perubahan Hari Ini`;
-      headers = searchResults.headers;
-      results = searchResults.history || searchResults.data;
-    } else {
-      if (jobData.listType) {
-        const { listType, itemName } = jobData;
-        const searchFunction = listType === "cluster" ? searchVmsByCluster : searchVmsByDatastore;
-        searchResults = searchFunction(itemName, config);
-        const friendlyListType = listType.charAt(0).toUpperCase() + listType.slice(1);
-        title = `Laporan VM di ${friendlyListType} - ${itemName}`;
-      } else if (jobData.searchTerm) {
-        const { searchTerm } = jobData;
-        searchResults = searchVmOnSheet(searchTerm, config);
-        title = `Laporan Hasil Pencarian - '${searchTerm}'`;
-      } else {
-        throw new Error("Data pekerjaan ekspor tidak valid.");
-      }
-      headers = searchResults.headers;
-      results = searchResults.results;
-    }
+try {
+  let headers, results;
 
-    if (!results || results.length === 0) {
-      kirimPesanTelegram(`ℹ️ Tidak ada data untuk diekspor untuk permintaan: "${title}".`, config, "HTML", null, chatId);
-      return;
-    }
-    exportResultsToSheet(headers, results, title, config, userData);
-  } catch (e) {
-    console.error(`Gagal mengeksekusi pekerjaan ekspor: ${JSON.stringify(jobData)}. Error: ${e.message}`);
-    if (jobData.config && jobData.chatId) {
-      kirimPesanTelegram(`🔴 Gagal memproses file ekspor Anda.\n<code>Penyebab: ${escapeHtml(e.message)}</code>`, jobData.config, "HTML", null, jobData.chatId);
-    }
+  // --- LOGIKA BARU YANG LEBIH CERDAS ---
+  // Periksa isi dari 'context' untuk menentukan jenis ekspor
+  if (context.pk || context.timeframe) {
+    // Ini adalah permintaan ekspor RIWAYAT
+    const searchResults = context.pk ? getVmHistory(context.pk, config) : getCombinedLogs(new Date(0), config);
+    title = context.pk ? `Laporan Riwayat - PK ${context.pk}` : `Laporan Riwayat Perubahan Hari Ini`;
+    headers = searchResults.headers;
+    results = searchResults.history || searchResults.data;
+  } 
+  else if (context.listType) {
+    // Ini adalah permintaan ekspor DAFTAR VM (Cluster/Datastore)
+    const { listType, itemName } = context;
+    const searchFunction = listType === "cluster" ? searchVmsByCluster : searchVmsByDatastore;
+    const searchResults = searchFunction(itemName, config);
+    const friendlyListType = listType.charAt(0).toUpperCase() + listType.slice(1);
+    title = `Laporan VM di ${friendlyListType} - ${itemName}`;
+    headers = searchResults.headers;
+    results = searchResults.results;
+  } else if (context.searchTerm) {
+    // Ini adalah permintaan ekspor HASIL PENCARIAN
+    const { searchTerm } = context;
+    const searchResults = searchVmOnSheet(searchTerm, config);
+    title = `Laporan Hasil Pencarian - '${searchTerm}'`;
+    headers = searchResults.headers;
+    results = searchResults.results;
+  } else {
+    // Jika tidak ada konteks yang cocok, baru lempar error
+    throw new Error("Data pekerjaan ekspor tidak valid atau konteks tidak dikenali.");
   }
+
+  if (!results || results.length === 0) {
+    const noDataMessage = `ℹ️ Tidak ada data untuk diekspor untuk permintaan: "<b>${title}</b>".`;
+    if (statusMessageId) {
+      editMessageText(noDataMessage, null, chatId, statusMessageId, config);
+    } else {
+      kirimPesanTelegram(noDataMessage, config, "HTML", null, chatId);
+    }
+    return;
+  }
+
+  exportResultsToSheet(headers, results, title, config, userData);
+  if (statusMessageId) {
+    const successMessage = `✅ Laporan "<b>${title}</b>" telah berhasil dibuat dan dikirimkan.`;
+    editMessageText(successMessage, null, chatId, statusMessageId, config);
+  }
+
+} catch (e) {
+  console.error(`Gagal mengeksekusi pekerjaan ekspor: ${JSON.stringify(jobData)}. Error: ${e.message}`);
+  if (statusMessageId) {
+      const errorMessage = `❌ Gagal memproses ekspor "<b>${title}</b>".\n\n<i>Penyebab: ${e.message}</i>`;
+      editMessageText(errorMessage, null, chatId, statusMessageId, config);
+  } else if (config && chatId) {
+      kirimPesanTelegram(`🔴 Gagal memproses file ekspor Anda.\n<code>Penyebab: ${escapeHtml(e.message)}</code>`, config, "HTML", null, chatId);
+  }
+}
 }

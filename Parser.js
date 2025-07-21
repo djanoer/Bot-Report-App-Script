@@ -1,4 +1,13 @@
-// ===== FILE: Parser.gs =====
+/**
+ * @file Parser.js
+ * @author Djanoer Team
+ * @date 2023-06-15
+ *
+ * @description
+ * Bertanggung jawab untuk mem-parsing (mengurai) blok teks dari pesan yang di-forward.
+ * Didesain untuk mengenali berbagai format laporan dan mengekstrak metrik-metrik
+ * penting menjadi format data yang terstruktur.
+ */
 
 /**
  * [FINAL v1.5.0] Router utama untuk parsing.

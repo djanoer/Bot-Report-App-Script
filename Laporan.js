@@ -1,39 +1,52 @@
-// ===== FILE: Laporan.js =====
+/**
+ * @file Laporan.js
+ * @author Djanoer Team
+ * @date 2023-02-22
+ *
+ * @description
+ * Bertanggung jawab untuk menghasilkan berbagai jenis laporan teks yang dikirim ke Telegram.
+ * Fungsi-fungsi di sini mengumpulkan, menganalisis, dan memformat data menjadi
+ * ringkasan yang informatif.
+ */
 
 /**
- * [REFACTORED v3.5.0] Mengambil status provisioning dengan membaca header dari Konfigurasi.
+ * [REFACTORED v3.5.1 - FINAL] Mengambil status provisioning dari data datastore.
+ * Fungsi ini sekarang bertindak sebagai kalkulator murni yang mengembalikan objek status,
+ * bukan string yang sudah diformat, untuk mendukung prinsip Separation of Concerns.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {object} Objek berisi status provisioning, contoh: { isOverProvisioned: boolean, message: string }.
  */
 function getProvisioningStatusSummary(config) {
   try {
-    const K = KONSTANTA.KUNCI_KONFIG; // Standarisasi menggunakan 'K'
+    const K = KONSTANTA.KUNCI_KONFIG;
     const sheetName = config[K.SHEET_DS];
     if (!sheetName) {
-      return "<i>Status provisioning tidak dapat diperiksa: NAMA_SHEET_DATASTORE belum diatur.</i>";
+      // Mengembalikan status default jika sheet tidak dikonfigurasi
+      return { isOverProvisioned: false, message: "<i>Status provisioning tidak dapat diperiksa: NAMA_SHEET_DATASTORE belum diatur.</i>" };
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dsSheet = ss.getSheetByName(sheetName);
     if (!dsSheet || dsSheet.getLastRow() <= 1) {
-      return "<i>Status provisioning tidak dapat diperiksa: Data datastore tidak ditemukan.</i>";
+      // Mengembalikan status default jika tidak ada data
+      return { isOverProvisioned: false, message: "<i>Status provisioning tidak dapat diperiksa: Data datastore tidak ditemukan.</i>" };
     }
 
     const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
 
+    // Validasi header penting
     const nameIndex = headers.indexOf(config[K.DS_NAME_HEADER]);
     const capGbIndex = headers.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
     const provGbIndex = headers.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
 
     if ([nameIndex, capGbIndex, provGbIndex].includes(-1)) {
-      const missing = [];
-      if (nameIndex === -1) missing.push(config[K.DS_NAME_HEADER]);
-      if (capGbIndex === -1) missing.push(config[K.HEADER_DS_CAPACITY_GB]);
-      if (provGbIndex === -1) missing.push(config[K.HEADER_DS_PROV_DS_GB]);
-      throw new Error(`Header tidak ditemukan di sheet Datastore: ${missing.join(", ")}`);
+      throw new Error(`Satu atau lebih header penting (Name, Capacity GB, Provisioned GB) tidak ditemukan di sheet Datastore.`);
     }
 
     const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
     let isOverProvisioned = false;
 
+    // Logika kalkulasi inti
     for (const row of dsData) {
       const capacity = parseFloat(String(row[capGbIndex]).replace(/,/g, "")) || 0;
       const provisioned = parseFloat(String(row[provGbIndex]).replace(/,/g, "")) || 0;
@@ -44,13 +57,22 @@ function getProvisioningStatusSummary(config) {
       }
     }
 
+    // Mengembalikan objek status, bukan string yang sudah jadi
     if (isOverProvisioned) {
-      return `❗️ Terdeteksi datastore over-provisioned. Gunakan /migrasicheck untuk detail.`;
+      return {
+        isOverProvisioned: true,
+        message: `❗️ Terdeteksi datastore over-provisioned.`
+      };
     }
 
-    return "✅ Semua datastore dalam rasio aman (1:1).";
+    return {
+      isOverProvisioned: false,
+      message: "✅ Semua datastore dalam rasio aman (1:1)."
+    };
+
   } catch (e) {
     console.error(`Gagal memeriksa status provisioning: ${e.message}`);
+    // Melempar error agar bisa ditangani oleh handler utama
     throw new Error(`Gagal memeriksa status provisioning: ${e.message}`);
   }
 }
@@ -135,28 +157,16 @@ function generateVcenterSummary(config) {
   return { vCenterMessage: message, uptimeMessage: uptimeMessage };
 }
 
-// Gantikan fungsi ini di Laporan.js
-/**
- * [REFACTORED v3.5.0] Membuat laporan harian yang akurat dengan header dinamis.
- */
-function buatLaporanHarianVM(config) {
-  let pesanLaporan = `📊 <b>Status Operasional Infrastruktur</b>\n`;
-  pesanLaporan += `🗓️ <i>${new Date().toLocaleString("id-ID", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  })}</i>\n`;
-
+// Nama diubah dan hanya mengembalikan objek
+function _calculateLaporanHarianData(config) {
   try {
     const K = KONSTANTA.KUNCI_KONFIG;
-    pesanLaporan += "\n<b>Aktivitas Sistem Hari Ini:</b>\n";
-
     const todayStartDate = new Date();
     todayStartDate.setHours(0, 0, 0, 0);
     const { headers, data: todaysLogs } = getCombinedLogs(todayStartDate, config);
 
+    const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
     if (todaysLogs.length > 0) {
-      const counts = { baru: 0, dimodifikasi: 0, dihapus: 0 };
       const actionHeader = config[K.HEADER_LOG_ACTION];
       const actionIndex = headers.indexOf(actionHeader);
 
@@ -166,23 +176,21 @@ function buatLaporanHarianVM(config) {
         else if (action.includes("MODIFIKASI")) counts.dimodifikasi++;
         else if (action.includes("PENGHAPUSAN")) counts.dihapus++;
       });
-      pesanLaporan += `Teridentifikasi <b>${todaysLogs.length}</b> aktivitas perubahan data:\n`;
-      pesanLaporan += `➕ Baru: ${counts.baru} | ✏️ Dimodifikasi: ${counts.dimodifikasi} | ❌ Dihapus: ${counts.dihapus}\n`;
-    } else {
-      pesanLaporan += "Tidak terdeteksi aktivitas perubahan data VM.\n";
     }
 
-    pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR;
     const summary = generateVcenterSummary(config);
-    pesanLaporan += "<b>Ringkasan vCenter & Uptime:</b>\n" + summary.vCenterMessage;
-    pesanLaporan += KONSTANTA.UI_STRINGS.SEPARATOR;
     const provisioningSummary = getProvisioningStatusSummary(config);
-    pesanLaporan += "<b>Status Provisioning:</b>\n" + provisioningSummary;
-    pesanLaporan += `\n\n<i>Rincian aktivitas dapat dilihat melalui perintah /cekhistory.</i>`;
 
-    return pesanLaporan;
+    // Mengembalikan objek berisi semua data yang sudah dihitung
+    return {
+      todaysLogs,
+      counts,
+      vCenterSummary: summary.vCenterMessage,
+      provisioningSummary
+    };
+
   } catch (e) {
-    throw new Error(`Gagal membuat Laporan Harian VM. Penyebab: ${e.message}`);
+    throw new Error(`Gagal menghitung data Laporan Harian VM. Penyebab: ${e.message}`);
   }
 }
 
@@ -236,7 +244,7 @@ function buatLaporanPeriodik(periode) {
  * [REFACTOR FINAL] Menyusun laporan provisioning.
  * Fungsi ini sekarang menerima data VM sebagai parameter.
  */
-function generateProvisioningReport(config, allVmData, headers) {
+function _calculateProvisioningReportData(config, allVmData, headers) {
   try {
     if (!allVmData || allVmData.length === 0) {
       throw new Error("Data VM tidak ditemukan atau kosong.");
@@ -297,52 +305,7 @@ function generateProvisioningReport(config, allVmData, headers) {
       updateTop5(reportData.Top5.disk, { ...vmInfo, value: disk });
     }
 
-    let message = `⚙️ <b>Laporan Alokasi Sumber Daya Infrastruktur</b>\n`;
-    message += `<i>Data per ${new Date().toLocaleString("id-ID")}</i>`;
-
-    Object.keys(reportData)
-      .filter((key) => key !== "Top5" && key !== "Total")
-      .sort()
-      .forEach((vc) => {
-        message += KONSTANTA.UI_STRINGS.SEPARATOR;
-        message += `🏢 <b>vCenter: ${vc}</b>\n\n`;
-        const totalCpu = reportData[vc].cpuOn + reportData[vc].cpuOff;
-        const totalMem = reportData[vc].memOn + reportData[vc].memOff;
-        message += `💻 <b>vCPU:</b>\n`;
-        message += ` • Total: <b>${totalCpu.toLocaleString("id")} vCPU</b> (On: ${reportData[vc].cpuOn}, Off: ${reportData[vc].cpuOff})\n`;
-        message += ` • Rata-rata/VM: <b>${(reportData[vc].vmCount > 0 ? totalCpu / reportData[vc].vmCount : 0).toFixed(1)} vCPU</b>\n\n`;
-        message += `🧠 <b>Memori:</b>\n`;
-        message += ` • Total: <b>${totalMem.toLocaleString("id")} GB</b> <i>(~${(totalMem / 1024).toFixed(1)} TB)</i>\n`;
-        message += ` • Rata-rata/VM: <b>${(reportData[vc].vmCount > 0 ? totalMem / reportData[vc].vmCount : 0).toFixed(1)} GB</b>\n\n`;
-        message += `💽 <b>Disk:</b>\n`;
-        message += ` • Total Provisioned: <b>${reportData[vc].disk.toFixed(2)} TB</b>\n`;
-      });
-
-    message += KONSTANTA.UI_STRINGS.SEPARATOR;
-    message += `🌍 <b>Total Keseluruhan</b>\n\n`;
-    const totalCpuGrand = reportData["Total"].cpuOn + reportData["Total"].cpuOff;
-    const totalMemGrand = reportData["Total"].memOn + reportData["Total"].memOff;
-    message += `💻 <b>vCPU:</b>\n`;
-    message += ` • Total: <b>${totalCpuGrand.toLocaleString("id")} vCPU</b> (On: ${reportData["Total"].cpuOn}, Off: ${reportData["Total"].cpuOff})\n`;
-    message += ` • Rata-rata/VM: <b>${(reportData["Total"].vmCount > 0 ? totalCpuGrand / reportData["Total"].vmCount : 0).toFixed(1)} vCPU</b>\n\n`;
-    message += `🧠 <b>Memori:</b>\n`;
-    message += ` • Total: <b>${totalMemGrand.toLocaleString("id")} GB</b> <i>(~${(totalMemGrand / 1024).toFixed(1)} TB)</i>\n`;
-    message += ` • Rata-rata/VM: <b>${(reportData["Total"].vmCount > 0 ? totalMemGrand / reportData["Total"].vmCount : 0).toFixed(1)} GB</b>\n\n`;
-    message += `💽 <b>Disk:</b>\n`;
-    message += ` • Total Provisioned: <b>${reportData["Total"].disk.toFixed(2)} TB</b>\n`;
-
-    message += KONSTANTA.UI_STRINGS.SEPARATOR;
-    message += `🏆 <b>Pengguna Resource Teratas</b>\n`;
-    const topCpuText = reportData.Top5.cpu.map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value} vCPU)`).join("\n");
-    const topMemText = reportData.Top5.memory.map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toLocaleString("id")} GB)`).join("\n");
-    const topDiskText = reportData.Top5.disk.map((vm, i) => `${i + 1}. <code>${escapeHtml(vm.name)}</code> (${vm.value.toFixed(2)} TB)`).join("\n");
-    message += `\n<i>vCPU Terbesar:</i>\n${topCpuText}\n`;
-    message += `\n<i>Memori Terbesar:</i>\n${topMemText}\n`;
-    message += `\n<i>Disk Terbesar:</i>\n${topDiskText}\n`;
-
-    message += `\n\n<i>Detail alokasi per vCenter dapat dianalisis lebih lanjut melalui perintah /export.</i>`;
-
-    return message;
+    return reportData;
   
   } catch (e) {
     throw new Error(`Gagal membuat laporan provisioning: ${e.message}`);
@@ -432,23 +395,22 @@ function analisisTrenPerubahan(startDate, config) {
 }
 
 /**
- * [REFACTORED v4.3.1] Menghasilkan laporan distribusi aset VM.
- * Memperbaiki bug referensi konstanta untuk 'KRITIKALITAS'.
+ * [REFACTORED v4.3.1] Menghitung data untuk laporan distribusi aset VM.
+ * Fungsi ini sekarang menerima data sebagai parameter dan tidak membaca sheet secara langsung.
+ * @param {object} config - Objek konfigurasi bot.
+ * @param {Array<Array<any>>} allVmData - Data VM dari sheet (tidak termasuk header).
+ * @param {Array<string>} headers - Header dari sheet VM.
+ * @returns {object} Objek berisi data distribusi yang sudah dihitung.
  */
-function generateAssetDistributionReport(config) {
+function _calculateAssetDistributionData(config, allVmData, headers) {
   const K = KONSTANTA.KUNCI_KONFIG;
-  const sheetName = config[K.SHEET_VM];
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
 
-  if (!sheet || sheet.getLastRow() < 2) {
-    throw new Error(`Sheet data VM "${sheetName}" tidak dapat ditemukan atau kosong.`);
+  // Pengaman jika data yang masuk kosong, untuk mencegah error.
+  if (!allVmData || allVmData.length === 0) {
+    return { criticality: {}, environment: {}, totalVm: 0 };
   }
 
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-
-  // Menggunakan referensi yang BENAR dari objek 'config'
+  // Validasi header penting untuk memastikan kalkulasi berjalan benar.
   const critIndex = headers.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
   const envIndex = headers.indexOf(config[K.HEADER_VM_ENVIRONMENT]);
   const stateIndex = headers.indexOf(config[K.HEADER_VM_STATE]);
@@ -460,13 +422,14 @@ function generateAssetDistributionReport(config) {
   const report = {
     criticality: {},
     environment: {},
-    totalVm: allData.length,
+    totalVm: allVmData.length,
   };
 
   const recognizedCriticality = config.LIST_KRITIKALITAS || [];
   const recognizedEnvironment = config.LIST_ENVIRONMENT || [];
 
-  allData.forEach((row) => {
+  // Logika kalkulasi inti tidak berubah, hanya memastikan sumber datanya benar.
+  allVmData.forEach((row) => {
     let criticality = String(row[critIndex] || "").trim();
     if (!recognizedCriticality.includes(criticality) || criticality === "") {
       criticality = "Other";
@@ -493,52 +456,7 @@ function generateAssetDistributionReport(config) {
     }
   });
 
-  const timestamp = new Date().toLocaleString("id-ID", {
-    dateStyle: "long",
-    timeStyle: "short",
-    timeZone: "Asia/Makassar",
-  });
-  let message = `📊 <b>Laporan Distribusi Aset VM</b>\n`;
-  message += `<i>Analisis per ${timestamp} WITA</i>\n\n`;
-  message += KONSTANTA.UI_STRINGS.SEPARATOR + "\n";
-
-  message += `🔥 <b>Analisis Berdasarkan Kritikalitas</b>\n`;
-  message += `<i>Total Keseluruhan: ${report.totalVm} VM</i>\n\n`;
-
-  const criticalityOrder = [...recognizedCriticality, "Other"];
-  for (const crit of criticalityOrder) {
-    if (report.criticality[crit]) {
-      const count = report.criticality[crit];
-      const percentage = ((count / report.totalVm) * 100).toFixed(1);
-      message += `• <b>${escapeHtml(crit)}:</b> <code>${count}</code> VM (${percentage}%)\n`;
-    }
-  }
-
-  message += "\n" + KONSTANTA.UI_STRINGS.SEPARATOR + "\n";
-
-  message += `🌍 <b>Analisis Berdasarkan Environment</b>\n\n`;
-  let grandTotal = { total: 0, on: 0, off: 0 };
-  const envOrder = [...recognizedEnvironment, "Other"];
-
-  for (const env of envOrder) {
-    if (report.environment[env]) {
-      const data = report.environment[env];
-      const icon = env.toLowerCase().includes("production") ? "🏢" : env.toLowerCase().includes("dev") ? "🛠️" : "⚙️";
-      message += `${icon} <b>${escapeHtml(env)}</b>\n`;
-      message += ` • Total: <code>${data.total}</code> VM\n`;
-      message += ` • Status: 🟢 <code>${data.on}</code> On | 🔴 <code>${data.off}</code> Off\n\n`;
-
-      grandTotal.total += data.total;
-      grandTotal.on += data.on;
-      grandTotal.off += data.off;
-    }
-  }
-
-  message += `--- <i>Grand Total</i> ---\n`;
-  message += ` • Total: <code>${grandTotal.total}</code> VM\n`;
-  message += ` • Status: 🟢 <code>${grandTotal.on}</code> On | 🔴 <code>${grandTotal.off}</code> Off\n`;
-
-  return message;
+  return report;
 }
 
 /**
@@ -610,31 +528,6 @@ function generateStorageUtilizationReport(config) {
 }
 
 /**
- * [BARU] Memformat objek hasil analisis cluster menjadi string header HTML.
- * @param {object} analysis - Objek hasil dari generateClusterAnalysis.
- * @param {string} clusterName - Nama cluster yang dianalisis.
- * @returns {string} String header yang sudah diformat.
- */
-function formatClusterAnalysisHeader(analysis, clusterName) {
-  if (!analysis) return "";
-  
-  let header = `📊 <b>Analisis Cluster "${escapeHtml(clusterName)}"</b>\n`;
-  header += `• <b>Total VM:</b> ${analysis.totalVms} (🟢 ${analysis.on} On / 🔴 ${analysis.off} Off)\n`;
-  
-  const totalMemoryInTb = analysis.totalMemory / 1024;
-  header += `• <b>Alokasi Resource:</b> ${analysis.totalCpu} vCPU | ${analysis.totalMemory.toFixed(0)} GB RAM (~${totalMemoryInTb.toFixed(2)} TB)\n`;
-  
-  const diskUtilPercent = analysis.diskUtilizationPercent;
-  header += `• <b>Utilisasi Disk:</b> ${diskUtilPercent.toFixed(1)}% [<code>${createProgressBar(diskUtilPercent)}</code>] (${analysis.totalVmProvisionedTb.toFixed(2)} / ${analysis.totalDsCapacityTb.toFixed(2)} TB)\n`;
-  
-  if (analysis.criticalVmOffCount > 0) {
-    header += `• <b>Peringatan:</b> Terdapat <b>${analysis.criticalVmOffCount} VM Kritis</b> dalam kondisi mati!\n`;
-  }
-  
-  return header;
-}
-
-/**
  * [BARU] Menganalisis sebuah datastore secara komprehensif.
  */
 function generateDatastoreAnalysis(datastoreName, config) {
@@ -662,20 +555,4 @@ function generateDatastoreAnalysis(datastoreName, config) {
   }
   
   return analysis;
-}
-
-/**
- * [BARU] Memformat objek hasil analisis datastore menjadi string header HTML.
- */
-function formatDatastoreAnalysisHeader(analysis, datastoreName) {
-  if (!analysis || !analysis.details) {
-    return `🗄️ <b>Ringkasan Datastore "${escapeHtml(datastoreName)}"</b>\n<i>Detail tidak dapat dimuat.</i>`;
-  }
-  
-  const { details, totalVms, on, off } = analysis;
-  let header = `🗄️ <b>Ringkasan Datastore "${escapeHtml(datastoreName)}"</b>\n`;
-  header += `• <b>Kapasitas:</b> ${details.capacityGb.toFixed(1)} GB | <b>Terpakai:</b> ${details.provisionedGb.toFixed(1)} GB\n`;
-  header += `• <b>Alokasi Terpakai:</b> ${details.usagePercent.toFixed(1)}% [<code>${createProgressBar(details.usagePercent)}</code>]\n`;
-  header += `• <b>Total VM:</b> ${totalVms} (🟢 ${on} On / 🔴 ${off} Off)\n`;
-  return header;
 }

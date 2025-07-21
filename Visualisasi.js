@@ -1,4 +1,17 @@
-// ===== FILE: Visualisasi.gs =====
+/**
+ * @file Visualisasi.js
+ * @author Djanoer Team
+ * @date 2023-07-05
+ * @version 2.0.0
+ *
+ * @description
+ * Bertanggung jawab untuk membuat visualisasi data dalam bentuk gambar,
+ * seperti grafik pie chart. Menggunakan layanan `Charts` dari Apps Script
+ * untuk membangun dan menghasilkan blob gambar.
+ *
+ * @section FUNGSI UTAMA
+ * - buatGrafikDistribusi(tipeDistribusi, config): Membuat gambar grafik Pie Chart untuk distribusi VM.
+ */
 
 /**
  * [REVISI FINAL] Membuat gambar grafik Pie Chart untuk distribusi aset.

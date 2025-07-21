@@ -1,4 +1,13 @@
-// ===== FILE: Datastore.gs =====
+/**
+ * @file Datastore.js
+ * @author Djanoer Team
+ * @date 2023-03-18
+ *
+ * @description
+ * Mengelola semua logika bisnis yang berkaitan dengan entitas Datastore.
+ * Mencakup deteksi perubahan, pengambilan detail, dan pemformatan
+ * informasi datastore untuk ditampilkan kepada pengguna.
+ */
 
 /**
  * [MODIFIKASI v3.1] Fungsi kini membaca daftar kolom pantau dari sheet "Konfigurasi",

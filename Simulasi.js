@@ -1,4 +1,12 @@
-// ===== FILE: Simulasi.gs =====
+/**
+ * @file Simulasi.js
+ * @author Djanoer Team
+ * @date 2023-08-25
+ *
+ * @description
+ * Berisi fungsi-fungsi untuk menjalankan skenario "what-if" atau simulasi
+ * terhadap data infrastruktur untuk tujuan perencanaan kapasitas dan analisis dampak.
+ */
 
 /**
  * [REVISI v1.3.0 - DENGAN VALIDASI] Menjalankan simulasi cleanup pada sebuah cluster

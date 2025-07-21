@@ -1,4 +1,12 @@
-// ===== FILE: Telegram.gs =====
+/**
+ * @file Telegram.js
+ * @author Djanoer Team
+ * @date 2023-01-05
+ *
+ * @description
+ * Bertindak sebagai lapisan abstraksi (wrapper) untuk semua komunikasi dengan
+ * Telegram Bot API. Semua panggilan keluar ke Telegram harus melalui file ini.
+ */
 
 /**
  * [OPTIMALISASI] Fungsi inti untuk semua panggilan ke API Telegram.
@@ -199,10 +207,16 @@ function editMessageText(teksPesan, inlineKeyboard, chatId, messageId, config) {
 }
 
 /**
- * [OPTIMALISASI] Fungsi ini sekarang hanya menyiapkan data dan mendelegasikannya ke callTelegramApi.
+ * [OPTIMALISASI] Fungsi ini sekarang dapat menampilkan teks notifikasi opsional.
  */
-function answerCallbackQuery(callbackQueryId, config) {
-  return callTelegramApi('answerCallbackQuery', { callback_query_id: callbackQueryId }, config);
+function answerCallbackQuery(callbackQueryId, config, text = null) {
+  const payloadData = {
+    callback_query_id: callbackQueryId
+  };
+  if (text) {
+    payloadData.text = text;
+  }
+  return callTelegramApi('answerCallbackQuery', payloadData, config);
 }
 
 /**

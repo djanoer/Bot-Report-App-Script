@@ -1,107 +1,23 @@
-// ===== FILE: Rekomendasi.gs =====
-
-// ====================================================================
-// BAGIAN 1: FUNGSI UNTUK ALUR PERCAKAPAN TERPANDU
-// ====================================================================
-
 /**
- * [FINAL v3.1.3] Memulai alur percakapan terpandu untuk rekomendasi setup.
- * @param {string} chatId - ID chat tempat percakapan dimulai.
- * @param {string} userId - ID pengguna yang memulai percakapan.
- * @param {object} config - Objek konfigurasi bot.
+ * @file Rekomendasi.js
+ * @author Djanoer Team
+ * @date 2023-07-20
+ *
+ * @description
+ * Mengelola alur percakapan terpandu dan mesin rekomendasi untuk penempatan VM baru.
+ * Menangani interaksi multi-langkah dengan pengguna untuk mengumpulkan
+ * kebutuhan dan kemudian mencarikan lokasi terbaik berdasarkan aturan yang ada.
  */
-
-/**
- * [REFACTOR STATE-DRIVEN] Memulai alur percakapan terpandu untuk rekomendasi setup.
- */
-function mulaiPercakapanRekomendasi(chatId, userId, config) {
-  const K = KONSTANTA.KUNCI_KONFIG;
-  const kritikalitasOptions = (config[K.KATEGORI_KRITIKALITAS] || "Critical,High,Medium,Low").split(",").map(item => item.trim());
-
-  // Membuat tombol dengan format callback baru
-  const keyboardRows = kritikalitasOptions.map(opt => {
-    // Sesi ini berisi data untuk langkah berikutnya (yaitu, menampilkan pertanyaan I/O)
-    const sessionId = createCallbackSession({ step: 'io', requirements: { kritikalitas: opt } }, config);
-    return [{ text: opt, callback_data: `rekomendasi_machine:handle_step:${sessionId}` }];
-  });
-  
-  const cancelSessionId = createCallbackSession({}, config);
-  keyboardRows.push([{ text: "❌ Batal", callback_data: `rekomendasi_machine:cancel:${cancelSessionId}` }]);
-
-  const pesan = "<b>Langkah 1 dari 3:</b> Silakan pilih tingkat kritikalitas VM:";
-  const sentMessage = kirimPesanTelegram(pesan, config, "HTML", { inline_keyboard: keyboardRows }, chatId);
-
-  // Tetap gunakan setUserState untuk menangani input teks manual sebagai fallback
-  if (sentMessage && sentMessage.ok) {
-    setUserState(userId, { 
-        action: "AWAITING_REKOMENDASI_KRITIKALITAS", 
-        messageId: sentMessage.result.message_id, 
-        chatId: chatId, 
-        requirements: {} 
-    });
-  }
-}
-
-/**
- * [REFACTOR STATE-DRIVEN] Menampilkan pertanyaan kedua (Profil I/O).
- */
-function tampilkanPertanyaanIo(userId, messageId, chatId, config, requirements) {
-  const ioOptions = ["High", "Normal"];
-  
-  // Membuat tombol dengan format callback baru
-  const keyboardRows = ioOptions.map(opt => {
-      // Sesi ini berisi data untuk langkah berikutnya (yaitu, menampilkan pertanyaan Spek)
-      const sessionId = createCallbackSession({ step: 'spek', requirements: { ...requirements, io: opt.toLowerCase() } }, config);
-      return [{ text: opt, callback_data: `rekomendasi_machine:handle_step:${sessionId}` }];
-  });
-
-  const cancelSessionId = createCallbackSession({}, config);
-  keyboardRows.push([{ text: "❌ Batal", callback_data: `rekomendasi_machine:cancel:${cancelSessionId}` }]);
-  
-  const pesan = `✅ Kritikalitas: <b>${escapeHtml(requirements.kritikalitas)}</b>\n\n<b>Langkah 2 dari 3:</b> Sekarang, pilih profil I/O:`;
-  editMessageText(pesan, { inline_keyboard: keyboardRows }, chatId, messageId, config);
-
-  // Tetap gunakan setUserState untuk menangani input teks manual sebagai fallback
-  setUserState(userId, { 
-      action: "AWAITING_REKOMENDASI_IO", 
-      messageId: messageId, 
-      chatId: chatId, 
-      requirements: requirements 
-  });
-}
-
-/**
- * [REFACTOR STATE-DRIVEN] Menampilkan pertanyaan terakhir (Spesifikasi Teknis).
- */
-function tampilkanPertanyaanSpek(userId, messageId, chatId, config, requirements) {
-  const cancelSessionId = createCallbackSession({}, config);
-  const keyboard = { inline_keyboard: [[{ text: "❌ Batal", callback_data: `rekomendasi_machine:cancel:${cancelSessionId}` }]] };
-
-  const pesan = `✅ Kritikalitas: <b>${escapeHtml(requirements.kritikalitas)}</b>\n` +
-                `✅ Profil I/O: <b>${escapeHtml(requirements.io)}</b>\n\n` +
-                "<b>Langkah 3 dari 3:</b> Terakhir, silakan masukkan kebutuhan CPU, RAM (GB), dan Disk (GB) dalam format:\n\n" +
-                "<code>CPU RAM DISK</code>\n\n" +
-                "Contoh: <code>8 16 100</code>";
-  editMessageText(pesan, keyboard, chatId, messageId, config);
-
-  // Tetap gunakan setUserState untuk menangani input teks dari pengguna
-  setUserState(userId, { 
-      action: "AWAITING_REKOMENDASI_SPEK", 
-      messageId: messageId, 
-      chatId: chatId, 
-      requirements: requirements 
-  });
-}
-
-// ====================================================================
-// BAGIAN 2: FUNGSI UNTUK MESIN REKOMENDASI
-// ====================================================================
 
 /**
  * [FINAL v4.0.0 - ADAPTIVE] Fungsi orkestrator utama untuk mendapatkan rekomendasi penempatan VM.
  * Kini menggunakan perhitungan beban aktif dan menyuntikkan data kebijakan ke dalam hasil.
  */
 function dapatkanRekomendasiPenempatan(requirements, config) {
+  // Defensive check untuk memastikan config ada
+  if (!config || Object.keys(config).length === 0) {
+    throw new Error("Objek konfigurasi (config) tidak valid atau kosong saat memanggil dapatkanRekomendasiPenempatan.");
+  }
   try {
     const { headers: vmHeaders, dataRows: allVmData } = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_VM]);
     const { headers: dsHeaders, dataRows: allDsData } = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
@@ -172,18 +88,15 @@ function calculateClusterLoad(allVmData, vmHeaders, config) {
   const cpuIndex = vmHeaders.indexOf(config[K.HEADER_VM_CPU]);
   const memoryIndex = vmHeaders.indexOf(config[K.HEADER_VM_MEMORY]);
   const stateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
-  const nameIndex = vmHeaders.indexOf(config[K.HEADER_VM_NAME]); // <-- Tambahkan ini
+  const nameIndex = vmHeaders.indexOf(config[K.HEADER_VM_NAME]);
 
   allVmData.forEach((vmRow) => {
     const clusterName = vmRow[clusterIndex];
     const state = String(vmRow[stateIndex] || "").toLowerCase();
-    const vmName = String(vmRow[nameIndex] || "").toLowerCase(); // <-- Tambahkan ini
+    const vmName = String(vmRow[nameIndex] || "").toLowerCase();
 
-    // --- PERUBAHAN UTAMA DI SINI ---
-    // Buat kondisi pengecualian
     const isExcluded = state.includes("off") || vmName.includes("unused");
 
-    // Hanya proses VM jika nama cluster ada DAN TIDAK termasuk yang dikecualikan
     if (clusterName && !isExcluded) {
       if (!clusterLoad.has(clusterName)) {
         clusterLoad.set(clusterName, { cpu: 0, memory: 0 });
@@ -192,7 +105,6 @@ function calculateClusterLoad(allVmData, vmHeaders, config) {
       load.cpu += parseInt(vmRow[cpuIndex], 10) || 0;
       load.memory += parseFloat(vmRow[memoryIndex]) || 0;
     }
-    // --- AKHIR PERUBAHAN ---
   });
   return clusterLoad;
 }
@@ -214,16 +126,16 @@ function filterLokasiByPolicy(
       rejected.push({ cluster: clusterName, reason: "kebijakan_tidak_ada" });
       continue;
     }
-    
+
     const physicalMemoryGb = (policy["physicalmemorytb"] || 0) * 1024;
     const memoryRatio = policy["memoryovercommitratio"];
     const maxMemory = physicalMemoryGb * memoryRatio;
-    
+
     const physicalCpu = policy["physicalcpucores"];
     const cpuRatio = policy["cpuovercommitratio"];
     const maxCpu = physicalCpu * cpuRatio;
 
-    const currentLoad = clusterLoadData.get(clusterName)?.activeLoad || { cpu: 0, memory: 0 };
+    const currentLoad = clusterLoadData.get(clusterName) || { cpu: 0, memory: 0 };
 
     if (currentLoad.cpu + req.cpu > maxCpu) {
       rejected.push({ cluster: clusterName, reason: "overcommit_cpu", current: currentLoad.cpu, max: maxCpu, ratio: `${cpuRatio}:1` });
@@ -256,10 +168,10 @@ function findDatastoresInCluster(clusterName, req, rule, config, allDsData, dsHe
     const dsNameIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
     const dsCapGbIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_DS_CAPACITY_GB]);
     const dsProvGbIndex = dsHeaders.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_DS_PROV_DS_GB]);
-    
+
     const p1Storage = getRuleAsArray(rule, 'storageprioritas1');
     const p2Storage = getRuleAsArray(rule, 'storageprioritas2');
-    
+
     const filterByStorageTier = (dsName, tiers) => {
         if (!tiers || tiers.length === 0 || tiers.includes('*')) return true;
         const { storageType } = getStorageInfoFromDsName(dsName, aliasMap);
@@ -288,7 +200,7 @@ function findDatastoresInCluster(clusterName, req, rule, config, allDsData, dsHe
     if (kandidat.length === 0 && p2Storage.length > 0) {
         kandidat = getValidDatastores(allDsData, p2Storage);
     }
-    
+
     return kandidat;
 }
 
@@ -317,13 +229,13 @@ function getAllTargetClusters(rule, allVmData, vmHeaders, config) {
     const p1 = getRuleAsArray(rule, 'prioritas1(cluster)');
     const p2 = getRuleAsArray(rule, 'prioritas2(cluster)');
     const p3 = getRuleAsArray(rule, 'prioritas3(cluster)');
-    
+
     if (p1.includes('all_others')) {
         const otherPriorityClusters = [...p2, ...p3];
         const exceptionClusters = getRuleAsArray(rule, 'clusterdikecualikan');
         return allClustersInVCenter.filter(c => !otherPriorityClusters.includes(c) && !exceptionClusters.includes(c));
     }
-    
+
     return [...new Set([...p1, ...p2, ...p3])];
 }
 
@@ -342,7 +254,7 @@ function getRuleAsArray(rule, ruleName) {
 function skorLokasiKandidat(kandidat, config, allVmData, vmHeaders) {
     const clusterLoad = calculateClusterLoad(allVmData, vmHeaders, config);
     const preferredDsKeywords = config['KATA_KUNCI_DS_DIUTAMAKAN'] || [];
-    
+
     return kandidat.map(lokasi => {
         const skorDatastore = Math.min(Math.log10(lokasi.freeSpaceGB + 1) * 12, 40);
         const totalCpu = clusterLoad.get(lokasi.clusterName)?.cpu || 0;
@@ -350,7 +262,7 @@ function skorLokasiKandidat(kandidat, config, allVmData, vmHeaders) {
 
         const isPreferred = preferredDsKeywords.some(kw => lokasi.dsName.toLowerCase().includes(kw.toLowerCase()));
         const skorPrioritasNama = isPreferred ? 20 : 0;
-        
+
         lokasi.skor = { total: parseFloat((skorDatastore + skorCluster + skorPrioritasNama).toFixed(1)) };
         lokasi.alasan = isPreferred ? "Datastore prioritas, ruang lega & beban cluster rendah." : "Ruang lega & beban cluster rendah.";
         return lokasi;
@@ -381,9 +293,7 @@ function formatPesanRekomendasi(kandidatTerbaik, req, rejected, rule) {
     pesan += `\n<i>Catatan: Cluster berikut telah dievaluasi namun diabaikan karena tidak memenuhi kebijakan: ${rejected.map((c) => `<code>${c.cluster}</code>`).join(", ")}.</i>`;
   }
 
-  // --- PERUBAHAN UTAMA DI SINI ---
   pesan += `\n\n<i>*Catatan: Perhitungan alokasi sumber daya <b>tidak termasuk</b> VM dengan status 'Power Off' atau bernama 'unused'.</i>`;
-  // --- AKHIR PERUBAHAN ---
 
   return pesan;
 }
@@ -413,9 +323,7 @@ function formatPesanGagal(req, rejected, rule) {
     pesan += `Tidak ada cluster yang cocok dengan aturan penempatan awal yang ditemukan.`;
   }
 
-  // --- PERUBAHAN UTAMA DI SINI ---
   pesan += `\n\n<i>*Catatan: Perhitungan alokasi sumber daya <b>tidak termasuk</b> VM dengan status 'Power Off' atau bernama 'unused'.</i>`;
-  // --- AKHIR PERUBAHAN ---
 
   return pesan;
 }

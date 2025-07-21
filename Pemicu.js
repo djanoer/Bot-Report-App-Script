@@ -1,5 +1,13 @@
-// ===== FILE: Pemicu.gs =====
-// Pusat untuk semua fungsi yang dijalankan oleh pemicu (trigger) berbasis waktu.
+/**
+ * @file Pemicu.js
+ * @author Djanoer Team
+ * @date 2023-02-15
+ *
+ * @description
+ * Pusat untuk semua fungsi yang dirancang untuk dieksekusi oleh pemicu (trigger)
+ * berbasis waktu. File ini mengorganisir pekerjaan terjadwal seperti laporan
+ * harian, pembersihan, dan pemrosesan antrean.
+ */
 
 /**
  * [PINDAH] Menjalankan semua pekerjaan harian: sinkronisasi, laporan, dan pemeriksaan kondisi.
@@ -56,41 +64,6 @@ function runTicketSync() {
     syncTiketDataForTrigger();
   } catch (e) {
     console.error(`Sinkronisasi tiket via trigger gagal: ${e.message}`);
-  }
-}
-
-/**
- * [REFACTOR FINAL] Memproses SATU pekerjaan ekspor dari antrean.
- * Dijalankan setiap menit untuk stabilitas dan ketahanan terhadap error.
- */
-function processExportQueue() {
-  const properties = PropertiesService.getUserProperties();
-  const jobKeys = properties.getKeys().filter((key) => key.startsWith("export_job_"));
-
-  if (jobKeys.length === 0) return; // Tidak ada pekerjaan, keluar.
-
-  const currentJobKey = jobKeys[0]; // Ambil pekerjaan pertama saja
-  const jobDataString = properties.getProperty(currentJobKey);
-  
-  // Hapus pekerjaan dari antrean SEBELUM dieksekusi untuk mencegah pengulangan tak terbatas
-  properties.deleteProperty(currentJobKey); 
-
-  if (jobDataString) {
-    console.log(`Memproses pekerjaan ekspor: ${currentJobKey}`);
-    try {
-      const jobData = JSON.parse(jobDataString);
-      executeExportJob(jobData); // Jalankan pekerjaan
-    } catch (e) {
-      console.error(`Gagal mengeksekusi pekerjaan ekspor ${currentJobKey}. Error: ${e.message}. Pekerjaan ini telah dihapus dari antrean.`);
-      // (Opsional) Kirim notifikasi ke admin tentang pekerjaan yang gagal
-      try {
-        const jobData = JSON.parse(jobDataString);
-        if (jobData.config && jobData.chatId) {
-          const failMessage = `🔴 Gagal memproses file ekspor Anda untuk pekerjaan ${currentJobKey}.\n<code>Penyebab: ${escapeHtml(e.message)}</code>`;
-          kirimPesanTelegram(failMessage, jobData.config, "HTML", null, jobData.chatId);
-        }
-      } catch (parseError) { /* Abaikan jika data pekerjaan juga korup */ }
-    }
   }
 }
 

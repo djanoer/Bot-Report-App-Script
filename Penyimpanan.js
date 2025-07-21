@@ -1,4 +1,13 @@
-// ===== FILE: Penyimpanan.gs =====
+/**
+ * @file Penyimpanan.js
+ * @author Djanoer Team
+ * @date 2023-06-16
+ *
+ * @description
+ * Mengelola proses pengolahan dan penyimpanan data historis untuk metrik storage.
+ * File ini mengambil data yang sudah di-parsing, melakukan standarisasi,
+ * dan menyimpannya ke sheet 'Log Storage Historis'.
+ */
 
 /**
  * [FINAL v1.5.0] Fungsi orkestrator utama yang melakukan seluruh proses:

@@ -1,19 +1,21 @@
-// ===== FILE: ManajemenPengguna.gs =====
+/**
+ * @file ManajemenPengguna.js
+ * @author Djanoer Team
+ * @date 2023-07-25
+ *
+ * @description
+ * Mengelola logika yang berkaitan dengan pengguna bot, termasuk alur pendaftaran,
+ * persetujuan oleh admin, dan penambahan pengguna baru ke sheet 'Hak Akses'.
+ */
 
 /**
- * [BARU v1.7.0] Fungsi utama untuk menangani aksi persetujuan pendaftaran.
- * @param {object} sessionData - Data pengguna dari sesi callback (userId, firstName, email).
- * @param {string} action - Aksi yang akan dilakukan ('approve_user', 'approve_admin', 'reject').
- * @param {object} adminUserData - Data admin yang menekan tombol.
- * @param {object} config - Objek konfigurasi bot.
- * @returns {string} Pesan konfirmasi untuk dieditkan ke pesan asli.
+ * [REFAKTOR] Fungsi ini sekarang hanya berisi logika bisnis inti untuk persetujuan pengguna.
  */
 function handleUserApproval(sessionData, action, adminUserData, config) {
   const { userId, firstName, email } = sessionData;
   const adminName = adminUserData.firstName;
 
   if (action === 'reject') {
-    // Kirim notifikasi penolakan ke pengguna
     kirimPesanTelegram(
       `Maaf ${escapeHtml(firstName)}, permintaan pendaftaran Anda telah ditolak oleh administrator.`,
       config, 'HTML', null, userId
@@ -23,21 +25,17 @@ function handleUserApproval(sessionData, action, adminUserData, config) {
 
   // Tentukan peran berdasarkan aksi
   const role = (action === 'approve_admin') ? 'Admin' : 'User';
-  
-  // Tambahkan pengguna ke sheet
+
   const isSuccess = addUserToSheet(userId, firstName, email, role);
 
   if (isSuccess) {
-    // Bersihkan cache agar pengguna baru langsung dikenali
     clearBotStateCache();
-    
-    // Kirim pesan selamat datang ke pengguna baru
+
     kirimPesanTelegram(
       `✅ Selamat datang, ${escapeHtml(firstName)}! Akun Anda telah berhasil diaktifkan dengan peran sebagai <b>${role}</b>.`,
       config, 'HTML', null, userId
     );
-    
-    // Kembalikan pesan konfirmasi untuk admin
+
     return `✅ Pendaftaran untuk <b>${escapeHtml(firstName)}</b> telah disetujui sebagai <b>${role}</b> oleh ${escapeHtml(adminName)}.`;
   } else {
     return `⚠️ Gagal menambahkan pengguna <b>${escapeHtml(firstName)}</b>. Kemungkinan User ID sudah terdaftar.`;
@@ -67,5 +65,30 @@ function addUserToSheet(userId, firstName, email, role) {
   } catch (e) {
     console.error(`Gagal menambahkan pengguna ke sheet: ${e.message}`);
     return false;
+  }
+}
+
+/**
+ * [BARU] Mesin Keadaan untuk menangani semua interaksi persetujuan pendaftaran.
+ */
+function registrationMachine(update, action, config) {
+  const userEvent = update.callback_query;
+  const adminUserData = getBotState().userAccessMap.get(String(userEvent.from.id));
+
+  if (!adminUserData || (adminUserData.role || "User").toLowerCase() !== "admin") {
+    answerCallbackQuery(userEvent.id, config, "Hanya Admin yang dapat melakukan aksi ini.");
+    return;
+  }
+  adminUserData.firstName = userEvent.from.first_name;
+
+  const sessionData = userEvent.sessionData;
+  if (sessionData) {
+    const resultMessage = handleUserApproval(sessionData, action, adminUserData, config);
+    // Tambahkan hasil aksi ke pesan permintaan asli
+    const finalMessage = userEvent.message.text + `\n\n------------------------------------\n${resultMessage}`;
+    editMessageText(finalMessage, null, userEvent.message.chat.id, userEvent.message.message_id, config);
+  } else {
+    const finalMessage = userEvent.message.text + "\n\n⚠️ Sesi persetujuan ini telah kedaluwarsa atau tidak valid.";
+    editMessageText(finalMessage, null, userEvent.message.chat.id, userEvent.message.message_id, config);
   }
 }

@@ -1,4 +1,13 @@
-// ===== FILE: Konfigurasi.gs =====
+/**
+ * @file Konfigurasi.js
+ * @author Djanoer Team
+ * @date 2023-01-10
+ *
+ * @description
+ * Bertanggung jawab untuk membaca semua konfigurasi, aturan, dan kebijakan
+ * dari Google Sheet dan PropertiesService. Menyediakan satu fungsi utama
+ * untuk memuat semua pengaturan ke dalam objek config.
+ */
 
 /**
  * [FINAL v3.0.2] Membaca aturan penempatan dinamis dari sheet "Rule Provisioning".
@@ -99,7 +108,8 @@ function bacaKonfigurasi() {
     
     const arrayKeys = [
       K.KOLOM_PANTAU, K.KOLOM_PANTAU_DS, K.DS_KECUALI, 
-      K.STATUS_TIKET_AKTIF, 'KATA_KUNCI_DS_DIUTAMAKAN', K.KRITIKALITAS_PANTAU
+      K.STATUS_TIKET_AKTIF, 'KATA_KUNCI_DS_DIUTAMAKAN', K.KRITIKALITAS_PANTAU,
+      K.STATUS_TIKET_SELESAI
     ];
     
     const jsonKeys = [
@@ -160,26 +170,6 @@ function getMigrationConfig(migrationLogicSheet) {
   }
   return migrationConfig;
 }
-
-/**
-function setupSimpanToken() {
-  const tokenTelegram = 'ISI_TOKEN_TELEGRAM_BOT_ANDA_DI_SINI';
-  const tokenWebhook = 'ISI_TOKEN_RAHASIA_WEBHOOK_ANDA_DI_SINI';
-
-  if (tokenTelegram.includes('ISI_TOKEN') || tokenWebhook.includes('ISI_TOKEN')) {
-    console.error('GAGAL: Harap isi nilai token yang sebenarnya di dalam fungsi setupSimpanToken sebelum menjalankannya.');
-    return;
-  }
-
-  const properties = PropertiesService.getScriptProperties();
-  properties.setProperties({
-    'TELEGRAM_BOT_TOKEN': tokenTelegram,
-    'WEBHOOK_BOT_TOKEN': tokenWebhook
-  });
-
-  console.log('BERHASIL: Token Anda telah disimpan dengan aman di PropertiesService.');
-}
-*/
 
 /**
  * [IMPLEMENTASI] Meminta token secara interaktif dari pengguna melalui UI

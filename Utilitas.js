@@ -1,4 +1,13 @@
-// ===== FILE: Utilitas.gs =====
+/**
+ * @file Utilitas.js
+ * @author Djanoer Team
+ * @date 2023-01-02
+ *
+ * @description
+ * Kumpulan fungsi pembantu (helper/utility) generik yang digunakan di
+ * berbagai bagian dalam proyek. Menyediakan fungsi yang dapat digunakan kembali
+ * untuk tugas umum seperti manajemen cache, sesi, dan parsing.
+ */
 
 function escapeHtml(text) {
   if (typeof text !== 'string') text = String(text);
@@ -109,9 +118,10 @@ function handleCentralizedError(errorObject, context, config, userData = null) {
 
 /**
  * [REFACTOR FINAL STATE-DRIVEN] Membuat tampilan berhalaman secara generik.
- * Versi ini menghasilkan callback yang stateful dan kompatibel dengan router mesin.
+ * Versi ini menghasilkan callback yang stateful, kompatibel dengan router mesin,
+ * dan dapat secara dinamis menambahkan tombol ekspor.
  */
-function createPaginatedView({ allItems, page, title, headerContent = null, formatEntryCallback, callbackInfo, config }) {
+function createPaginatedView(allItems, page, title, headerContent, formatEntryCallback, callbackInfo, config) {
   const entriesPerPage = (config.SYSTEM_LIMITS && config.SYSTEM_LIMITS.PAGINATION_ENTRIES) || 15;
   const totalEntries = allItems.length;
   if (totalEntries === 0) {
@@ -129,16 +139,30 @@ function createPaginatedView({ allItems, page, title, headerContent = null, form
   let text = `${headerContent ? headerContent + '\n' : ''}`;
   text += `<i>Menampilkan <b>${startIndex + 1}-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
   text += `------------------------------------\n\n${listContent}\u200B`;
+
   const keyboardRows = [];
   const navigationButtons = [];
-  const createSessionForPage = (targetPage) => createCallbackSession({ ...callbackInfo.context, page: targetPage }, config);
-  if (page > 1) navigationButtons.push({ text: "⬅️ Prev", callback_data: `${callbackInfo.navPrefix}${createSessionForPage(page - 1)}` });
-  if (totalPages > 1) navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: "ignore" });
-  if (page < totalPages) navigationButtons.push({ text: "Next ➡️", callback_data: `${callbackInfo.navPrefix}${createSessionForPage(page + 1)}` });
-  if (navigationButtons.length > 0) keyboardRows.push(navigationButtons);
-  if (callbackInfo.exportPrefix) {
-    keyboardRows.push([{ text: `📄 Ekspor Semua ${totalEntries} Hasil`, callback_data: `${callbackInfo.exportPrefix}${createSessionForPage(1)}` }]);
+
+  if (page > 1) {
+    navigationButtons.push({ text: "⬅️ Prev", callback_data: CallbackHelper.build(callbackInfo.machine, callbackInfo.action, { ...callbackInfo.context, page: page - 1 }, config) });
   }
+  if (totalPages > 1) {
+    navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: "ignore" });
+  }
+  if (page < totalPages) {
+    navigationButtons.push({ text: "Next ➡️", callback_data: CallbackHelper.build(callbackInfo.machine, callbackInfo.action, { ...callbackInfo.context, page: page + 1 }, config) });
+  }
+
+  if (navigationButtons.length > 0) keyboardRows.push(navigationButtons);
+
+  // --- PERUBAHAN UTAMA DI SINI ---
+  if (callbackInfo.exportAction) {
+    keyboardRows.push([{ 
+      text: `📄 Ekspor Semua ${totalEntries} Hasil`, 
+      callback_data: CallbackHelper.build(callbackInfo.machine, callbackInfo.exportAction, callbackInfo.context, config) 
+    }]);
+  }
+
   return { text, keyboard: { inline_keyboard: keyboardRows } };
 }
 

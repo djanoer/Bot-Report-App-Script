@@ -1,4 +1,13 @@
-// ===== FILE: Pembersih.gs =====
+/**
+ * @file Pembersih.js
+ * @author Djanoer Team
+ * @date 2023-04-05
+ *
+ * @description
+ * Berisi fungsi-fungsi yang berhubungan dengan pemeliharaan dan pembersihan.
+ * Tanggung jawab utamanya adalah mengelola siklus hidup data log dan file
+ * sementara, seperti mengarsipkan log dan menghapus file ekspor yang sudah tua.
+ */
 
 /**
  * [FINAL v1.8.1] Membersihkan file ekspor lama.
