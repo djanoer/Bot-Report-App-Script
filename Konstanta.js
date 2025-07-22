@@ -146,6 +146,7 @@ const KONSTANTA = {
     SYNC_LAPORAN: '/syncdata',
     ARSIPKAN_LOG: '/jalankanarsip',
     CLEAR_CACHE: '/bersihkancache',
+    MANAGE_CONFIG: '/manageconfig',
   },
 
   // String yang sering digunakan
@@ -163,6 +164,7 @@ const KONSTANTA = {
   PERINTAH_ADMIN: [
     '/syncdata',
     '/jalankanarsip',
-    '/bersihkancache'
+    '/bersihkancache',
+    '/manageconfig'
   ],
 };

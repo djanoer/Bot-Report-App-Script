@@ -17,9 +17,8 @@
  * - setUserState/getUserState: Mengelola status percakapan multi-langkah pengguna.
  */
 
-
 function escapeHtml(text) {
-  if (typeof text !== 'string') text = String(text);
+  if (typeof text !== "string") text = String(text);
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
@@ -110,8 +109,10 @@ function normalizePrimaryKey(pk) {
  * membantu proses debugging menjadi lebih cepat dan akurat.
  */
 function handleCentralizedError(errorObject, context, config, userData = null) {
-  const userIdentifier = userData ? `[User: ${userData.id} | ${userData.firstName}]` : '[User: System/Unknown]';
-  const errorMessageTechnical = `[ERROR di ${context}] ${userIdentifier} ${errorObject.message}\nStack: ${errorObject.stack || "Tidak tersedia"}`;
+  const userIdentifier = userData ? `[User: ${userData.id} | ${userData.firstName}]` : "[User: System/Unknown]";
+  const errorMessageTechnical = `[ERROR di ${context}] ${userIdentifier} ${errorObject.message}\nStack: ${
+    errorObject.stack || "Tidak tersedia"
+  }`;
   console.error(errorMessageTechnical);
   if (config) {
     let userFriendlyMessage = `🔴 Maaf, terjadi kesalahan saat memproses permintaan Anda.\n\n`;
@@ -144,32 +145,59 @@ function createPaginatedView(allItems, page, title, headerContent, formatEntryCa
   const startIndex = (page - 1) * entriesPerPage;
   const endIndex = Math.min(startIndex + entriesPerPage, totalEntries);
   const pageEntries = allItems.slice(startIndex, endIndex);
-  const listContent = pageEntries.map((item, index) => `${startIndex + index + 1}. ${formatEntryCallback(item)}`).join("\n\n");
-  let text = `${headerContent ? headerContent + '\n' : ''}`;
-  text += `<i>Menampilkan <b>${startIndex + 1}-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
+  const listContent = pageEntries
+    .map((item, index) => `${startIndex + index + 1}. ${formatEntryCallback(item)}`)
+    .join("\n\n");
+  let text = `${headerContent ? headerContent + "\n" : ""}`;
+  text += `<i>Menampilkan <b>${
+    startIndex + 1
+  }-${endIndex}</b> dari <b>${totalEntries}</b> hasil | Halaman <b>${page}/${totalPages}</b></i>\n`;
   text += `------------------------------------\n\n${listContent}\u200B`;
 
   const keyboardRows = [];
   const navigationButtons = [];
 
   if (page > 1) {
-    navigationButtons.push({ text: "⬅️ Prev", callback_data: CallbackHelper.build(callbackInfo.machine, callbackInfo.action, { ...callbackInfo.context, page: page - 1 }, config) });
+    navigationButtons.push({
+      text: "⬅️ Prev",
+      callback_data: CallbackHelper.build(
+        callbackInfo.machine,
+        callbackInfo.action,
+        { ...callbackInfo.context, page: page - 1 },
+        config
+      ),
+    });
   }
   if (totalPages > 1) {
     navigationButtons.push({ text: `📄 ${page}/${totalPages}`, callback_data: "ignore" });
   }
   if (page < totalPages) {
-    navigationButtons.push({ text: "Next ➡️", callback_data: CallbackHelper.build(callbackInfo.machine, callbackInfo.action, { ...callbackInfo.context, page: page + 1 }, config) });
+    navigationButtons.push({
+      text: "Next ➡️",
+      callback_data: CallbackHelper.build(
+        callbackInfo.machine,
+        callbackInfo.action,
+        { ...callbackInfo.context, page: page + 1 },
+        config
+      ),
+    });
   }
 
   if (navigationButtons.length > 0) keyboardRows.push(navigationButtons);
 
   // --- PERUBAHAN UTAMA DI SINI ---
   if (callbackInfo.exportAction) {
-    keyboardRows.push([{ 
-      text: `📄 Ekspor Semua ${totalEntries} Hasil`, 
-      callback_data: CallbackHelper.build(callbackInfo.machine, callbackInfo.exportAction, callbackInfo.context, config) 
-    }]);
+    keyboardRows.push([
+      {
+        text: `📄 Ekspor Semua ${totalEntries} Hasil`,
+        callback_data: CallbackHelper.build(
+          callbackInfo.machine,
+          callbackInfo.exportAction,
+          callbackInfo.context,
+          config
+        ),
+      },
+    ]);
   }
 
   return { text, keyboard: { inline_keyboard: keyboardRows } };
@@ -200,7 +228,9 @@ function getBotState() {
       cachedState.userAccessMap = new Map(cachedState.userAccessMap);
       botState = cachedState;
       return botState;
-    } catch (e) { console.warn("Gagal mem-parsing state dari cache.", e); }
+    } catch (e) {
+      console.warn("Gagal mem-parsing state dari cache.", e);
+    }
   }
   console.log("Membaca state dari Spreadsheet...");
   const config = bacaKonfigurasi();
@@ -254,7 +284,9 @@ function clearBotStateCache() {
     // 5. Reset state di memori untuk sesi eksekusi saat ini
     botState = null;
 
-    console.log(`PEMBERSIHAN CACHE TUNTAS: Upaya penghapusan untuk ${keysToRemove.length} kunci cache telah dijalankan.`);
+    console.log(
+      `PEMBERSIHAN CACHE TUNTAS: Upaya penghapusan untuk ${keysToRemove.length} kunci cache telah dijalankan.`
+    );
     return true;
   } catch (e) {
     console.error(`Gagal menjalankan pembersihan cache total: ${e.message}`);
@@ -292,7 +324,7 @@ function parseLocaleNumber(numberString) {
 function setUserState(userId, stateObject) {
   const cache = CacheService.getScriptCache();
   // Simpan status untuk pengguna ini selama 10 menit.
-  cache.put(`user_state_${userId}`, JSON.stringify(stateObject), 600); 
+  cache.put(`user_state_${userId}`, JSON.stringify(stateObject), 600);
 }
 
 /**
@@ -307,7 +339,7 @@ function getUserState(userId) {
 
   if (stateJSON) {
     // Setelah status diambil, langsung hapus agar tidak digunakan lagi.
-    cache.remove(stateKey); 
+    cache.remove(stateKey);
     return JSON.parse(stateJSON);
   }
   return null;
@@ -348,14 +380,14 @@ function getCallbackSession(sessionId) {
  * @returns {{headers: Array<string>, dataRows: Array<Array<any>>}} Objek berisi header dan baris data.
  */
 function _getSheetData(sheetName) {
-    if (!sheetName) return { headers: [], dataRows: [] };
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return { headers: [], dataRows: [] };
-    if (sheet.getLastRow() < 1) return { headers: [], dataRows: [] };
-    const allData = sheet.getDataRange().getValues();
-    const headers = allData.shift() || [];
-    return { headers: headers, dataRows: allData };
+  if (!sheetName) return { headers: [], dataRows: [] };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return { headers: [], dataRows: [] };
+  if (sheet.getLastRow() < 1) return { headers: [], dataRows: [] };
+  const allData = sheet.getDataRange().getValues();
+  const headers = allData.shift() || [];
+  return { headers: headers, dataRows: allData };
 }
 
 /**
@@ -386,8 +418,8 @@ function getLevenshteinDistance(a, b) {
       } else {
         matrix[i][j] = Math.min(
           matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j] + 1      // deletion
+          matrix[i][j - 1] + 1, // insertion
+          matrix[i - 1][j] + 1 // deletion
         );
       }
     }
@@ -406,7 +438,7 @@ function findClosestCommand(wrongCommand) {
   let closestCommand = null;
   let minDistance = 3; // Batas toleransi, jangan sarankan jika terlalu beda
 
-  allCommands.forEach(command => {
+  allCommands.forEach((command) => {
     const distance = getLevenshteinDistance(wrongCommand, command);
     if (distance < minDistance) {
       minDistance = distance;
@@ -426,30 +458,30 @@ function findClosestCommand(wrongCommand) {
  * @returns {object} Objek berisi { cluster: '...', storageType: '...' }.
  */
 function getStorageInfoFromDsName(dsName, aliasMap) {
-    if (typeof dsName !== 'string' || !aliasMap) return { cluster: null, storageType: null };
+  if (typeof dsName !== "string" || !aliasMap) return { cluster: null, storageType: null };
 
-    // === AWAL BLOK PERBAIKAN UTAMA ===
-    // Regex baru yang lebih fleksibel: mencari pola kata-kata yang diakhiri dengan CL##
-    // Contoh: akan cocok dengan "TBN-COM-LNV-CL02" dan juga "COM-CL01"
-    const clusterMatch = dsName.match(/((?:\w+-)*CL\d+)/i);
-    const cluster = clusterMatch ? clusterMatch[0].toUpperCase() : null;
-    // === AKHIR BLOK PERBAIKAN UTAMA ===
+  // === AWAL BLOK PERBAIKAN UTAMA ===
+  // Regex baru yang lebih fleksibel: mencari pola kata-kata yang diakhiri dengan CL##
+  // Contoh: akan cocok dengan "TBN-COM-LNV-CL02" dan juga "COM-CL01"
+  const clusterMatch = dsName.match(/((?:\w+-)*CL\d+)/i);
+  const cluster = clusterMatch ? clusterMatch[0].toUpperCase() : null;
+  // === AKHIR BLOK PERBAIKAN UTAMA ===
 
-    // Cari alias storage yang cocok
-    let storageType = null;
-    // Urutkan kunci dari yang terpanjang agar tidak salah cocok (misal: "VSPA" sebelum "VSP")
-    const storageKeys = Object.keys(aliasMap).sort((a, b) => b.length - a.length);
+  // Cari alias storage yang cocok
+  let storageType = null;
+  // Urutkan kunci dari yang terpanjang agar tidak salah cocok (misal: "VSPA" sebelum "VSP")
+  const storageKeys = Object.keys(aliasMap).sort((a, b) => b.length - a.length);
 
-    for (const key of storageKeys) {
-        const aliases = aliasMap[key];
-        const isMatch = aliases.some(alias => dsName.toUpperCase().includes(alias.toUpperCase()));
-        if (isMatch) {
-            // Gunakan alias pertama sebagai tipe storage utama
-            storageType = aliases[0];
-            break;
-        }
+  for (const key of storageKeys) {
+    const aliases = aliasMap[key];
+    const isMatch = aliases.some((alias) => dsName.toUpperCase().includes(alias.toUpperCase()));
+    if (isMatch) {
+      // Gunakan alias pertama sebagai tipe storage utama
+      storageType = aliases[0];
+      break;
     }
-    return { cluster: cluster, storageType: storageType };
+  }
+  return { cluster: cluster, storageType: storageType };
 }
 
 /**
@@ -488,7 +520,7 @@ function createProgressBar(percentage, barLength = 10) {
  */
 function formatRelativeTime(date) {
   if (!date) return "";
-  
+
   const startDate = new Date(date);
   if (isNaN(startDate.getTime())) return "";
 

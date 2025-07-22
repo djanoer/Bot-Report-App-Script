@@ -242,3 +242,56 @@ function tesKonfigurasi() {
     SpreadsheetApp.getUi().alert("Tes Konfigurasi Gagal!", `Terjadi error: ${e.message}. Silakan periksa Log Eksekusi untuk detail.`);
   }
 }
+
+/**
+ * [BARU - FASE 4] Memperbarui nilai konfigurasi di sheet, mencatat log audit,
+ * dan membersihkan cache secara otomatis.
+ * @param {string} key - Kunci konfigurasi yang akan diubah.
+ * @param {string} newValue - Nilai baru yang akan disimpan.
+ * @param {object} adminUserData - Objek data admin yang melakukan perubahan.
+ * @returns {{success: boolean, oldValue: any}} Objek yang menandakan keberhasilan dan nilai lama.
+ */
+function updateConfiguration(key, newValue, adminUserData) {
+    try {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const configSheet = ss.getSheetByName(KONSTANTA.NAMA_SHEET.KONFIGURASI);
+        const logSheet = ss.getSheetByName("Log Konfigurasi");
+
+        if (!configSheet || !logSheet) {
+            throw new Error("Sheet 'Konfigurasi' atau 'Log Konfigurasi' tidak ditemukan.");
+        }
+
+        const data = configSheet.getRange("A:B").getValues();
+        let oldValue = null;
+        let rowIndex = -1;
+
+        for (let i = 1; i < data.length; i++) {
+            if (data[i][0] === key) {
+                rowIndex = i + 1;
+                oldValue = data[i][1];
+                break;
+            }
+        }
+
+        if (rowIndex === -1) {
+            throw new Error(`Kunci konfigurasi '${key}' tidak ditemukan.`);
+        }
+
+        // 1. Update nilai di sheet
+        configSheet.getRange(rowIndex, 2).setValue(newValue);
+
+        // 2. Catat log audit
+        const timestamp = new Date();
+        const adminName = adminUserData.firstName || adminUserData.userId;
+        logSheet.appendRow([timestamp, adminName, key, oldValue, newValue]);
+
+        // 3. Bersihkan cache (Langkah Paling Krusial)
+        clearBotStateCache();
+
+        return { success: true, oldValue: oldValue };
+
+    } catch (e) {
+        console.error(`Gagal memperbarui konfigurasi untuk kunci '${key}': ${e.message}`);
+        return { success: false, oldValue: null };
+    }
+}

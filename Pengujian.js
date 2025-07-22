@@ -13,6 +13,52 @@
 
 /**
  * ==================================================================
+ * FUNGSI PENGUJIAN DIAGNOSTIK UNTUK IZIN BACA KONFIGURASI
+ * ==================================================================
+ * Tujuan: Fungsi ini secara spesifik menguji apakah skrip memiliki
+ * izin untuk membaca data dari sheet "Konfigurasi". Ini adalah
+ * langkah debugging paling penting saat ini.
+ */
+function jalankanTesIzinBacaKonfigurasi() {
+  Logger.log("🚀 MEMULAI PENGUJIAN IZIN BACA SHEET KONFIGURASI...");
+
+  try {
+    Logger.log("Mencoba mengakses Spreadsheet aktif...");
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    Logger.log("Spreadsheet berhasil diakses.");
+
+    const sheetName = KONSTANTA.NAMA_SHEET.KONFIGURASI;
+    Logger.log(`Mencoba mengakses sheet dengan nama: "${sheetName}"...`);
+    const sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) {
+      Logger.log(`❌ GAGAL KRITIS: Sheet dengan nama "${sheetName}" tidak dapat ditemukan.`);
+      Logger.log("Pastikan tidak ada salah ketik pada nama sheet atau di file Konstanta.js.");
+      return;
+    }
+    Logger.log(`Sheet "${sheetName}" berhasil ditemukan.`);
+
+    Logger.log("Mencoba membaca seluruh data dari sheet (getDataRange().getValues())...");
+    const data = sheet.getDataRange().getValues();
+
+    if (data && data.length > 0) {
+      Logger.log(`✅ PENGUJIAN BERHASIL: Skrip berhasil membaca ${data.length} baris dari sheet "Konfigurasi".`);
+      Logger.log("Ini berarti masalah BUKAN pada izin baca sheet.");
+    } else {
+      Logger.log("⚠️ PERINGATAN: Skrip berhasil membaca sheet, tetapi sheet tersebut kosong atau tidak ada datanya.");
+    }
+  } catch (e) {
+    Logger.log("🔥🔥🔥 GAGAL KRITIS: Terjadi error saat mencoba membaca sheet 'Konfigurasi'. 🔥🔥🔥");
+    Logger.log(`DETAIL ERROR: ${e.message}`);
+    Logger.log("Ini sangat mungkin disebabkan oleh pengaturan proteksi (kunci) pada sheet.");
+    Logger.log("REKOMENDASI: Buka proteksi sheet 'Konfigurasi' dan jalankan tes ini lagi.");
+  } finally {
+    Logger.log("🏁 PENGUJIAN IZIN BACA SELESAI.");
+  }
+}
+
+/**
+ * ==================================================================
  * FUNGSI PENGUJIAN DIAGNOSTIK UPTIME
  * ==================================================================
  * Tujuan: Fungsi ini secara spesifik menguji logika di dalam

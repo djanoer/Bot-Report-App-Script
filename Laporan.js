@@ -99,7 +99,6 @@ function buatLaporanPeriodik(periode) {
   kirimPesanTelegram(pesanLaporan, config, "HTML");
 }
 
-
 // =================================================================================
 // FUNGSI KALKULASI DATA (LOGIKA INTI)
 // =================================================================================
@@ -137,9 +136,8 @@ function _calculateLaporanHarianData(config, vmHeaders, vmData) {
       counts,
       vCenterSummary: summary.vCenterMessage,
       uptimeSummary: summary.uptimeMessage, // Menambahkan uptime summary
-      provisioningSummary
+      provisioningSummary,
     };
-
   } catch (e) {
     throw new Error(`Gagal menghitung data Laporan Harian VM. Penyebab: ${e.message}`);
   }
@@ -234,14 +232,20 @@ function getProvisioningStatusSummary(config) {
     const sheetName = config[K.SHEET_DS];
     if (!sheetName) {
       // Mengembalikan status default jika sheet tidak dikonfigurasi
-      return { isOverProvisioned: false, message: "<i>Status provisioning tidak dapat diperiksa: NAMA_SHEET_DATASTORE belum diatur.</i>" };
+      return {
+        isOverProvisioned: false,
+        message: "<i>Status provisioning tidak dapat diperiksa: NAMA_SHEET_DATASTORE belum diatur.</i>",
+      };
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dsSheet = ss.getSheetByName(sheetName);
     if (!dsSheet || dsSheet.getLastRow() <= 1) {
       // Mengembalikan status default jika tidak ada data
-      return { isOverProvisioned: false, message: "<i>Status provisioning tidak dapat diperiksa: Data datastore tidak ditemukan.</i>" };
+      return {
+        isOverProvisioned: false,
+        message: "<i>Status provisioning tidak dapat diperiksa: Data datastore tidak ditemukan.</i>",
+      };
     }
 
     const headers = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
@@ -252,7 +256,9 @@ function getProvisioningStatusSummary(config) {
     const provGbIndex = headers.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
 
     if ([nameIndex, capGbIndex, provGbIndex].includes(-1)) {
-      throw new Error(`Satu atau lebih header penting (Name, Capacity GB, Provisioned GB) tidak ditemukan di sheet Datastore.`);
+      throw new Error(
+        `Satu atau lebih header penting (Name, Capacity GB, Provisioned GB) tidak ditemukan di sheet Datastore.`
+      );
     }
 
     const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
@@ -273,15 +279,14 @@ function getProvisioningStatusSummary(config) {
     if (isOverProvisioned) {
       return {
         isOverProvisioned: true,
-        message: `❗️ Terdeteksi datastore over-provisioned.`
+        message: `❗️ Terdeteksi datastore over-provisioned.`,
       };
     }
 
     return {
       isOverProvisioned: false,
-      message: "✅ Semua datastore dalam rasio aman (1:1)."
+      message: "✅ Semua datastore dalam rasio aman (1:1).",
     };
-
   } catch (e) {
     console.error(`Gagal memeriksa status provisioning: ${e.message}`);
     // Melempar error agar bisa ditangani oleh handler utama
@@ -373,7 +378,9 @@ function _calculateProvisioningReportData(config, allVmData, headers) {
 
     for (const row of allVmData) {
       const vCenter = row[indices.VCENTER] || "Lainnya";
-      const isPoweredOn = String(row[indices.STATE] || "").toLowerCase().includes("on");
+      const isPoweredOn = String(row[indices.STATE] || "")
+        .toLowerCase()
+        .includes("on");
       const cpu = parseInt(row[indices.CPU], 10) || 0;
       const memory = parseFloat(row[indices.MEMORY]) || 0;
       const disk = parseFloat(row[indices.PROV_TB]) || 0;
@@ -401,7 +408,6 @@ function _calculateProvisioningReportData(config, allVmData, headers) {
     }
 
     return reportData;
-  
   } catch (e) {
     throw new Error(`Gagal membuat laporan provisioning: ${e.message}`);
   }
@@ -568,8 +574,8 @@ function generateStorageUtilizationReport(config) {
     if (!capacityMap || Object.keys(capacityMap).length === 0 || !aliasMap) {
       return "❌ <b>Gagal:</b> Konfigurasi `MAP_KAPASITAS_STORAGE` atau `MAP_ALIAS_STORAGE` tidak ditemukan atau kosong.";
     }
-    
-    const reportKeys = Object.keys(capacityMap); 
+
+    const reportKeys = Object.keys(capacityMap);
     const thresholds = config[K.STORAGE_UTILIZATION_THRESHOLDS] || { warning: 75, critical: 90 };
 
     const { headers, data: logs } = getCombinedStorageLogs(config, 7);
@@ -592,20 +598,20 @@ function generateStorageUtilizationReport(config) {
 
     reportKeys.forEach((reportKey) => {
       const totalCapacity = capacityMap[reportKey];
-      
+
       // --- LOGIKA PENCARIAN ALIAS YANG DIPERBAIKI ---
       let semuaAliasTerkait = [reportKey];
       for (const key in aliasMap) {
-          if (aliasMap[key].map(a => a.toUpperCase()).includes(reportKey.toUpperCase())) {
-              semuaAliasTerkait = aliasMap[key];
-              break;
-          }
+        if (aliasMap[key].map((a) => a.toUpperCase()).includes(reportKey.toUpperCase())) {
+          semuaAliasTerkait = aliasMap[key];
+          break;
+        }
       }
       // --- AKHIR PERBAIKAN ---
 
       const lastEntry = logs.find((row) => {
-        const logAliases = (row[nameIndex] || "").split(",").map(a => a.trim());
-        return logAliases.some(logAlias => semuaAliasTerkait.includes(logAlias));
+        const logAliases = (row[nameIndex] || "").split(",").map((a) => a.trim());
+        return logAliases.some((logAlias) => semuaAliasTerkait.includes(logAlias));
       });
 
       if (!lastEntry) {
@@ -615,7 +621,7 @@ function generateStorageUtilizationReport(config) {
 
       const currentUsage = parseFloat(lastEntry[usageIndex]) || 0;
       const percentage = totalCapacity > 0 ? (currentUsage / totalCapacity) * 100 : 0;
-      let statusEmoji = percentage >= thresholds.critical ? "🔴" : (percentage >= thresholds.warning ? "🟡" : "🟢");
+      let statusEmoji = percentage >= thresholds.critical ? "🔴" : percentage >= thresholds.warning ? "🟡" : "🟢";
 
       reportMessage += `\n${statusEmoji} <b>${reportKey}</b> <code>(${percentage.toFixed(1)}%)</code>\n`;
       reportMessage += `${createProgressBar(percentage)}\n`;
@@ -623,21 +629,21 @@ function generateStorageUtilizationReport(config) {
     });
 
     return reportMessage;
-
   } catch (e) {
     console.error(`Gagal membuat laporan utilisasi storage: ${e.message}\n${e.stack}`);
     return `🔴 <b>Gagal Membuat Laporan Storage</b>\n\nPenyebab: <pre>${escapeHtml(e.message)}</pre>`;
   }
 }
 
-
 /**
  * [BARU] Menganalisis sebuah datastore secara komprehensif.
  */
 function generateDatastoreAnalysis(datastoreName, config) {
   const analysis = {
-    totalVms: 0, on: 0, off: 0,
-    details: getDatastoreDetails(datastoreName, config)
+    totalVms: 0,
+    on: 0,
+    off: 0,
+    details: getDatastoreDetails(datastoreName, config),
   };
 
   if (!analysis.details) return analysis;
@@ -645,18 +651,22 @@ function generateDatastoreAnalysis(datastoreName, config) {
   try {
     const { headers, results: vmsInDatastore } = searchVmsByDatastore(datastoreName, config);
     analysis.totalVms = vmsInDatastore.length;
-    
+
     if (vmsInDatastore.length > 0) {
       const stateIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.HEADER_VM_STATE]);
       if (stateIndex !== -1) {
-        vmsInDatastore.forEach(row => {
-          String(row[stateIndex] || "").toLowerCase().includes("on") ? analysis.on++ : analysis.off++;
+        vmsInDatastore.forEach((row) => {
+          String(row[stateIndex] || "")
+            .toLowerCase()
+            .includes("on")
+            ? analysis.on++
+            : analysis.off++;
         });
       }
     }
-  } catch(e) {
+  } catch (e) {
     console.error(`Gagal menganalisis VM di datastore ${datastoreName}: ${e.message}`);
   }
-  
+
   return analysis;
 }

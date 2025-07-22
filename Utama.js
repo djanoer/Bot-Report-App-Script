@@ -558,11 +558,16 @@ const commandHandlers = {
     const pesanStatus = jalankanPemeriksaanKesehatan();
     kirimPesanTelegram(pesanStatus, config, "HTML");
   },
+  [KONSTANTA.PERINTAH_BOT.MANAGE_CONFIG]: (update, config, userData) => {
+    // Memulai alur kerja interaktif untuk manajemen konfigurasi
+    handleConfigManager(update, "start", config, userData);
+  },
 };
 
 /**
- * [REFACTOR STATE-DRIVEN FINAL] Fungsi utama yang menangani semua permintaan dari Telegram.
- * Menggunakan arsitektur state-driven untuk routing callback yang bersih dan tangguh.
+ * [REVISI ARSITEKTURAL FINAL] Fungsi utama yang menangani semua permintaan dari Telegram.
+ * Logika pemrosesan teks stateful telah dipindahkan ke StateMachine.js untuk
+ * menjaga fungsi ini tetap bersih sebagai router.
  */
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) {
@@ -574,7 +579,7 @@ function doPost(e) {
 
   try {
     state = getBotState();
-    const config = state.config; // Deklarasi config tetap di sini untuk jangkauan luas
+    const config = state.config;
     const userAccessMap = state.userAccessMap;
 
     if (!e.parameter.token || e.parameter.token !== config.WEBHOOK_BOT_TOKEN) {
@@ -586,6 +591,7 @@ function doPost(e) {
     const isCallback = !!update.callback_query;
 
     if (isCallback) {
+      // --- BLOK PENANGANAN CALLBACK QUERY (TIDAK BERUBAH) ---
       contextForError = "Pemrosesan Callback Query";
       const userEvent = update.callback_query;
       const callbackData = userEvent.data;
@@ -639,36 +645,7 @@ function doPost(e) {
               exportMachine(update, config, userData);
               break;
             case "rekomendasi_machine":
-              const { step, requirements } = userEvent.sessionData;
-              const userId = String(userEvent.from.id);
-              if (action === "cancel") {
-                editMessageText(
-                  "ℹ️ Proses rekomendasi setup telah dibatalkan.",
-                  null,
-                  userEvent.message.chat.id,
-                  userEvent.message.message_id,
-                  config
-                );
-                clearUserState(userId);
-              } else if (action === "handle_step") {
-                if (step === "io") {
-                  tampilkanPertanyaanIo(
-                    userId,
-                    userEvent.message.message_id,
-                    userEvent.message.chat.id,
-                    config,
-                    requirements
-                  );
-                } else if (step === "spek") {
-                  tampilkanPertanyaanSpek(
-                    userId,
-                    userEvent.message.message_id,
-                    userEvent.message.chat.id,
-                    config,
-                    requirements
-                  );
-                }
-              }
+              rekomendasiMachine(update, action, config);
               break;
             case "ticket_machine":
               ticketMachine(update, action, config);
@@ -676,12 +653,18 @@ function doPost(e) {
             case "registration_machine":
               registrationMachine(update, action, config);
               break;
+            case "storage_explorer_machine":
+              handleStorageExplorer(update, action, config, userData);
+              break;
+            case "config_machine":
+              handleConfigManager(update, action, config, userData);
+              break;
             default:
               console.warn(`Mesin tidak dikenal: ${machineName}`);
           }
         } else {
           console.warn(`Sesi tidak valid atau sudah digunakan: ${sessionId}. Permintaan diabaikan.`);
-          answerCallbackQuery(callbackQueryId, config);
+          answerCallbackQuery(callbackQueryId, config, "Sesi telah kedaluwarsa. Harap mulai ulang perintah.");
         }
       } else {
         console.warn("Menerima callback dengan format yang tidak dikenal:", callbackData);
@@ -692,100 +675,25 @@ function doPost(e) {
         answerCallbackQuery(callbackQueryId, config);
       }
     } else if (update.message && update.message.text) {
+      // --- BLOK PENANGANAN PESAN TEKS (TELAH DIREFAKTOR) ---
       contextForError = "Pemrosesan Perintah Teks";
       const userEvent = update.message;
       const text = userEvent.text;
       const userId = String(userEvent.from.id);
+
       const userState = getUserState(userId);
 
-      // --- BLOK UTAMA PERBAIKAN ---
       if (userState && userState.action) {
-        // Periksa jika state adalah untuk alur rekomendasi
-        if (userState.action.startsWith("AWAITING_REKOMENDASI_")) {
-          const messageId = userState.messageId;
-          const chatId = userState.chatId;
-          const requirements = userState.requirements;
-          if (text.toLowerCase() === "batal") {
-            editMessageText("ℹ️ Proses rekomendasi setup telah dibatalkan.", null, chatId, messageId, state.config);
-            clearUserState(userId);
-            return HtmlService.createHtmlOutput("OK");
-          }
-          if (userState.action === "AWAITING_REKOMENDASI_KRITIKALITAS") {
-            requirements.kritikalitas = text;
-            tampilkanPertanyaanIo(userId, messageId, chatId, state.config, requirements);
-          } else if (userState.action === "AWAITING_REKOMENDASI_SPEK") {
-            const specs = text.split(/\s+/);
-            if (
-              specs.length !== 3 ||
-              isNaN(parseInt(specs[0])) ||
-              isNaN(parseInt(specs[1])) ||
-              isNaN(parseInt(specs[2]))
-            ) {
-              kirimPesanTelegram("Format spesifikasi tidak valid...", state.config, "HTML", null, userEvent.chat.id);
-            } else {
-              requirements.cpu = parseInt(specs[0], 10);
-              requirements.memory = parseInt(specs[1], 10);
-              requirements.disk = parseInt(specs[2], 10);
-              clearUserState(userId);
-              const resultMessage = dapatkanRekomendasiPenempatan(requirements, state.config);
-              editMessageText(resultMessage, null, chatId, messageId, state.config);
-            }
-          }
-          return HtmlService.createHtmlOutput("OK");
-        }
-        // Periksa jika state adalah untuk input catatan
-        else if (userState.action === "AWAITING_NOTE_INPUT") {
-          const pk = userState.pk;
-          const originalMessageId = userState.messageId;
-
-          if (text.toLowerCase() === "batal") {
-            const { headers, results } = searchVmOnSheet(pk, config);
-            if (results.length > 0) {
-              const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
-              editMessageText(pesan, keyboard, userEvent.chat.id, originalMessageId, config);
-            } else {
-              editMessageText(`✅ Aksi dibatalkan.`, null, userEvent.chat.id, originalMessageId, config);
-            }
-            clearUserState(userId);
-            return HtmlService.createHtmlOutput("OK");
-          }
-
-          if (!text || text.trim().length === 0) {
-            kirimPesanTelegram("❌ Catatan tidak boleh kosong...", config, "HTML", null, userEvent.chat.id);
-            setUserState(userId, { action: "AWAITING_NOTE_INPUT", pk: pk, messageId: originalMessageId });
-            return HtmlService.createHtmlOutput("OK");
-          }
-          if (text.length > 100) {
-            kirimPesanTelegram("❌ Catatan terlalu panjang...", config, "HTML", null, userEvent.chat.id);
-            setUserState(userId, { action: "AWAITING_NOTE_INPUT", pk: pk, messageId: originalMessageId });
-            return HtmlService.createHtmlOutput("OK");
-          }
-
-          const userData = userAccessMap.get(userId) || {};
-          userData.firstName = userEvent.from.first_name;
-
-          if (saveOrUpdateVmNote(pk, text, userData)) {
-            const { headers, results } = searchVmOnSheet(pk, config);
-            if (results.length > 0) {
-              const { pesan, keyboard } = formatVmDetail(results[0], headers, config);
-              const successMessage = "✅ Catatan berhasil disimpan.\n\n" + pesan;
-              editMessageText(successMessage, keyboard, userEvent.chat.id, originalMessageId, config);
-            } else {
-              editMessageText(`✅ Catatan berhasil disimpan.`, null, userEvent.chat.id, originalMessageId, config);
-            }
-          } else {
-            editMessageText(`❌ Gagal menyimpan catatan...`, null, userEvent.chat.id, originalMessageId, config);
-          }
-
-          clearUserState(userId);
-          return HtmlService.createHtmlOutput("OK");
-        }
+        // Jika pengguna dalam percakapan, delegasikan ke state machine dan selesai.
+        routeToStateMachineByState(update, userState, config, userAccessMap);
+        return HtmlService.createHtmlOutput("OK");
       }
 
-      // --- Blok untuk perintah '/' tetap sama ---
+      // Jika tidak ada state, proses sebagai perintah baru.
       if (!text.startsWith("/")) {
         return HtmlService.createHtmlOutput("OK");
       }
+
       const commandParts = text.split(" ");
       const command = commandParts[0].toLowerCase().split("@")[0];
 
@@ -944,7 +852,8 @@ function kirimPesanInfo(update, config, userData) {
       "🛡️ <b>Perintah Administratif</b>\n" +
       `<code>${K.SYNC_LAPORAN}</code> - Sinkronisasi data & laporan lengkap.\n` +
       `<code>${K.ARSIPKAN_LOG}</code> - Jalankan pengarsipan semua log manual.\n` +
-      `<code>${K.CLEAR_CACHE}</code> - Bersihkan cache hak akses & konfigurasi.`;
+      `<code>${K.CLEAR_CACHE}</code> - Bersihkan cache hak akses & konfigurasi.` +
+      `<code>${K.MANAGE_CONFIG}</code> - Kelola konfigurasi bot secara interaktif.`;
   }
 
   // Kirim pesan ke chat ID yang benar

@@ -599,6 +599,51 @@ function formatClusterDetail(analysis, vmsInCluster, vmHeaders, config) {
 }
 
 /**
+ * [BARU - FASE 4] Membuat tampilan menu utama untuk manajemen konfigurasi.
+ * @returns {object} Objek berisi { pesan: string, keyboard: object }.
+ */
+function formatConfigMainMenu() {
+  const pesan =
+    "⚙️ <b>Pusat Manajemen Konfigurasi</b>\n\n" +
+    "Silakan pilih kategori konfigurasi yang ingin Anda lihat atau ubah. " +
+    "Setiap perubahan akan dicatat untuk tujuan audit.";
+
+  // Tombol akan dibuat oleh state machine, fungsi ini hanya menyediakan teks.
+  return { pesan };
+}
+
+/**
+ * [BARU - FASE 4] Membuat tampilan sub-menu untuk kategori konfigurasi tertentu.
+ * @param {string} categoryTitle - Judul kategori yang akan ditampilkan.
+ * @param {Array<object>} configItems - Array objek [{key: string, value: any}].
+ * @returns {string} String pesan yang sudah diformat HTML.
+ */
+function formatConfigCategoryView(categoryTitle, configItems) {
+  let pesan = `⚙️ **Kategori: ${escapeHtml(categoryTitle)}**\n\n`;
+  pesan += "Berikut adalah daftar konfigurasi saat ini. Pilih 'Ubah' untuk memperbarui nilai.\n\n";
+
+  if (configItems.length === 0) {
+    pesan += "<i>Tidak ada item konfigurasi dalam kategori ini.</i>";
+    return pesan;
+  }
+
+  configItems.forEach((item) => {
+    let displayValue = item.value;
+    // Jika nilainya array atau objek, tampilkan sebagai JSON string agar rapi
+    if (typeof displayValue === "object" && displayValue !== null) {
+      displayValue = JSON.stringify(displayValue);
+    }
+    // Batasi panjang tampilan nilai agar tidak merusak pesan
+    if (String(displayValue).length > 50) {
+      displayValue = String(displayValue).substring(0, 50) + "...";
+    }
+    pesan += `• <code>${escapeHtml(item.key)}</code>\n   └ Nilai Saat Ini: <b>${escapeHtml(displayValue)}</b>\n`;
+  });
+
+  return pesan;
+}
+
+/**
  * [BARU] Membuat blok header standar untuk semua laporan.
  * @param {string} title - Judul utama laporan.
  * @returns {string} String header laporan yang sudah diformat HTML.

@@ -12,6 +12,119 @@
  * - testAlurEksporLengkap(): Mensimulasikan alur permintaan ekspor dari menu hingga antrean.
  */
 
+/**
+ * ==================================================================
+ * FUNGSI PENGUJIAN DIAGNOSTIK UNTUK ALUR /manageconfig
+ * ==================================================================
+ * Tujuan: Fungsi ini mensimulasikan seluruh alur dari pengguna menekan
+ * tombol kategori hingga diproses oleh doPost untuk menemukan titik kegagalan.
+ *
+ * Cara Menggunakan:
+ * 1. Pastikan Anda telah menerapkan perbaikan terakhir pada `doPost` di `Utama.js`.
+ * 2. Pilih fungsi `jalankanTesAlurConfigManager` dari dropdown di atas.
+ * 3. Klik "Run".
+ * 4. Lihat hasilnya di Log Eksekusi (View > Logs atau Ctrl+Enter).
+ */
+function jalankanTesAlurConfigManager() {
+  Logger.log("🚀 MEMULAI PENGUJIAN END-TO-END UNTUK ALUR /manageconfig...");
+
+  // --- 1. SIMULASI LINGKUNGAN (MOCKING) ---
+  // Kita akan mengganti layanan global sementara agar bisa mengontrolnya.
+  const originalUrlFetchApp = UrlFetchApp;
+  const originalCacheService = CacheService;
+
+  let capturedEditMessagePayload = null; // Variabel untuk menangkap output
+
+  // Ganti UrlFetchApp dengan versi palsu yang hanya mencatat panggilan
+  UrlFetchApp = {
+    fetch: function (url, params) {
+      if (url.includes("editMessageText")) {
+        Logger.log("==> [MOCK] Panggilan ke 'editMessageText' terdeteksi.");
+        capturedEditMessagePayload = JSON.parse(params.payload);
+      }
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true }) };
+    },
+  };
+
+  // Ganti CacheService dengan versi palsu yang bisa kita kontrol
+  let mockCache = {};
+  CacheService = {
+    getScriptCache: function () {
+      return {
+        get: function (key) {
+          return mockCache[key] || null;
+        },
+        put: function (key, value, exp) {
+          mockCache[key] = value;
+        },
+      };
+    },
+  };
+
+  try {
+    // --- 2. SIMULASI AKSI PENGGUNA ---
+    Logger.log("\n--- TAHAP 1: Menyiapkan Sesi & Callback ---");
+
+    // Dapatkan konfigurasi nyata untuk membuat callback yang valid
+    const state = getBotState();
+    const config = state.config;
+
+    // Pengguna menekan tombol "Thresholds & Peringatan"
+    const targetCategory = "thresholds";
+    const callbackDataString = CallbackHelper.build(
+      "config_machine",
+      "show_category",
+      { category: targetCategory },
+      config
+    );
+    Logger.log(`Callback Data yang Dihasilkan: ${callbackDataString}`);
+
+    // Buat objek 'update' palsu seolah-olah dari Telegram
+    const mockUpdate = {
+      callback_query: {
+        id: "1234567890123456789",
+        from: { id: 1, is_bot: false, first_name: "AdminTester" },
+        message: { message_id: 987, chat: { id: -1001, type: "group" }, text: "Pesan Menu Utama" },
+        chat_instance: "123",
+        data: callbackDataString,
+      },
+    };
+
+    // Buat objek 'event' palsu seolah-olah dari Webhook
+    const mockEvent = {
+      postData: { contents: JSON.stringify(mockUpdate) },
+      parameter: { token: config.WEBHOOK_BOT_TOKEN },
+    };
+
+    Logger.log("\n--- TAHAP 2: Mengeksekusi doPost dengan Data Simulasi ---");
+    doPost(mockEvent); // Panggil fungsi utama kita
+
+    // --- 3. HASIL & VERIFIKASI ---
+    Logger.log("\n--- TAHAP 3: Menganalisis Hasil ---");
+    if (capturedEditMessagePayload) {
+      Logger.log("✅ VERIFIKASI BERHASIL: Fungsi 'editMessageText' berhasil dipanggil.");
+      Logger.log("Teks yang akan dikirim ke pengguna:");
+      Logger.log(capturedEditMessagePayload.text);
+      if (capturedEditMessagePayload.text.includes("Kategori: Thresholds & Peringatan")) {
+        Logger.log("✅ KONTEN VALID: Pesan berisi judul kategori yang benar.");
+      } else {
+        Logger.log("❌ KONTEN TIDAK VALID: Pesan tidak berisi judul kategori yang diharapkan.");
+      }
+    } else {
+      Logger.log(
+        "❌ VERIFIKASI GAGAL: Fungsi 'editMessageText' TIDAK pernah dipanggil. Ini berarti alur terputus di suatu tempat di dalam doPost."
+      );
+    }
+  } catch (e) {
+    Logger.log(`🔥 TERJADI ERROR KRITIS SAAT PENGUJIAN: ${e.message}\n${e.stack}`);
+  } finally {
+    // Kembalikan layanan asli, ini sangat penting!
+    UrlFetchApp = originalUrlFetchApp;
+    CacheService = originalCacheService;
+    Logger.log("\n🏁 PENGUJIAN SELESAI. Layanan asli telah dipulihkan.");
+  }
+}
+
 // =================================================================================
 // BAGIAN 1: KERANGКА KERJA PENGUJIAN & MOCKS
 // =================================================================================

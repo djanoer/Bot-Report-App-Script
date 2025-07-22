@@ -496,10 +496,10 @@ function handleStorageExplorer(update, action, config, userData) {
       const dsNameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
 
       // Buat tombol aksi HANYA untuk item di halaman saat ini
-      const actionButtons = pageEntries.map((row) => {
+      const actionButtons = pageEntries.map((row, index) => {
         const dsName = row[dsNameIndex];
         return {
-          text: `Telusuri VM di ${dsName.substring(0, 25)}...`,
+          text: `Telusuri VM #${(page - 1) * entriesPerPage + index + 1}`,
           callback_data: CallbackHelper.build(
             "storage_explorer_machine",
             "show_vm_list",
@@ -546,13 +546,200 @@ function handleStorageExplorer(update, action, config, userData) {
   } catch (e) {
     handleCentralizedError(e, `Perintah: /cekstorage`, config, userData);
     if (statusMessageId) {
-      editMessageText(
-        `❌ Gagal memproses permintaan.\n\nPenyebab: <code>${escapeHtml(e.message)}</code>`,
-        null,
-        chatId,
-        statusMessageId,
-        config
-      );
+      editMessageText(`❌ Gagal memproses permintaan.\n\nPenyebab: -`, null, chatId, statusMessageId, config);
     }
+  }
+}
+
+// Helper object untuk mendefinisikan kategori konfigurasi.
+const CONFIG_CATEGORIES = {
+  thresholds: {
+    title: "Thresholds & Peringatan",
+    keys: [
+      "THRESHOLD_DS_USED_PERCENT",
+      "THRESHOLD_VM_UPTIME",
+      "LOG_TOLERANCE_PROV_GB",
+      "SYSTEM_LIMITS",
+      "STORAGE_UTILIZATION_THRESHOLDS",
+    ],
+  },
+  headers: {
+    title: "Nama Header & Kolom",
+    keys: [
+      "HEADER_VM_PK",
+      "HEADER_VM_NAME",
+      "HEADER_VM_IP",
+      "HEADER_VM_GUEST_OS",
+      "HEADER_VM_STATE",
+      "HEADER_VM_VCENTER",
+      "HEADER_VM_CLUSTER",
+      "HEADER_VM_UPTIME",
+      "HEADER_VM_CPU",
+      "HEADER_VM_MEMORY",
+      "HEADER_VM_PROV_GB",
+      "HEADER_VM_PROV_TB",
+      "HEADER_VM_KRITIKALITAS",
+      "HEADER_VM_KELOMPOK_APP",
+      "HEADER_VM_DEV_OPS",
+      "HEADER_VM_ENVIRONMENT",
+      "HEADER_VM_NO_TIKET",
+      "HEADER_VM_HOSTS",
+      "HEADER_VM_TANGGAL_SETUP",
+      "HEADER_DATASTORE_NAME",
+      "HEADER_VM_DATASTORE_COLUMN",
+    ],
+  },
+  system_ids: {
+    title: "ID Sistem & Folder",
+    keys: [
+      "SUMBER_SPREADSHEET_ID",
+      "TIKET_SPREADSHEET_ID",
+      "FOLDER_ID_ARSIP",
+      "FOLDER_ID_HASIL_EKSPOR",
+      "FOLDER_ID_ARSIP_LOG",
+      "FOLDER_ID_ARSIP_LOG_STORAGE",
+    ],
+  },
+  mappings: {
+    title: "Pemetaan & Aturan",
+    keys: [
+      "PEMETAAN_ENVIRONMENT",
+      "KATA_KUNCI_DS_DIKECUALIKAN",
+      "SKOR_KRITIKALITAS",
+      "MAP_ALIAS_STORAGE",
+      "MAP_KAPASITAS_STORAGE",
+    ],
+  },
+};
+
+/**
+ * [REVISI FINAL - FASE 4] State machine untuk alur kerja manajemen konfigurasi.
+ * Kini menangani alur perubahan nilai secara lengkap.
+ */
+function handleConfigManager(update, action, config, userData) {
+  const isInitialCall = action === "start";
+  const userEvent = isInitialCall ? update.message : update.callback_query;
+  const chatId = userEvent.chat.id;
+  let statusMessageId = isInitialCall ? null : userEvent.message.message_id;
+  const sessionData = isInitialCall ? {} : userEvent.sessionData;
+  const userId = String(userEvent.from.id);
+
+  try {
+    if (action === "start" || action === "back_to_main") {
+      const { pesan } = formatConfigMainMenu();
+      const keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: " Thresholds & Peringatan",
+              callback_data: CallbackHelper.build(
+                "config_machine",
+                "show_category",
+                { category: "thresholds" },
+                config
+              ),
+            },
+          ],
+          [
+            {
+              text: " Nama Header & Kolom",
+              callback_data: CallbackHelper.build("config_machine", "show_category", { category: "headers" }, config),
+            },
+          ],
+          [
+            {
+              text: " ID Sistem & Folder",
+              callback_data: CallbackHelper.build(
+                "config_machine",
+                "show_category",
+                { category: "system_ids" },
+                config
+              ),
+            },
+          ],
+          [
+            {
+              text: " Pemetaan & Aturan",
+              callback_data: CallbackHelper.build("config_machine", "show_category", { category: "mappings" }, config),
+            },
+          ],
+        ],
+      };
+      if (isInitialCall) {
+        kirimPesanTelegram(pesan, config, "HTML", keyboard, chatId);
+      } else {
+        editMessageText(pesan, keyboard, chatId, statusMessageId, config);
+      }
+    } else if (action === "show_category") {
+      const { category } = sessionData;
+      const categoryInfo = CONFIG_CATEGORIES[category];
+      if (!categoryInfo) {
+        editMessageText("❌ Kategori konfigurasi tidak valid.", null, chatId, statusMessageId, config);
+        return;
+      }
+      const configItems = categoryInfo.keys
+        .map((key) => ({ key: key, value: config[key] }))
+        .filter((item) => item.value !== undefined);
+      const pesan = formatConfigCategoryView(categoryInfo.title, configItems);
+      const keyboardRows = configItems.map((item) => {
+        return [
+          {
+            text: `Ubah ${item.key}`,
+            callback_data: CallbackHelper.build(
+              "config_machine",
+              "prompt_edit",
+              {
+                category: category,
+                key: item.key,
+              },
+              config
+            ),
+          },
+        ];
+      });
+      keyboardRows.push([
+        {
+          text: "⬅️ Kembali ke Menu Utama",
+          callback_data: CallbackHelper.build("config_machine", "back_to_main", {}, config),
+        },
+      ]);
+      const keyboard = { inline_keyboard: keyboardRows };
+      editMessageText(pesan, keyboard, chatId, statusMessageId, config);
+    } else if (action === "prompt_edit") {
+      const { key, category } = sessionData;
+      const currentValue = config[key];
+      let displayValue = currentValue;
+      if (typeof displayValue === "object" && displayValue !== null) {
+        displayValue = JSON.stringify(displayValue, null, 2); // Format JSON agar lebih rapi
+      }
+
+      let pesan = `✏️ <b>Mengubah Konfigurasi</b>\n\n`;
+      pesan += `Anda akan mengubah nilai untuk kunci:\n<code>${escapeHtml(key)}</code>\n\n`;
+      pesan += `Nilai saat ini:\n<pre>${escapeHtml(displayValue)}</pre>\n\n`;
+      pesan += `Silakan kirimkan nilai baru sebagai balasan. Kirim "batal" untuk kembali.`;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: "⬅️ Batal",
+              callback_data: CallbackHelper.build("config_machine", "show_category", { category: category }, config),
+            },
+          ],
+        ],
+      };
+
+      // Set state untuk memberitahu bot agar menunggu balasan teks
+      setUserState(userId, {
+        action: "AWAITING_CONFIG_INPUT",
+        key: key,
+        category: category,
+        originalMessageId: statusMessageId,
+      });
+
+      editMessageText(pesan, keyboard, chatId, statusMessageId, config);
+    }
+  } catch (e) {
+    handleCentralizedError(e, `Manajemen Konfigurasi`, config, userData);
   }
 }
