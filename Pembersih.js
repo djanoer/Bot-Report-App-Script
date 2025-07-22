@@ -17,13 +17,15 @@ function bersihkanFileEksporTua(config) {
   console.log("Memulai proses pembersihan file ekspor lama...");
   try {
     if (!config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR]) {
-      console.warn(`Proses pembersihan dibatalkan: ${KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR} tidak diatur di Konfigurasi.`);
+      console.warn(
+        `Proses pembersihan dibatalkan: ${KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR} tidak diatur di Konfigurasi.`
+      );
       return;
     }
 
     const folder = DriveApp.getFolderById(config[KONSTANTA.KUNCI_KONFIG.FOLDER_EKSPOR]);
     const files = folder.getFiles();
-    const oneDayAgo = new Date(new Date().getTime() - (1 * 24 * 60 * 60 * 1000));
+    const oneDayAgo = new Date(new Date().getTime() - 1 * 24 * 60 * 60 * 1000);
 
     let deleteCount = 0;
     while (files.hasNext()) {
@@ -34,13 +36,13 @@ function bersihkanFileEksporTua(config) {
         deleteCount++;
       }
     }
-    
+
     if (deleteCount > 0) {
       console.log(`Pembersihan selesai. ${deleteCount} file telah dipindahkan ke sampah.`);
     } else {
       console.log("Pembersihan selesai. Tidak ada file lama yang perlu dihapus.");
     }
-  } catch(e) {
+  } catch (e) {
     console.error(`Gagal menjalankan pembersihan file lama. Error: ${e.message}`);
   }
 }
@@ -81,7 +83,7 @@ function jalankanPengarsipanLogStorageKeJson(config) {
   }
 
   // Tentukan rentang tanggal dari data yang akan diarsipkan
-  const timestamps = allLogData.map(row => new Date(row[timestampIndex])).filter(d => !isNaN(d.getTime()));
+  const timestamps = allLogData.map((row) => new Date(row[timestampIndex])).filter((d) => !isNaN(d.getTime()));
   const logStartDate = new Date(Math.min.apply(null, timestamps));
   const logEndDate = new Date(Math.max.apply(null, timestamps));
   // --- AKHIR LOGIKA INDEXING BARU ---
@@ -123,7 +125,7 @@ function jalankanPengarsipanLogStorageKeJson(config) {
       fileName: namaFileArsip,
       startDate: logStartDate.toISOString(),
       endDate: logEndDate.toISOString(),
-      recordCount: allLogData.length
+      recordCount: allLogData.length,
     });
 
     // Buat file index yang baru dengan data yang sudah diperbarui
@@ -137,7 +139,6 @@ function jalankanPengarsipanLogStorageKeJson(config) {
     const pesanSukses = `✅ Pengarsipan log storage berhasil.\n\nSebanyak ${allLogData.length} baris telah dipindahkan ke file "${namaFileArsip}".`;
     console.log(pesanSukses);
     return pesanSukses;
-
   } catch (e) {
     const pesanGagal = `❌ Gagal melakukan pengarsipan log storage. Error: ${e.message}`;
     console.error(pesanGagal + `\nStack: ${e.stack}`);
@@ -174,10 +175,10 @@ function cekDanArsipkanLogJikaPenuh(config = null) {
       console.log(feedbackMsg);
       return feedbackMsg;
     }
-  } catch(e) {
-      const errorMsg = `❌ Gagal saat memeriksa log perubahan untuk pengarsipan: ${e.message}`;
-      console.error(errorMsg);
-      return errorMsg;
+  } catch (e) {
+    const errorMsg = `❌ Gagal saat memeriksa log perubahan untuk pengarsipan: ${e.message}`;
+    console.error(errorMsg);
+    return errorMsg;
   }
 }
 
@@ -204,17 +205,19 @@ function cekDanArsipkanLogStorageJikaPenuh(config = null) {
     console.log(`Pengecekan jumlah baris log storage: ${jumlahBaris} baris.`);
 
     if (jumlahBaris > BATAS_BARIS) {
-      console.log(`Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan log storage...`);
+      console.log(
+        `Jumlah baris (${jumlahBaris}) melebihi batas (${BATAS_BARIS}). Memulai proses pengarsipan log storage...`
+      );
       return jalankanPengarsipanLogStorageKeJson(activeConfig);
     } else {
       const feedbackMsg = `ℹ️ Pengarsipan log storage belum diperlukan. Jumlah baris saat ini adalah ${jumlahBaris}, masih di bawah ambang batas ${BATAS_BARIS} baris.`;
       console.log(feedbackMsg);
       return feedbackMsg;
     }
-  } catch(e) {
-      const errorMsg = `❌ Gagal saat memeriksa log storage untuk pengarsipan: ${e.message}`;
-      console.error(errorMsg);
-      return errorMsg;
+  } catch (e) {
+    const errorMsg = `❌ Gagal saat memeriksa log storage untuk pengarsipan: ${e.message}`;
+    console.error(errorMsg);
+    return errorMsg;
   }
 }
 

@@ -15,7 +15,6 @@
  * - salinDataSheet(...): Menyalin konten sheet dari spreadsheet sumber.
  */
 
-
 /**
  * [ORKESTRATOR BARU] Menjalankan alur kerja sinkronisasi dan pelaporan secara lengkap.
  * Fungsi ini menggabungkan logika yang sebelumnya ada di AntreanTugas.js.
@@ -32,19 +31,34 @@ function jalankanAlurSinkronisasiPenuh(config, triggerSource) {
   }
 
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(300000)) { // Coba kunci selama 5 menit
+  if (!lock.tryLock(300000)) {
+    // Coba kunci selama 5 menit
     throw new Error("Proses sinkronisasi lain sedang berjalan. Permintaan dilewati.");
   }
 
   try {
     // 2. Jalankan proses penyalinan dan deteksi perubahan
     salinDataSheet(sheetVmName, sumberId);
-    processDataChanges(config, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, config[KUNCI.HEADER_VM_PK], (config[KUNCI.KOLOM_PANTAU] || []).map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.VM);
+    processDataChanges(
+      config,
+      sheetVmName,
+      KONSTANTA.NAMA_FILE.ARSIP_VM,
+      config[KUNCI.HEADER_VM_PK],
+      (config[KUNCI.KOLOM_PANTAU] || []).map((n) => ({ nama: n })),
+      KONSTANTA.NAMA_ENTITAS.VM
+    );
 
     const sheetDsName = config[KUNCI.SHEET_DS];
     if (sheetDsName) {
       salinDataSheet(sheetDsName, sumberId);
-      processDataChanges(config, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, config[KUNCI.DS_NAME_HEADER], (config[KUNCI.KOLOM_PANTAU_DS] || []).map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.DATASTORE);
+      processDataChanges(
+        config,
+        sheetDsName,
+        KONSTANTA.NAMA_FILE.ARSIP_DS,
+        config[KUNCI.DS_NAME_HEADER],
+        (config[KUNCI.KOLOM_PANTAU_DS] || []).map((n) => ({ nama: n })),
+        KONSTANTA.NAMA_ENTITAS.DATASTORE
+      );
     }
 
     // 3. Buat laporan
@@ -52,7 +66,6 @@ function jalankanAlurSinkronisasiPenuh(config, triggerSource) {
     const pesanLaporan = buatLaporanHarianVM(config);
     console.log("Pembuatan laporan selesai.");
     return pesanLaporan; // Kembalikan string laporan
-
   } finally {
     lock.releaseLock();
   }
@@ -67,11 +80,15 @@ function syncDanBuatLaporanHarian(triggerSource = "TIDAK DIKETAHUI", config) {
   // 1. Periksa kunci-kunci konfigurasi yang paling penting sebelum melakukan apa pun.
   const KUNCI = KONSTANTA.KUNCI_KONFIG;
   const requiredKeys = [KUNCI.ID_SUMBER, KUNCI.SHEET_VM];
-  const missingKeys = requiredKeys.filter(key => !config[key]);
+  const missingKeys = requiredKeys.filter((key) => !config[key]);
 
   // 2. Jika ada kunci yang hilang, lemparkan error yang sangat spesifik.
   if (missingKeys.length > 0) {
-    throw new Error(`Konfigurasi tidak valid. Kunci berikut hilang atau kosong di sheet "Konfigurasi": ${missingKeys.join(', ')}. Harap periksa kembali sheet Anda.`);
+    throw new Error(
+      `Konfigurasi tidak valid. Kunci berikut hilang atau kosong di sheet "Konfigurasi": ${missingKeys.join(
+        ", "
+      )}. Harap periksa kembali sheet Anda.`
+    );
   }
   // --- AKHIR BLOK VALIDASI ---
 
@@ -93,7 +110,14 @@ function syncDanBuatLaporanHarian(triggerSource = "TIDAK DIKETAHUI", config) {
     salinDataSheet(sheetVmName, sumberId);
     const kolomVmUntukDipantau = config[KUNCI.KOLOM_PANTAU] || [];
     if (kolomVmUntukDipantau.length > 0) {
-      processDataChanges(config, sheetVmName, KONSTANTA.NAMA_FILE.ARSIP_VM, config[KUNCI.HEADER_VM_PK], kolomVmUntukDipantau.map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.VM);
+      processDataChanges(
+        config,
+        sheetVmName,
+        KONSTANTA.NAMA_FILE.ARSIP_VM,
+        config[KUNCI.HEADER_VM_PK],
+        kolomVmUntukDipantau.map((n) => ({ nama: n })),
+        KONSTANTA.NAMA_ENTITAS.VM
+      );
     }
 
     // Proses Sinkronisasi Data Datastore (jika ada)
@@ -101,14 +125,20 @@ function syncDanBuatLaporanHarian(triggerSource = "TIDAK DIKETAHUI", config) {
       salinDataSheet(sheetDsName, sumberId);
       const kolomDsUntukDipantau = config[KUNCI.KOLOM_PANTAU_DS] || [];
       if (kolomDsUntukDipantau.length > 0) {
-        processDataChanges(config, sheetDsName, KONSTANTA.NAMA_FILE.ARSIP_DS, config[KUNCI.DS_NAME_HEADER], kolomDsUntukDipantau.map(n => ({nama: n})), KONSTANTA.NAMA_ENTITAS.DATASTORE);
+        processDataChanges(
+          config,
+          sheetDsName,
+          KONSTANTA.NAMA_FILE.ARSIP_DS,
+          config[KUNCI.DS_NAME_HEADER],
+          kolomDsUntukDipantau.map((n) => ({ nama: n })),
+          KONSTANTA.NAMA_ENTITAS.DATASTORE
+        );
       }
     }
 
     // Membuat laporan dan mengembalikan hasilnya
     const pesanLaporanOperasional = buatLaporanHarianVM(config);
     return pesanLaporanOperasional;
-
   } catch (e) {
     // Salurkan error ke tingkat yang lebih tinggi untuk dilaporkan
     throw new Error(`Gagal saat sinkronisasi: ${e.message}`);
@@ -168,13 +198,18 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
     try {
       const archivedData = JSON.parse(fileArsip.getBlob().getDataAsString());
       mapDataKemarin = new Map(archivedData.map(([pk, data]) => [normalizePrimaryKey(pk), data]));
-    } catch (e) { console.warn(`Gagal parse arsip "${archiveFileName}": ${e.message}`); }
+    } catch (e) {
+      console.warn(`Gagal parse arsip "${archiveFileName}": ${e.message}`);
+    }
   }
 
-  const dataHariIni = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
+  const dataHariIni =
+    sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
   const mapDataHariIni = new Map();
 
-  columnsToTrack.forEach((kolom) => { kolom.index = headers.indexOf(kolom.nama); });
+  columnsToTrack.forEach((kolom) => {
+    kolom.index = headers.indexOf(kolom.nama);
+  });
 
   const buatObjekData = (row) => {
     const data = {};
@@ -207,7 +242,17 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
     const pkRawForLog = dataBaru.data[primaryKeyHeader];
 
     if (!dataLama) {
-      logEntriesToAdd.push([timestamp, "PENAMBAHAN", pkRawForLog, entityDisplayName, sheetName, "", "", `${entityName} baru.`, entityName]);
+      logEntriesToAdd.push([
+        timestamp,
+        "PENAMBAHAN",
+        pkRawForLog,
+        entityDisplayName,
+        sheetName,
+        "",
+        "",
+        `${entityName} baru.`,
+        entityName,
+      ]);
     } else if (dataBaru.hash !== dataLama.hash) {
       if (dataLama && dataLama.data) {
         for (const key in dataBaru.data) {
@@ -222,7 +267,17 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
             if (String(newValue) !== String(oldValue)) hasChanged = true;
           }
           if (hasChanged) {
-            logEntriesToAdd.push([timestamp, "MODIFIKASI", pkRawForLog, entityDisplayName, sheetName, oldValue, newValue, `Kolom '${key}' diubah`, entityName]);
+            logEntriesToAdd.push([
+              timestamp,
+              "MODIFIKASI",
+              pkRawForLog,
+              entityDisplayName,
+              sheetName,
+              oldValue,
+              newValue,
+              `Kolom '${key}' diubah`,
+              entityName,
+            ]);
           }
         }
       }
@@ -233,7 +288,17 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
   for (const [id, dataLama] of mapDataKemarin.entries()) {
     const entityDisplayName = (dataLama.data && dataLama.data[nameHeaderForLog]) || id;
     const pkRawForLog = (dataLama.data && dataLama.data[primaryKeyHeader]) || id;
-    logEntriesToAdd.push([timestamp, "PENGHAPUSAN", pkRawForLog, entityDisplayName, sheetName, "", "", `${entityName} dihapus.`, entityName]);
+    logEntriesToAdd.push([
+      timestamp,
+      "PENGHAPUSAN",
+      pkRawForLog,
+      entityDisplayName,
+      sheetName,
+      "",
+      "",
+      `${entityName} dihapus.`,
+      entityName,
+    ]);
   }
 
   if (logEntriesToAdd.length > 0) {
@@ -246,7 +311,6 @@ function processDataChanges(config, sheetName, archiveFileName, primaryKeyHeader
 
   return logEntriesToAdd;
 }
-
 
 /**
  * [PINDAH] Mengumpulkan entri log dari sheet aktif DAN arsip JSON.
@@ -263,7 +327,9 @@ function getCombinedLogs(startDate, config) {
     logHeaders = allLogData.shift();
     const timestampIndex = logHeaders.indexOf(config[K.HEADER_LOG_TIMESTAMP]);
     if (timestampIndex === -1) throw new Error(`Kolom '${config[K.HEADER_LOG_TIMESTAMP]}' tidak ditemukan.`);
-    const activeLogs = allLogData.filter((row) => row.length > 0 && row[timestampIndex] && new Date(row[timestampIndex]) >= startDate);
+    const activeLogs = allLogData.filter(
+      (row) => row.length > 0 && row[timestampIndex] && new Date(row[timestampIndex]) >= startDate
+    );
     combinedLogEntries.push(...activeLogs);
   } else if (sheetLog) {
     logHeaders = sheetLog.getRange(1, 1, 1, sheetLog.getLastColumn()).getValues()[0];
@@ -285,14 +351,18 @@ function getCombinedLogs(startDate, config) {
             if (archiveFiles.hasNext()) {
               const file = archiveFiles.next();
               const archivedLogs = JSON.parse(file.getBlob().getDataAsString());
-              const relevantLogs = archivedLogs.filter((log) => log[timestampHeader] && new Date(log[timestampHeader]) >= startDate);
+              const relevantLogs = archivedLogs.filter(
+                (log) => log[timestampHeader] && new Date(log[timestampHeader]) >= startDate
+              );
               const relevantLogsAsArray = relevantLogs.map((log) => logHeaders.map((header) => log[header] || ""));
               combinedLogEntries.push(...relevantLogsAsArray);
             }
           }
         }
       }
-    } catch (e) { console.error(`Gagal membaca arsip log: ${e.message}`); }
+    } catch (e) {
+      console.error(`Gagal membaca arsip log: ${e.message}`);
+    }
   }
 
   if (combinedLogEntries.length > 0) {

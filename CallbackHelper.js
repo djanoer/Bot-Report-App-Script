@@ -18,7 +18,7 @@ const CallbackHelper = {
    * @param {object} config - Objek konfigurasi bot.
    * @returns {string} String callback data yang sudah diformat.
    */
-  build: function(machine, action, data, config) {
+  build: function (machine, action, data, config) {
     const sessionId = createCallbackSession(data, config);
     return `${machine}:${action}:${sessionId}`;
   },
@@ -29,8 +29,8 @@ const CallbackHelper = {
    * @param {object} config - Objek konfigurasi bot.
    * @returns {string} String callback data untuk aksi batal.
    */
-  cancel: function(machine, config) {
+  cancel: function (machine, config) {
     const sessionId = createCallbackSession({}, config); // Sesi kosong
     return `${machine}:cancel:${sessionId}`;
-  }
+  },
 };

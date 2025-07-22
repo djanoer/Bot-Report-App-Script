@@ -20,15 +20,14 @@ function tesLingkunganDanKonfigurasi() {
     pesan += `ID Chat PROD: ${chatID}\n`;
     pesan += `ID Chat DEV: ${devChatID}\n\n`;
 
-    if (environment === 'DEV') {
+    if (environment === "DEV") {
       pesan += "✅ Verifikasi Berhasil! Skrip ini berjalan sebagai lingkungan DEV.";
     } else {
       pesan += "❌ Verifikasi Gagal! Skrip ini tidak terdeteksi sebagai DEV. Periksa Properti Skrip Anda.";
     }
 
-    SpreadsheetApp.getUi().alert('Hasil Tes Lingkungan', pesan, SpreadsheetApp.getUi().ButtonSet.OK);
-
+    SpreadsheetApp.getUi().alert("Hasil Tes Lingkungan", pesan, SpreadsheetApp.getUi().ButtonSet.OK);
   } catch (e) {
-    SpreadsheetApp.getUi().alert('Error', e.message);
+    SpreadsheetApp.getUi().alert("Error", e.message);
   }
 }

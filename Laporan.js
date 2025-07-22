@@ -555,8 +555,9 @@ function _calculateAssetDistributionData(config, allVmData, headers) {
 }
 
 /**
- * [FINAL] Fungsi utama untuk menghasilkan laporan utilisasi storage.
- * Versi ini dilengkapi dengan penanganan error internal dan pemformatan HTML yang konsisten.
+ * [REVISI FINAL - FASE 4] Menghasilkan laporan utilisasi storage ringkas.
+ * Logika pencocokan alias telah diperbaiki secara fundamental untuk memastikan
+ * semua data log ditemukan dengan benar.
  */
 function generateStorageUtilizationReport(config) {
   try {
@@ -565,10 +566,10 @@ function generateStorageUtilizationReport(config) {
     const aliasMap = config[K.MAP_ALIAS_STORAGE];
 
     if (!capacityMap || Object.keys(capacityMap).length === 0 || !aliasMap) {
-      return "❌ <b>Gagal:</b> Konfigurasi `MAP_KAPASITAS_STORAGE` atau `MAP_ALIAS_STORAGE` tidak ditemukan atau kosong di sheet Konfigurasi. Fitur ini tidak dapat berjalan.";
+      return "❌ <b>Gagal:</b> Konfigurasi `MAP_KAPASITAS_STORAGE` atau `MAP_ALIAS_STORAGE` tidak ditemukan atau kosong.";
     }
     
-    const storageKeys = Object.keys(capacityMap); // Menggunakan variabel yang benar
+    const reportKeys = Object.keys(capacityMap); 
     const thresholds = config[K.STORAGE_UTILIZATION_THRESHOLDS] || { warning: 75, critical: 90 };
 
     const { headers, data: logs } = getCombinedStorageLogs(config, 7);
@@ -586,22 +587,29 @@ function generateStorageUtilizationReport(config) {
 
     logs.sort((a, b) => new Date(b[timestampIndex]) - new Date(a[timestampIndex]));
 
-    let reportMessage = "📊 <b>Ringkasan Utilisasi Storage</b>\n";
-    reportMessage += "<i>Data berdasarkan catatan terakhir yang diterima.</i>\n\n";
-    reportMessage += "------------------------------------\n";
+    let reportMessage = formatReportHeader("Ringkasan Utilisasi Storage");
+    reportMessage += "<i>Data berdasarkan catatan terakhir yang diterima untuk setiap tipe storage.</i>\n";
 
-    storageKeys.forEach((aliasUtama) => {
-      const reportKey = Object.keys(aliasMap).find((key) => aliasMap[key].includes(aliasUtama));
-      const semuaAliasTerkait = reportKey ? aliasMap[reportKey] : [aliasUtama];
+    reportKeys.forEach((reportKey) => {
+      const totalCapacity = capacityMap[reportKey];
+      
+      // --- LOGIKA PENCARIAN ALIAS YANG DIPERBAIKI ---
+      let semuaAliasTerkait = [reportKey];
+      for (const key in aliasMap) {
+          if (aliasMap[key].map(a => a.toUpperCase()).includes(reportKey.toUpperCase())) {
+              semuaAliasTerkait = aliasMap[key];
+              break;
+          }
+      }
+      // --- AKHIR PERBAIKAN ---
 
       const lastEntry = logs.find((row) => {
-        const logAliases = (row[nameIndex] || "").split(",").map((a) => a.trim());
-        return logAliases.some((logAlias) => semuaAliasTerkait.includes(logAlias));
+        const logAliases = (row[nameIndex] || "").split(",").map(a => a.trim());
+        return logAliases.some(logAlias => semuaAliasTerkait.includes(logAlias));
       });
 
-      const totalCapacity = capacityMap[aliasUtama];
       if (!lastEntry) {
-        reportMessage += `\n⚪️ <b>${aliasUtama}</b>\n   <i>(Tidak ada data log ditemukan)</i>\n`;
+        reportMessage += `\n⚪️ <b>${reportKey}</b>\n   <i>(Tidak ada data log ditemukan)</i>\n`;
         return;
       }
 
@@ -609,18 +617,19 @@ function generateStorageUtilizationReport(config) {
       const percentage = totalCapacity > 0 ? (currentUsage / totalCapacity) * 100 : 0;
       let statusEmoji = percentage >= thresholds.critical ? "🔴" : (percentage >= thresholds.warning ? "🟡" : "🟢");
 
-      reportMessage += `\n${statusEmoji} <b>${aliasUtama}</b> <code>(${percentage.toFixed(1)}%)</code>\n`;
+      reportMessage += `\n${statusEmoji} <b>${reportKey}</b> <code>(${percentage.toFixed(1)}%)</code>\n`;
       reportMessage += `${createProgressBar(percentage)}\n`;
-      reportMessage += `<code>${currentUsage.toFixed(1)} / ${totalCapacity} TB</code>\n`;
+      reportMessage += `<code>${currentUsage.toFixed(1)} / ${totalCapacity} TB Terpakai</code>\n`;
     });
 
     return reportMessage;
 
   } catch (e) {
-    console.error(`Gagal total saat membuat laporan utilisasi storage: ${e.message}\n${e.stack}`);
-    return `🔴 <b>Gagal Membuat Laporan Storage</b>\n\n<b>Penyebab:</b>\n<pre>${escapeHtml(e.message)}</pre>`;
+    console.error(`Gagal membuat laporan utilisasi storage: ${e.message}\n${e.stack}`);
+    return `🔴 <b>Gagal Membuat Laporan Storage</b>\n\nPenyebab: <pre>${escapeHtml(e.message)}</pre>`;
   }
 }
+
 
 /**
  * [BARU] Menganalisis sebuah datastore secara komprehensif.

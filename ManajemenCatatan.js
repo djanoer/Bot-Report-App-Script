@@ -18,7 +18,7 @@ function getVmNote(vmPrimaryKey, config) {
   const sheet = ss.getSheetByName(sheetName);
 
   if (!sheet || sheet.getLastRow() <= 1) {
-    return null; 
+    return null;
   }
 
   const data = sheet.getDataRange().getValues();

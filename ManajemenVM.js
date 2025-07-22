@@ -15,7 +15,6 @@
  * - getVmHistory(pk, config): Mengambil riwayat lengkap sebuah VM dari log aktif dan arsip.
  */
 
-
 /**
  * [FUNGSI BARU & SUPERIOR] Mengambil data VM dengan strategi Cache-First.
  * Ini akan menjadi PENGGANTI UTAMA untuk panggilan _getSheetData untuk data VM.
@@ -77,7 +76,7 @@ function saveLargeDataToCache(keyPrefix, data, durationInSeconds) {
   }
 
   const manifest = { totalChunks: chunks.length };
-  
+
   try {
     // --- PERBAIKAN UTAMA DI SINI ---
     // Simpan manifest terlebih dahulu
@@ -145,9 +144,7 @@ function searchVmsByColumn(columnName, searchValue, config) {
   }
 
   const searchLower = searchValue.toLowerCase();
-  const results = dataRows.filter(row =>
-    String(row[columnIndex] || "").toLowerCase() === searchLower
-  );
+  const results = dataRows.filter((row) => String(row[columnIndex] || "").toLowerCase() === searchLower);
 
   return { headers, results };
 }
@@ -184,7 +181,7 @@ function searchVmOnSheet(searchTerm, config) {
   };
 
   const indices = {};
-  
+
   for (const key in headerKeys) {
     const configKey = headerKeys[key];
     const headerNameFromConfig = config[configKey];
@@ -195,16 +192,19 @@ function searchVmOnSheet(searchTerm, config) {
 
     const foundIndex = headers.indexOf(headerNameFromConfig);
     if (foundIndex === -1) {
-      // Ini akan memberikan pesan error yang sangat spesifik
-      throw new Error(
-        `Header '${headerNameFromConfig}' (dari kunci '${configKey}') tidak dapat ditemukan di sheet "Data VM".\n\n` +
-        `Pastikan tidak ada salah ketik atau spasi ekstra.\n` +
-        `Header yang tersedia: [${headers.join(", ")}]`
-      );
+      // Membuat pesan error yang sangat spesifik dan solutif
+      let errorMessage = `❌ **Error Konfigurasi Terdeteksi**\n\n`;
+      errorMessage += `Gagal menjalankan pencarian karena header yang didefinisikan di konfigurasi tidak cocok dengan file data.\n\n`;
+      errorMessage += `• **Header Dicari:** \`${headerNameFromConfig}\`\n`;
+      errorMessage += `• **Kunci Konfigurasi:** \`${configKey}\`\n\n`;
+      errorMessage += `**Saran Perbaikan:**\nPastikan nilai untuk kunci \`${configKey}\` di sheet "Konfigurasi" sama persis dengan nama kolom di sheet "Data VM".`;
+
+      // Melemparkan error dengan pesan yang sudah diformat
+      throw new Error(errorMessage);
     }
-    indices[key + 'Index'] = foundIndex;
+    indices[key + "Index"] = foundIndex;
   }
-  
+
   const { pkIndex, nameIndex, ipIndex } = indices;
   // --- AKHIR VALIDASI ---
 
@@ -222,8 +222,12 @@ function searchVmOnSheet(searchTerm, config) {
 
     results = allData.filter((row) => {
       const vmPk = normalizePrimaryKey(String(row[pkIndex] || "").trim()).toLowerCase();
-      const vmName = String(row[nameIndex] || "").trim().toLowerCase();
-      const vmIp = String(row[ipIndex] || "").trim().toLowerCase();
+      const vmName = String(row[nameIndex] || "")
+        .trim()
+        .toLowerCase();
+      const vmIp = String(row[ipIndex] || "")
+        .trim()
+        .toLowerCase();
       return vmPk.includes(normalizedSearchTerm) || vmName.includes(searchLower) || vmIp.includes(searchLower);
     });
   }
@@ -321,61 +325,61 @@ function getVmHistory(pk, config) {
 }
 
 function analyzeVmProfile(history, headers, config) {
-    if (!history || history.length === 0) {
-      return "";
-    }
-  
-    const K = KONSTANTA.KUNCI_KONFIG;
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-  
-    const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
-    const detailIndex = headers.indexOf(config[K.HEADER_LOG_DETAIL]);
-    const timestampIndex = headers.indexOf(config[K.HEADER_LOG_TIMESTAMP]);
-  
-    let modificationCount = 0;
-    let recentModificationCount = 0;
-    const modifiedColumns = {};
-  
-    history.forEach((log) => {
-      const action = log[actionIndex];
-      const timestamp = new Date(log[timestampIndex]);
-  
-      if (action === "MODIFIKASI") {
-        modificationCount++;
-        if (timestamp > ninetyDaysAgo) {
-          recentModificationCount++;
-        }
-  
-        const detail = log[detailIndex] || "";
-        const columnNameMatch = detail.match(/'([^']+)'/);
-        if (columnNameMatch) {
-          const columnName = columnNameMatch[1];
-          modifiedColumns[columnName] = (modifiedColumns[columnName] || 0) + 1;
-        }
+  if (!history || history.length === 0) {
+    return "";
+  }
+
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+  const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
+  const detailIndex = headers.indexOf(config[K.HEADER_LOG_DETAIL]);
+  const timestampIndex = headers.indexOf(config[K.HEADER_LOG_TIMESTAMP]);
+
+  let modificationCount = 0;
+  let recentModificationCount = 0;
+  const modifiedColumns = {};
+
+  history.forEach((log) => {
+    const action = log[actionIndex];
+    const timestamp = new Date(log[timestampIndex]);
+
+    if (action === "MODIFIKASI") {
+      modificationCount++;
+      if (timestamp > ninetyDaysAgo) {
+        recentModificationCount++;
       }
-    });
-  
-    let mostModifiedColumn = null;
-    let maxMods = 0;
-    for (const col in modifiedColumns) {
-      if (modifiedColumns[col] > maxMods) {
-        maxMods = modifiedColumns[col];
-        mostModifiedColumn = col;
+
+      const detail = log[detailIndex] || "";
+      const columnNameMatch = detail.match(/'([^']+)'/);
+      if (columnNameMatch) {
+        const columnName = columnNameMatch[1];
+        modifiedColumns[columnName] = (modifiedColumns[columnName] || 0) + 1;
       }
     }
-  
-    let profileMessage = "<b>Analisis Profil VM:</b>\n";
-    profileMessage += `• <b>Frekuensi Perubahan:</b> Total <code>${modificationCount}</code> modifikasi tercatat.\n`;
-    if (modificationCount > 0) {
-      profileMessage += `  └ <code>${recentModificationCount}</code> di antaranya terjadi dalam 90 hari terakhir.\n`;
+  });
+
+  let mostModifiedColumn = null;
+  let maxMods = 0;
+  for (const col in modifiedColumns) {
+    if (modifiedColumns[col] > maxMods) {
+      maxMods = modifiedColumns[col];
+      mostModifiedColumn = col;
     }
-  
-    if (mostModifiedColumn) {
-      profileMessage += `• <b>Stabilitas Konfigurasi:</b> Kolom '<code>${mostModifiedColumn}</code>' adalah yang paling sering diubah (${maxMods} kali).\n`;
-    } else {
-      profileMessage += `• <b>Stabilitas Konfigurasi:</b> Konfigurasi terpantau stabil.\n`;
-    }
-  
-    return profileMessage + "\n";
+  }
+
+  let profileMessage = "<b>Analisis Profil VM:</b>\n";
+  profileMessage += `• <b>Frekuensi Perubahan:</b> Total <code>${modificationCount}</code> modifikasi tercatat.\n`;
+  if (modificationCount > 0) {
+    profileMessage += `  └ <code>${recentModificationCount}</code> di antaranya terjadi dalam 90 hari terakhir.\n`;
+  }
+
+  if (mostModifiedColumn) {
+    profileMessage += `• <b>Stabilitas Konfigurasi:</b> Kolom '<code>${mostModifiedColumn}</code>' adalah yang paling sering diubah (${maxMods} kali).\n`;
+  } else {
+    profileMessage += `• <b>Stabilitas Konfigurasi:</b> Konfigurasi terpantau stabil.\n`;
+  }
+
+  return profileMessage + "\n";
 }

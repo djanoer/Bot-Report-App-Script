@@ -39,7 +39,9 @@ function buatGrafikDistribusi(tipeDistribusi, config) {
     }
 
     if (columnIndex === -1) {
-      throw new Error(`Header untuk distribusi '${tipeDistribusi}' tidak ditemukan di sheet "Konfigurasi" atau "Data VM".`);
+      throw new Error(
+        `Header untuk distribusi '${tipeDistribusi}' tidak ditemukan di sheet "Konfigurasi" atau "Data VM".`
+      );
     }
 
     const counts = {};

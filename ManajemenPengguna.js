@@ -15,16 +15,19 @@ function handleUserApproval(sessionData, action, adminUserData, config) {
   const { userId, firstName, email } = sessionData;
   const adminName = adminUserData.firstName;
 
-  if (action === 'reject') {
+  if (action === "reject") {
     kirimPesanTelegram(
       `Maaf ${escapeHtml(firstName)}, permintaan pendaftaran Anda telah ditolak oleh administrator.`,
-      config, 'HTML', null, userId
+      config,
+      "HTML",
+      null,
+      userId
     );
     return `❌ Pendaftaran untuk <b>${escapeHtml(firstName)}</b> telah ditolak oleh ${escapeHtml(adminName)}.`;
   }
 
   // Tentukan peran berdasarkan aksi
-  const role = (action === 'approve_admin') ? 'Admin' : 'User';
+  const role = action === "approve_admin" ? "Admin" : "User";
 
   const isSuccess = addUserToSheet(userId, firstName, email, role);
 
@@ -32,11 +35,18 @@ function handleUserApproval(sessionData, action, adminUserData, config) {
     clearBotStateCache();
 
     kirimPesanTelegram(
-      `✅ Selamat datang, ${escapeHtml(firstName)}! Akun Anda telah berhasil diaktifkan dengan peran sebagai <b>${role}</b>.`,
-      config, 'HTML', null, userId
+      `✅ Selamat datang, ${escapeHtml(
+        firstName
+      )}! Akun Anda telah berhasil diaktifkan dengan peran sebagai <b>${role}</b>.`,
+      config,
+      "HTML",
+      null,
+      userId
     );
 
-    return `✅ Pendaftaran untuk <b>${escapeHtml(firstName)}</b> telah disetujui sebagai <b>${role}</b> oleh ${escapeHtml(adminName)}.`;
+    return `✅ Pendaftaran untuk <b>${escapeHtml(
+      firstName
+    )}</b> telah disetujui sebagai <b>${role}</b> oleh ${escapeHtml(adminName)}.`;
   } else {
     return `⚠️ Gagal menambahkan pengguna <b>${escapeHtml(firstName)}</b>. Kemungkinan User ID sudah terdaftar.`;
   }
@@ -49,11 +59,11 @@ function handleUserApproval(sessionData, action, adminUserData, config) {
 function addUserToSheet(userId, firstName, email, role) {
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KONSTANTA.NAMA_SHEET.HAK_AKSES);
-    
+
     // Cek duplikat
     const data = sheet.getDataRange().getValues();
     const idColumn = data[0].indexOf("User ID"); // Asumsi header adalah "User ID"
-    const existingIds = data.slice(1).map(row => String(row[idColumn]));
+    const existingIds = data.slice(1).map((row) => String(row[idColumn]));
     if (existingIds.includes(String(userId))) {
       console.warn(`Upaya mendaftarkan User ID duplikat: ${userId}`);
       return false;

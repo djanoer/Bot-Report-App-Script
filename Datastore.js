@@ -194,3 +194,44 @@ function formatDatastoreDetail(details, originPk = null) {
   }
   return { pesan: message, keyboard: { inline_keyboard: keyboardRows } };
 }
+
+/**
+ * [REVISI - FASE 4] Mencari semua datastore yang cocok dengan tipe storage
+ * berdasarkan aturan di MAP_ALIAS_STORAGE.
+ * @param {string} storageType - Tipe storage yang dicari (misal: "VSP E790 A", "VSPA", atau "COM").
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {{headers: Array, results: Array}} Objek berisi header dan baris data datastore yang cocok.
+ */
+function searchDatastoresByType(storageType, config) {
+    const { headers, dataRows: allDatastores } = _getSheetData(config[KONSTANTA.KUNCI_KONFIG.SHEET_DS]);
+    if (allDatastores.length === 0) return { headers, results: [] };
+
+    const aliasMap = config[KONSTANTA.KUNCI_KONFIG.MAP_ALIAS_STORAGE] || {};
+    const dsNameIndex = headers.indexOf(config[KONSTANTA.KUNCI_KONFIG.DS_NAME_HEADER]);
+    const searchLower = storageType.toLowerCase();
+
+    // 1. Temukan kunci utama dan semua alias yang relevan dari input pengguna
+    let targetAliases = [];
+    for (const key in aliasMap) {
+        const aliasesInMap = aliasMap[key].map(a => a.toLowerCase());
+        if (key.toLowerCase().includes(searchLower) || aliasesInMap.includes(searchLower)) {
+            targetAliases = aliasMap[key];
+            break;
+        }
+    }
+
+    if (targetAliases.length === 0) {
+        // Jika tidak ada alias yang cocok, mungkin pengguna mengetik alias secara langsung
+        targetAliases.push(storageType);
+    }
+
+    const targetAliasesUpper = targetAliases.map(a => a.toUpperCase());
+
+    // 2. Saring datastore yang namanya mengandung salah satu dari alias target
+    const results = allDatastores.filter(row => {
+        const dsName = String(row[dsNameIndex] || '').toUpperCase();
+        return targetAliasesUpper.some(alias => dsName.includes(alias));
+    });
+
+    return { headers, results };
+}

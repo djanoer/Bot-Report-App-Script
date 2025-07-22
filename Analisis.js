@@ -16,7 +16,6 @@
  * - findBestDestination(...): Menemukan datastore tujuan terbaik untuk migrasi VM berdasarkan aturan.
  */
 
-
 /**
  * [REFACTOR v4.7.0 - READ ONCE & PROACTIVE VALIDATION] Menjalankan alur kerja analisis migrasi.
  * Fungsi ini sekarang menerima semua data yang diperlukan sebagai parameter untuk performa optimal.
@@ -63,32 +62,53 @@ function jalankanRekomendasiMigrasi(config, allDatastores, allVms, vmHeaders, mi
       const migrationTargetTb = migrationTargetGb / 1024;
 
       finalMessage += `❗️ <b>Datastore Over-Provisioned:</b> <code>${dsInfo.name}</code>\n`;
-      finalMessage += `• <b>Status:</b> Provisioned ${dsInfo.provisionedGb.toFixed(2)} GB (${provisionedTb.toFixed(2)} TB) / ${dsInfo.capacityGb.toFixed(2)} GB (${capacityTb.toFixed(2)} TB) (<b>${dsInfo.utilization.toFixed(1)}%</b>)\n`;
+      finalMessage += `• <b>Status:</b> Provisioned ${dsInfo.provisionedGb.toFixed(2)} GB (${provisionedTb.toFixed(
+        2
+      )} TB) / ${dsInfo.capacityGb.toFixed(2)} GB (${capacityTb.toFixed(2)} TB) (<b>${dsInfo.utilization.toFixed(
+        1
+      )}%</b>)\n`;
 
       const diagnosis = diagnoseOverprovisioningCause(dsInfo.name, config);
       if (diagnosis) finalMessage += `• <b>Indikasi Penyebab:</b> ${diagnosis}\n`;
-      finalMessage += `• <b>Target Migrasi:</b> ${migrationTargetGb.toFixed(2)} GB (~${migrationTargetTb.toFixed(2)} TB)\n`;
+      finalMessage += `• <b>Target Migrasi:</b> ${migrationTargetGb.toFixed(2)} GB (~${migrationTargetTb.toFixed(
+        2
+      )} TB)\n`;
 
       const migrationPlan = _buildMigrationPlan(dsInfo, allDatastores, allVms, vmHeaders, migrationConfig, config);
 
-      finalMessage += `\n✅ <b>Rencana Tindak Lanjut:</b>\n`;
+      finalMessage += `\n🔮 <b>Rencana Migrasi Cerdas:</b>\n`;
       if (migrationPlan.size > 0) {
         migrationPlan.forEach((vms, destDsName) => {
           const totalSizeToDest = vms.reduce((sum, vm) => sum + vm.provisionedGb, 0);
-          finalMessage += `\n➡️ Migrasi ke <code>${destDsName}</code> (~${totalSizeToDest.toFixed(2)} GB):\n`;
+          finalMessage += `\n➡️ <b>Tujuan:</b> <code>${destDsName}</code> (~${totalSizeToDest.toFixed(2)} GB)\n`;
           vms.forEach((vm) => {
-            finalMessage += ` • <code>${escapeHtml(vm.name)}</code> (${vm.provisionedGb.toFixed(2)} GB) | ${escapeHtml(vm.criticality)} | ${escapeHtml(vm.state)}\n`;
+            const stateIcon = String(vm.state || "")
+              .toLowerCase()
+              .includes("on")
+              ? "🟢"
+              : "🔴";
+            finalMessage += ` • <b>Pindahkan VM:</b> <code>${escapeHtml(vm.name)}</code> (${vm.provisionedGb.toFixed(
+              2
+            )} GB)\n`;
+            // --- BARIS BARU DITAMBAHKAN DI SINI ---
+            finalMessage += `   └ Info: ${stateIcon} ${escapeHtml(vm.state)} | Kritikalitas: ${escapeHtml(
+              vm.criticality || "N/A"
+            )}\n`;
+            finalMessage += `   └ <b>Skor Kelayakan: ${vm.migrationScore}/100</b> | <i>${escapeHtml(
+              vm.justification
+            )}</i>\n`;
           });
         });
       } else {
         finalMessage += "<i>Tidak ditemukan datastore tujuan yang cocok di dalam cluster ini.</i>\n\n";
         finalMessage += "💡 <b>Rekomendasi:</b>\n";
-        finalMessage += `Buat Datastore baru pada <b>Cluster ${dsInfo.cluster}</b> dengan tipe <code>${dsInfo.type || "Sesuai standar"}</code> dan kapasitas > <code>${migrationTargetGb.toFixed(2)} GB</code>.\n`;
+        finalMessage += `Buat Datastore baru pada <b>Cluster ${dsInfo.cluster}</b> dengan tipe <code>${
+          dsInfo.type || "Sesuai standar"
+        }</code> dan kapasitas > <code>${migrationTargetGb.toFixed(2)} GB</code>.\n`;
       }
     });
 
     kirimPesanTelegram(finalMessage, config, "HTML");
-
   } catch (e) {
     console.error(`Gagal menjalankan analisis migrasi: ${e.message}\nStack: ${e.stack}`);
     // Melemparkan kembali error agar bisa ditangkap oleh handler perintah
@@ -97,359 +117,346 @@ function jalankanRekomendasiMigrasi(config, allDatastores, allVms, vmHeaders, mi
 }
 
 function _gatherMigrationDataSource(config) {
-    const K = KONSTANTA.KUNCI_KONFIG;
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    // 1. Mengambil Data Datastore
-    const dsSheet = ss.getSheetByName(config[K.SHEET_DS]);
-    if (!dsSheet) throw new Error(`Sheet datastore '${config[K.SHEET_DS]}' tidak ditemukan.`);
-    const dsHeaders = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
-    const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
-    const dsCapGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
-    const dsProvGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
-    const dsCapTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_TB]);
-    const dsProvTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_TB]);
+  // 1. Mengambil Data Datastore
+  const dsSheet = ss.getSheetByName(config[K.SHEET_DS]);
+  if (!dsSheet) throw new Error(`Sheet datastore '${config[K.SHEET_DS]}' tidak ditemukan.`);
+  const dsHeaders = dsSheet.getRange(1, 1, 1, dsSheet.getLastColumn()).getValues()[0];
+  const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
+  const dsCapGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_GB]);
+  const dsProvGbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_GB]);
+  const dsCapTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_TB]);
+  const dsProvTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_PROV_DS_TB]);
 
-    if ([dsNameIndex, dsCapGbIndex, dsProvGbIndex, dsCapTbIndex, dsProvTbIndex].includes(-1)) {
-        throw new Error(
-        "Satu atau lebih header penting (Name, Capacity/Provisioned GB/TB) tidak ditemukan di sheet Datastore."
-        );
-    }
-    const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
+  if ([dsNameIndex, dsCapGbIndex, dsProvGbIndex, dsCapTbIndex, dsProvTbIndex].includes(-1)) {
+    throw new Error(
+      "Satu atau lebih header penting (Name, Capacity/Provisioned GB/TB) tidak ditemukan di sheet Datastore."
+    );
+  }
+  const dsData = dsSheet.getRange(2, 1, dsSheet.getLastRow() - 1, dsSheet.getLastColumn()).getValues();
 
-    // 2. Mengambil Logika Migrasi
-    const migrationConfig = getMigrationConfig(ss.getSheetByName(config[K.SHEET_LOGIKA_MIGRASI]));
+  // 2. Mengambil Logika Migrasi
+  const migrationConfig = getMigrationConfig(ss.getSheetByName(config[K.SHEET_LOGIKA_MIGRASI]));
 
-    // 3. Memproses Data Datastore
-    const allDatastores = dsData.map((row) => {
-        const dsName = row[dsNameIndex];
-        const capacityGb = parseLocaleNumber(row[dsCapGbIndex]);
-        const provisionedGb = parseLocaleNumber(row[dsProvGbIndex]);
-        const capacityTb = parseLocaleNumber(row[dsCapTbIndex]);
-        const provisionedTb = parseLocaleNumber(row[dsProvTbIndex]);
-        const dsInfo = getDsInfo(dsName, migrationConfig);
-        return {
-        name: dsName,
-        capacityGb,
-        provisionedGb,
-        capacityTb,
-        provisionedTb,
-        freeSpace: capacityGb - provisionedGb,
-        utilization: capacityGb > 0 ? (provisionedGb / capacityGb) * 100 : 0,
-        cluster: dsInfo.cluster,
-        type: dsInfo.type,
-        environment: getEnvironmentFromDsName(dsName, config[K.MAP_ENV]),
-        };
-    });
+  // 3. Memproses Data Datastore
+  const allDatastores = dsData.map((row) => {
+    const dsName = row[dsNameIndex];
+    const capacityGb = parseLocaleNumber(row[dsCapGbIndex]);
+    const provisionedGb = parseLocaleNumber(row[dsProvGbIndex]);
+    const capacityTb = parseLocaleNumber(row[dsCapTbIndex]);
+    const provisionedTb = parseLocaleNumber(row[dsProvTbIndex]);
+    const dsInfo = getDsInfo(dsName, migrationConfig);
+    return {
+      name: dsName,
+      capacityGb,
+      provisionedGb,
+      capacityTb,
+      provisionedTb,
+      freeSpace: capacityGb - provisionedGb,
+      utilization: capacityGb > 0 ? (provisionedGb / capacityGb) * 100 : 0,
+      cluster: dsInfo.cluster,
+      type: dsInfo.type,
+      environment: getEnvironmentFromDsName(dsName, config[K.MAP_ENV]),
+    };
+  });
 
-    // 4. Mengambil Data VM
-    const vmSheet = ss.getSheetByName(config[K.SHEET_VM]);
-    if (!vmSheet) throw new Error(`Sheet VM '${config[K.SHEET_VM]}' tidak ditemukan.`);
-    const vmHeaders = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
-    const allVms = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
+  // 4. Mengambil Data VM
+  const vmSheet = ss.getSheetByName(config[K.SHEET_VM]);
+  if (!vmSheet) throw new Error(`Sheet VM '${config[K.SHEET_VM]}' tidak ditemukan.`);
+  const vmHeaders = vmSheet.getRange(1, 1, 1, vmSheet.getLastColumn()).getValues()[0];
+  const allVms = vmSheet.getRange(2, 1, vmSheet.getLastRow() - 1, vmSheet.getLastColumn()).getValues();
 
-    return { allDatastores, allVms, vmHeaders, migrationConfig };
+  return { allDatastores, allVms, vmHeaders, migrationConfig };
 }
 
 function _buildMigrationPlan(sourceDsInfo, allDatastores, allVms, vmHeaders, migrationConfig, config) {
-    const K = KONSTANTA.KUNCI_KONFIG;
-    const migrationTargetGb = sourceDsInfo.provisionedGb - sourceDsInfo.capacityGb;
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const migrationTargetGb = sourceDsInfo.provisionedGb - sourceDsInfo.capacityGb;
 
-    // Indeks header VM
-    const vmNameIndex = vmHeaders.indexOf(config[K.HEADER_VM_NAME]);
-    const vmProvGbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_GB]);
-    const vmStateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
-    const vmCritIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
-    const vmDsColumnIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
-    const skorKritikalitas = config[K.SKOR_KRITIKALITAS] || {};
+  // 1. Siapkan kandidat VM lengkap dengan skor risiko
+  const vmNameIndex = vmHeaders.indexOf(config[K.HEADER_VM_NAME]);
+  const vmProvGbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_GB]);
+  const vmStateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
+  const vmCritIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
+  const vmDsColumnIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
 
-    let datastoresInCluster = JSON.parse(
-        JSON.stringify(allDatastores.filter((ds) => ds.cluster === sourceDsInfo.cluster))
-    );
-
-    let candidatePool = allVms
-        .filter((row) => row[vmDsColumnIndex] === sourceDsInfo.name)
-        .map((row) => ({
+  let candidatePool = allVms
+    .filter((row) => row[vmDsColumnIndex] === sourceDsInfo.name)
+    .map((row) => {
+      const vm = {
         name: row[vmNameIndex],
         provisionedGb: parseLocaleNumber(row[vmProvGbIndex]),
         state: row[vmStateIndex],
         criticality: row[vmCritIndex],
-        }));
+      };
+      vm.migrationScore = calculateMigrationScore(vm, config);
+      return vm;
+    });
 
-    const migrationPlan = new Map();
-    let totalMigrated = 0;
-    const MAX_MIGRATION_LOOPS = 50;
-    let loopCount = 0;
+  // 2. Logika "Best Fit": Cari kombinasi paling efisien
+  let bestCombination = [];
+  let smallestOvershoot = Infinity;
 
-    while (totalMigrated < migrationTargetGb && candidatePool.length > 0 && loopCount < MAX_MIGRATION_LOOPS) {
-        loopCount++;
-        let bestMove = { vmIndex: -1, destDsName: null, efficiencyScore: -Infinity };
+  // Urutkan berdasarkan skor keamanan untuk memulai pencarian dari kandidat terbaik
+  candidatePool.sort((a, b) => b.migrationScore - a.migrationScore);
 
-        for (let i = 0; i < candidatePool.length; i++) {
-        const vm = candidatePool[i];
-        const sourceDs = datastoresInCluster.find((ds) => ds.name === sourceDsInfo.name);
-        const recipients = datastoresInCluster.filter(
-            (ds) => ds.name !== sourceDs.name && vm.provisionedGb <= ds.freeSpace
-        );
-        if (recipients.length === 0) continue;
-
-        for (const destDs of recipients) {
-            const isValidMove = findBestDestination(sourceDs, vm.provisionedGb, [destDs], migrationConfig, config);
-            if (!isValidMove || isValidMove.error) continue;
-
-            let benefitScore = 1;
-            if (
-            String(vm.state || "")
-                .toLowerCase()
-                .includes("off")
-            )
-            benefitScore += 10000;
-            if (
-            String(vm.name || "")
-                .toLowerCase()
-                .includes("unused")
-            )
-            benefitScore += 5000;
-            const critScore =
-            skorKritikalitas[
-                String(vm.criticality || "")
-                .toUpperCase()
-                .trim()
-            ] || 0;
-            benefitScore += (10 - critScore) * 100;
-
-            const sizeDifference = Math.abs(vm.provisionedGb - (migrationTargetGb - totalMigrated));
-            const cost = 1 + sizeDifference;
-            const efficiencyScore = benefitScore / cost;
-
-            if (efficiencyScore > bestMove.efficiencyScore) {
-            bestMove = { vmIndex: i, destDsName: destDs.name, efficiencyScore: efficiencyScore };
-            }
-        }
-        }
-
-        if (bestMove.vmIndex !== -1) {
-        const vmToMove = candidatePool[bestMove.vmIndex];
-        if (!migrationPlan.has(bestMove.destDsName)) {
-            migrationPlan.set(bestMove.destDsName, []);
-        }
-        migrationPlan.get(bestMove.destDsName).push(vmToMove);
-        totalMigrated += vmToMove.provisionedGb;
-        const destDs = datastoresInCluster.find((ds) => ds.name === bestMove.destDsName);
-        destDs.freeSpace -= vmToMove.provisionedGb;
-        candidatePool.splice(bestMove.vmIndex, 1);
-        } else {
-        break;
-        }
+  // Algoritma greedy untuk menemukan subset yang "cukup"
+  let currentCombination = [];
+  let currentSize = 0;
+  for (const vm of candidatePool) {
+    currentCombination.push(vm);
+    currentSize += vm.provisionedGb;
+    if (currentSize >= migrationTargetGb) {
+      // Kita menemukan solusi pertama yang memenuhi syarat.
+      // Karena sudah diurutkan berdasarkan keamanan, ini adalah solusi teraman.
+      // Logika ini secara inheren mencari solusi yang "pas" karena berhenti
+      // segera setelah target terpenuhi.
+      bestCombination = currentCombination;
+      break;
     }
-    return migrationPlan;
+  }
+
+  // 3. Bangun rencana migrasi HANYA dari kombinasi terbaik
+  const migrationPlan = new Map();
+  let availableDestinations = allDatastores.filter(
+    (ds) => ds.cluster === sourceDsInfo.cluster && ds.name !== sourceDsInfo.name
+  );
+
+  for (const vmToMove of bestCombination) {
+    const bestDest = findBestDestination(
+      sourceDsInfo,
+      vmToMove.provisionedGb,
+      availableDestinations,
+      migrationConfig,
+      config
+    );
+    if (bestDest && !bestDest.error) {
+      if (!migrationPlan.has(bestDest.name)) {
+        migrationPlan.set(bestDest.name, []);
+      }
+      vmToMove.justification = getMigrationJustification(vmToMove);
+      migrationPlan.get(bestDest.name).push(vmToMove);
+
+      const destDsInPool = availableDestinations.find((ds) => ds.name === bestDest.name);
+      if (destDsInPool) {
+        destDsInPool.freeSpace -= vmToMove.provisionedGb;
+      }
+    }
+  }
+  return migrationPlan;
 }
 
+/**
+ * [BARU - FASE 2] Memberikan justifikasi teks berdasarkan properti VM.
+ * @param {object} vm - Objek VM yang akan dianalisis.
+ * @returns {string} Justifikasi dalam bentuk teks.
+ */
+function getMigrationJustification(vm) {
+  if (
+    String(vm.state || "")
+      .toLowerCase()
+      .includes("off")
+  ) {
+    return "Risiko Sangat Rendah (VM berstatus poweredOff).";
+  }
+  if (
+    String(vm.name || "")
+      .toLowerCase()
+      .includes("unused") ||
+    String(vm.name || "")
+      .toLowerCase()
+      .includes("decom")
+  ) {
+    return "Risiko Sangat Rendah (VM terindikasi tidak terpakai).";
+  }
+  const lowRiskCrits = ["LOW", "MEDIUM", "NON-CRITICAL", ""];
+  if (
+    lowRiskCrits.includes(
+      String(vm.criticality || "")
+        .toUpperCase()
+        .trim()
+    )
+  ) {
+    return "Risiko Rendah (VM non-produksi/non-kritis).";
+  }
+  return "Risiko Moderat (VM produksi aktif).";
+}
+
+/**
+ * [REVISI FINAL - FASE 2] Menghitung skor kelayakan migrasi untuk sebuah VM
+ * dengan skala kepercayaan tinggi (90-100).
+ * @param {object} vm - Objek yang berisi detail VM.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {number} Skor kelayakan migrasi antara 0 dan 100.
+ */
 function calculateMigrationScore(vm, config) {
-    let score = 0;
-    const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
+  // Mulai dengan skor kepercayaan maksimal.
+  let score = 100;
+  const skorKritikalitas = config[KONSTANTA.KUNCI_KONFIG.SKOR_KRITIKALITAS] || {};
 
-    // 1. Bobot Status (Paling Penting)
-    const isOff = String(vm.state || "")
-        .toLowerCase()
-        .includes("off");
-    if (isOff) {
-        score += 1000000; // Bobot sangat besar untuk VM yang mati
-    }
+  // Jika VM mati atau tidak terpakai, risikonya hampir nol. Skor tetap sangat tinggi.
+  const isOff = String(vm.state || "")
+    .toLowerCase()
+    .includes("off");
+  const isUnused =
+    String(vm.name || "")
+      .toLowerCase()
+      .includes("unused") ||
+    String(vm.name || "")
+      .toLowerCase()
+      .includes("decom");
 
-    // 2. Bobot Nama "unused"
-    const isUnused = String(vm.name || "")
-        .toLowerCase()
-        .includes("unused");
-    if (isUnused) {
-        score += 500000; // Bobot besar untuk VM yang tidak terpakai
-    }
+  if (isOff || isUnused) {
+    return 99; // Beri skor nyaris sempurna untuk kandidat ideal.
+  }
 
-    // 3. Bobot Kritikalitas (Terbalik)
-    const criticalityScore =
-        skorKritikalitas[
-        String(vm.criticality || "")
-            .toUpperCase()
-            .trim()
-        ] || 0;
-    // Bobot tertinggi untuk yang tidak terdefinisi (skor 0), terendah untuk CRITICAL (skor 5)
-    score += (10 - criticalityScore) * 1000;
+  // --- Terapkan Penalti HANYA untuk VM yang Aktif ---
 
-    // 4. Bobot Ukuran (Terbalik)
-    // Memberi skor lebih tinggi pada VM yang lebih kecil.
-    // Angka 10000 digunakan sebagai basis maksimum agar perhitungannya signifikan.
-    const size = vm.provisionedGb || 0;
-    if (size > 0) {
-        score += 10000 - size;
-    }
+  // 1. Penalti dasar karena VM aktif (ada risiko downtime minimal saat vMotion)
+  score -= 5; // Skor sekarang: 95
 
-    return score;
+  // 2. Penalti tambahan berdasarkan risiko bisnis (kritikalitas)
+  const criticality = String(vm.criticality || "")
+    .toUpperCase()
+    .trim();
+  // Skor dari 0 (tdk diketahui) hingga 5 (sangat kritis)
+  const criticalityScoreValue = skorKritikalitas[criticality] || 2; // Anggap 'unknown' sebagai risiko sedang
+
+  // Penalti kecil yang presisi untuk setiap tingkat kritikalitas
+  const penalty = criticalityScoreValue;
+  score -= penalty;
+
+  // Hasil akhir akan berada di rentang ~90-95 untuk VM aktif
+  return Math.max(0, Math.round(score));
 }
 
-function generateClusterAnalysis(clusterName, config) {
-    const K = KONSTANTA.KUNCI_KONFIG;
-    const analysis = {
-        totalVms: 0,
-        on: 0,
-        off: 0,
-        totalCpu: 0,
-        totalMemory: 0,
-        totalVmProvisionedTb: 0,
-        totalDsCapacityTb: 0,
-        diskUtilizationPercent: 0,
-        criticalVmOffCount: 0,
-        criticalVmOffDetails: {},
-    };
+/**
+ * [REVISI - FASE 3] Menganalisis dan meringkas metrik kesehatan sebuah cluster
+ * berdasarkan data yang sudah disaring. Menambahkan analisis vs kebijakan overcommit.
+ * @param {string} clusterName - Nama cluster yang dianalisis.
+ * @param {Array<Array<any>>} vmsInCluster - Baris data untuk VM yang HANYA ada di cluster ini.
+ * @param {Array<string>} vmHeaders - Array header dari sheet VM.
+ * @param {object} config - Objek konfigurasi bot.
+ * @returns {object} Objek hasil analisis yang terstruktur.
+ */
+function generateClusterAnalysis(clusterName, vmsInCluster, vmHeaders, config) {
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const analysis = {
+    clusterName: clusterName,
+    totalVms: vmsInCluster.length,
+    on: 0,
+    off: 0,
+    totalCpu: 0,
+    totalMemoryGb: 0,
+    totalDiskTb: 0,
+    policy: null,
+    cpuUtilEffective: 0,
+    memUtilEffective: 0,
+  };
 
-    try {
-        // 1. Analisis VM (Tidak ada perubahan di blok ini)
-        const { headers: vmHeaders, results: vmsInCluster } = searchVmsByCluster(clusterName, config);
-        if (vmsInCluster.length > 0) {
-        analysis.totalVms = vmsInCluster.length;
-        const stateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
-        const cpuIndex = vmHeaders.indexOf(config[K.HEADER_VM_CPU]);
-        const memoryIndex = vmHeaders.indexOf(config[K.HEADER_VM_MEMORY]);
-        const critIndex = vmHeaders.indexOf(config[K.HEADER_VM_KRITIKALITAS]);
-        const provTbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_TB]);
-        const monitoredCritLevels = Object.keys(config[K.SKOR_KRITIKALITAS] || {});
+  const stateIndex = vmHeaders.indexOf(config[K.HEADER_VM_STATE]);
+  const cpuIndex = vmHeaders.indexOf(config[K.HEADER_VM_CPU]);
+  const memoryIndex = vmHeaders.indexOf(config[K.HEADER_VM_MEMORY]);
+  const provTbIndex = vmHeaders.indexOf(config[K.HEADER_VM_PROV_TB]);
 
-        vmsInCluster.forEach((row) => {
-            const state = String(row[stateIndex] || "").toLowerCase();
-            if (state.includes("on")) analysis.on++;
-            else analysis.off++;
-            analysis.totalCpu += parseInt(row[cpuIndex], 10) || 0;
-            analysis.totalMemory += parseFloat(row[memoryIndex]) || 0;
-            analysis.totalVmProvisionedTb += parseLocaleNumber(row[provTbIndex]);
-
-            const criticality = String(row[critIndex] || "")
-            .toUpperCase()
-            .trim();
-            if (monitoredCritLevels.includes(criticality) && !state.includes("on")) {
-            analysis.criticalVmOffCount++;
-            analysis.criticalVmOffDetails[criticality] = (analysis.criticalVmOffDetails[criticality] || 0) + 1;
-            }
-        });
-        }
-
-        // 2. Analisis Datastore dengan Logika Parsing Baru
-        const dsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_DS]);
-        if (dsSheet && dsSheet.getLastRow() > 1) {
-        const dsData = dsSheet.getDataRange().getValues();
-        const dsHeaders = dsData.shift();
-        const dsNameIndex = dsHeaders.indexOf(config[K.DS_NAME_HEADER]);
-        const dsCapTbIndex = dsHeaders.indexOf(config[K.HEADER_DS_CAPACITY_TB]);
-
-        const includedKeywords = (config.KATA_KUNCI_DS_DIUTAMAKAN || []).map((k) => k.toLowerCase());
-        const excludedKeywords = (config[K.DS_KECUALI] || []).map((k) => k.toLowerCase());
-
-        // Ekstrak pola inti cluster (CLxx) dari nama cluster lengkap yang dicari.
-        const clusterPatternMatch = clusterName.match(/CL\d+/i);
-        const coreClusterPattern = clusterPatternMatch ? clusterPatternMatch[0].toLowerCase() : null;
-
-        if (coreClusterPattern && dsNameIndex !== -1 && dsCapTbIndex !== -1) {
-            dsData.forEach((row) => {
-            const dsName = String(row[dsNameIndex] || "");
-            const dsNameLower = dsName.toLowerCase();
-
-            // Periksa apakah nama DS mengandung pola inti cluster (cth: 'cl01').
-            if (!dsNameLower.includes(coreClusterPattern)) {
-                return; // Lanjut ke datastore berikutnya jika tidak cocok
-            }
-
-            const isIncluded =
-                includedKeywords.length === 0 || includedKeywords.some((keyword) => dsNameLower.includes(keyword));
-            if (!isIncluded) {
-                return;
-            }
-
-            const isExcluded = excludedKeywords.some((keyword) => dsNameLower.includes(keyword));
-            if (isExcluded) {
-                return;
-            }
-
-            analysis.totalDsCapacityTb += parseLocaleNumber(row[dsCapTbIndex]);
-            });
-        }
-        }
-
-        // 3. Hitung utilisasi
-        if (analysis.totalDsCapacityTb > 0) {
-        analysis.diskUtilizationPercent = (analysis.totalVmProvisionedTb / analysis.totalDsCapacityTb) * 100;
-        }
-
-        return analysis;
-    } catch (e) {
-        console.error(`Gagal melakukan analisis untuk cluster "${clusterName}". Error: ${e.message}`);
-        return analysis;
+  vmsInCluster.forEach((row) => {
+    const state = String(row[stateIndex] || "").toLowerCase();
+    if (state.includes("on")) {
+      analysis.on++;
+      analysis.totalCpu += parseInt(row[cpuIndex], 10) || 0;
+      analysis.totalMemoryGb += parseFloat(row[memoryIndex]) || 0;
+    } else {
+      analysis.off++;
     }
+    analysis.totalDiskTb += parseLocaleNumber(row[provTbIndex]);
+  });
+
+  // Analisis Cerdas vs Kebijakan Overcommit
+  const clusterPolicies = bacaKebijakanCluster();
+  const policy = clusterPolicies.get(clusterName);
+  if (policy) {
+    analysis.policy = policy;
+    const maxCpu = (policy["physicalcpucores"] || 0) * (policy["cpuovercommitratio"] || 1);
+    const maxMemory = (policy["physicalmemorytb"] || 0) * 1024 * (policy["memoryovercommitratio"] || 1);
+    if (maxCpu > 0) {
+      analysis.cpuUtilEffective = (analysis.totalCpu / maxCpu) * 100;
+    }
+    if (maxMemory > 0) {
+      analysis.memUtilEffective = (analysis.totalMemoryGb / maxMemory) * 100;
+    }
+  }
+
+  return analysis;
 }
 
 function diagnoseOverprovisioningCause(dsName, config) {
-    const K = KONSTANTA.KUNCI_KONFIG;
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const K = KONSTANTA.KUNCI_KONFIG;
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const { headers, data: allRecentLogs } = getCombinedLogs(thirtyDaysAgo, config);
-    if (allRecentLogs.length === 0) return null;
+  const { headers, data: allRecentLogs } = getCombinedLogs(thirtyDaysAgo, config);
+  if (allRecentLogs.length === 0) return null;
 
-    const typeLogHeader = config[K.HEADER_LOG_TIPE_LOG];
-    const typeLogIndex = headers.indexOf(typeLogHeader);
+  const typeLogHeader = config[K.HEADER_LOG_TIPE_LOG];
+  const typeLogIndex = headers.indexOf(typeLogHeader);
 
-    if (typeLogIndex === -1) {
-        console.warn(
-        `Kolom 'Tipe Log' dengan header '${typeLogHeader}' tidak ditemukan, analisis penyebab mungkin tidak akurat.`
-        );
-        return null;
-    }
-
-    const recentLogs = allRecentLogs.filter((log) => log[typeLogIndex] === KONSTANTA.NAMA_ENTITAS.VM);
-    if (recentLogs.length === 0) return null;
-
-    const pkIndex = headers.indexOf(config[K.HEADER_VM_PK]);
-    const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
-    const detailIndex = headers.indexOf(config[K.HEADER_LOG_DETAIL]);
-
-    let newVmCount = 0;
-    let diskModCount = 0;
-
-    const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_VM]);
-    const vmData = vmSheet.getDataRange().getValues();
-    const vmHeaders = vmData.shift();
-    const vmPkIndex = vmHeaders.indexOf(config[K.HEADER_VM_PK]);
-    const vmDsIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
-    const vmProvGbHeader = config[K.HEADER_VM_PROV_GB];
-
-    if (vmPkIndex === -1 || vmDsIndex === -1) {
-        console.warn("Header PK atau DS tidak ditemukan di sheet VM, analisis penyebab dibatalkan.");
-        return null;
-    }
-
-    const vmsOnThisDs = new Set(
-        vmData.filter((row) => row[vmDsIndex] === dsName).map((row) => normalizePrimaryKey(row[vmPkIndex]))
+  if (typeLogIndex === -1) {
+    console.warn(
+      `Kolom 'Tipe Log' dengan header '${typeLogHeader}' tidak ditemukan, analisis penyebab mungkin tidak akurat.`
     );
-
-    recentLogs.forEach((log) => {
-        const pk = normalizePrimaryKey(log[pkIndex]);
-        if (vmsOnThisDs.has(pk)) {
-        const action = log[actionIndex];
-        if (action === "PENAMBAHAN") {
-            newVmCount++;
-        } else if (action === "MODIFIKASI" && log[detailIndex].includes(vmProvGbHeader)) {
-            diskModCount++;
-        }
-        }
-    });
-
-    if (newVmCount > 0 || diskModCount > 0) {
-        let diagnosis = "Kondisi ini kemungkinan disebabkan oleh ";
-        const causes = [];
-        if (newVmCount > 0) causes.push(`<b>${newVmCount} penambahan VM baru</b>`);
-        if (diskModCount > 0) causes.push(`<b>${diskModCount} modifikasi ukuran disk</b>`);
-        diagnosis += causes.join(" dan ") + " dalam 30 hari terakhir.";
-        return diagnosis;
-    }
-
     return null;
+  }
+
+  const recentLogs = allRecentLogs.filter((log) => log[typeLogIndex] === KONSTANTA.NAMA_ENTITAS.VM);
+  if (recentLogs.length === 0) return null;
+
+  const pkIndex = headers.indexOf(config[K.HEADER_VM_PK]);
+  const actionIndex = headers.indexOf(config[K.HEADER_LOG_ACTION]);
+  const detailIndex = headers.indexOf(config[K.HEADER_LOG_DETAIL]);
+
+  let newVmCount = 0;
+  let diskModCount = 0;
+
+  const vmSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config[K.SHEET_VM]);
+  const vmData = vmSheet.getDataRange().getValues();
+  const vmHeaders = vmData.shift();
+  const vmPkIndex = vmHeaders.indexOf(config[K.HEADER_VM_PK]);
+  const vmDsIndex = vmHeaders.indexOf(config[K.VM_DS_COLUMN_HEADER]);
+  const vmProvGbHeader = config[K.HEADER_VM_PROV_GB];
+
+  if (vmPkIndex === -1 || vmDsIndex === -1) {
+    console.warn("Header PK atau DS tidak ditemukan di sheet VM, analisis penyebab dibatalkan.");
+    return null;
+  }
+
+  const vmsOnThisDs = new Set(
+    vmData.filter((row) => row[vmDsIndex] === dsName).map((row) => normalizePrimaryKey(row[vmPkIndex]))
+  );
+
+  recentLogs.forEach((log) => {
+    const pk = normalizePrimaryKey(log[pkIndex]);
+    if (vmsOnThisDs.has(pk)) {
+      const action = log[actionIndex];
+      if (action === "PENAMBAHAN") {
+        newVmCount++;
+      } else if (action === "MODIFIKASI" && log[detailIndex].includes(vmProvGbHeader)) {
+        diskModCount++;
+      }
+    }
+  });
+
+  if (newVmCount > 0 || diskModCount > 0) {
+    let diagnosis = "Kondisi ini kemungkinan disebabkan oleh ";
+    const causes = [];
+    if (newVmCount > 0) causes.push(`<b>${newVmCount} penambahan VM baru</b>`);
+    if (diskModCount > 0) causes.push(`<b>${diskModCount} modifikasi ukuran disk</b>`);
+    diagnosis += causes.join(" dan ") + " dalam 30 hari terakhir.";
+    return diagnosis;
+  }
+
+  return null;
 }
 
 /**
